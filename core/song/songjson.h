@@ -1,0 +1,59 @@
+#pragma once
+
+#include "song.h"
+
+#include <QByteArray>
+#include <QString>
+#include <QStringList>
+#include <optional>
+
+namespace visualis {
+
+class SongStore;
+
+// Songs as human-readable JSON (plan 5.9), so a church's songs never depend on this app's
+// database. One file per song, "<title>.visualis-song.json". Also the test fixture format.
+//
+// {
+//   "format": "visualis-song", "version": 1,
+//   "id": "…", "title": "Amazing Grace",
+//   "credits": {"ccliNumber": "", "authors": "John Newton", "copyright": "Public Domain"},
+//   "pcoSongId": "",
+//   "groups": [{"id": "…", "label": "Verse 1", "color": "#0078cc", "slides": ["line\nline", "…"]}],
+//   "arrangements": [{"id": "…", "name": "Default", "sequence": ["<group id or label>", …],
+//                     "pcoArrangementId": ""}],
+//   "defaultArrangement": "<arrangement id or name>",
+//   "created": "2026-11-21T15:04:05.000Z", "updated": "…"
+// }
+//
+// Written by hand (fixtures), ids may be left out and sequences may name groups by label.
+QByteArray songToJson(const Song &song);
+
+struct SongJsonResult {
+    std::optional<Song> song;
+    QString error;   // set when the JSON can't be read as a song
+};
+SongJsonResult songFromJson(const QByteArray &json);
+
+// The file name a song exports to, with characters that aren't allowed in file names replaced.
+QString songFileName(const QString &title);
+
+struct SongExportReport {
+    QStringList written;                         // file names
+    QList<std::pair<QString, QString>> failed;   // title, error
+};
+// Writes every song in the library to `folder`, one file each. Titles that collide get " (2)".
+SongExportReport exportSongs(SongStore &store, const QString &folder);
+
+struct SongImportReport {
+    QStringList imported;                        // titles
+    QList<std::pair<QString, QString>> skipped;  // file name, reason
+    QList<std::pair<QString, QString>> failed;   // file name, error
+    QStringList warnings;
+};
+// Imports every *.visualis-song.json in `folder`. Never overwrites: a song whose id is already
+// in the library is skipped. A title already in the library under another id is imported with
+// a warning, since it may be a different song.
+SongImportReport importSongs(const QString &folder, SongStore &store);
+
+} // namespace visualis

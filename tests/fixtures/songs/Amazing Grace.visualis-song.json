@@ -1,0 +1,26 @@
+{
+  "format": "visualis-song",
+  "version": 1,
+  "title": "Amazing Grace",
+  "credits": { "authors": "John Newton", "copyright": "Public Domain" },
+  "groups": [
+    { "label": "Intro", "color": "#b3a624", "slides": [""] },
+    { "label": "Verse 1", "color": "#0078cc", "slides": [
+      "Amazing grace how sweet the sound\nThat saved a wretch like me",
+      "I once was lost but now am found\nWas blind but now I see"
+    ] },
+    { "label": "Verse 2", "color": "#0078cc", "slides": [
+      "'Twas grace that taught my heart to fear\nAnd grace my fears relieved",
+      "How precious did that grace appear\nThe hour I first believed"
+    ] },
+    { "label": "Verse 3", "color": "#0078cc", "slides": [
+      "When we've been there ten thousand years\nBright shining as the sun",
+      "We've no less days to sing God's praise\nThan when we'd first begun"
+    ] }
+  ],
+  "arrangements": [
+    { "name": "Sunday", "sequence": ["Intro", "Verse 1", "Verse 2", "Verse 3", "Verse 1"] },
+    { "name": "Short", "sequence": ["Verse 1", "Verse 3"] }
+  ],
+  "defaultArrangement": "Sunday"
+}
