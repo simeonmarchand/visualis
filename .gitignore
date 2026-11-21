@@ -29,3 +29,6 @@ spikes/output/media/
 
 # Spike logs and benchmark scratch output
 *.log
+
+# Spike run logs
+spike-logs/
