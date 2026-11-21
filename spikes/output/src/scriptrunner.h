@@ -13,10 +13,11 @@
 //   next | prev | goto <slide> | clear-text | background on|off | clear-all
 //   mode shared|per-window | video <file> | assign <role> <screen key>
 //   wait <ms>
+//   mark <text>                          logs "mark <text>" so an outside script can sync on it
 //   snapshot <name>                      saves a PNG of every visible window
 //   locate <objectName>                  logs "located <name> at <x> <y>": the item's centre in
 //                                        global screen points, so an outside script can click it
-//   expect <key> <op> <value>            op: =  !=  >=  <=  ~ (starts with)
+//   expect <key> <op> <value>            op: =  !=  >=  <=  ~ (starts with)  has (contains)
 //   wait-for <key> <op> <value> [ms]     polls until true, fails after the timeout (default 5000)
 //   # comment
 //

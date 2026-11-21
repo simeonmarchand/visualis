@@ -10,7 +10,7 @@ app=./build/visualis-output-spike.app/Contents/MacOS/visualis-output-spike
 [[ -x "$app" ]] || { echo "build the spike first (see README)"; exit 2; }
 [[ -f media/1080p30-h264.mp4 && -f media/4k30-hevc.mp4 ]] || ./scripts/make-test-media.sh
 
-"$app" --script tests/operator-smoke.txt --log-dir "$log_dir" > "$log_dir.out" 2>&1
+"$app" --script tests/operator-smoke.txt --log-dir "$log_dir" --settings-dir "$log_dir/settings" > "$log_dir.out" 2>&1
 status=$?
 
 grep -E "  (ok |FAIL|script done)" "$log_dir/events.log"

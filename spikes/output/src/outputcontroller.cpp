@@ -1,6 +1,7 @@
 #include "outputcontroller.h"
 #include "eventlog.h"
 #include "framestats.h"
+#include "macwindow.h"
 
 #include <QGuiApplication>
 #include <QSettings>
@@ -178,6 +179,7 @@ void OutputController::place(const QString &role, QQuickWindow *window)
         window->setScreen(screen);
         window->setGeometry(screen->geometry());
         window->show();
+        raiseAboveMenuBar(window);
         status = "borderless on " + screen->name();
     } else {
         // A fullscreen window has to leave fullscreen before it can move to another display.

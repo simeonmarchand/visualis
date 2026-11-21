@@ -42,8 +42,9 @@ Options:
 | `--video-mode shared\|per-window` | One decoder for all outputs, or one per output. Default `shared`. |
 | `--stage-video` | Also show the video behind the stage text (needed for the decoder test). |
 | `--backend ffmpeg\|darwin` | Qt Multimedia backend. Sets `QT_MEDIA_BACKEND`. Default: Qt's default (FFmpeg). |
-| `--fullscreen native\|borderless` | macOS native fullscreen (own Space) or a borderless window sized to the display. Default `native`. |
+| `--fullscreen borderless\|native` | A borderless window sized to the display and raised above the menu bar, or macOS native fullscreen (own Space). Default `borderless`: native fails the hot-plug test (an output that enters fullscreen after another one stops the other from drawing). |
 | `--windowed` | Outputs as ordinary windows, allowed on the operator screen. Turned on automatically with only one display. |
+| `--settings-dir <dir>` | Keep settings in an INI file in this directory instead of the user's preferences. The test scripts use it. |
 | `--log-dir <dir>` | Where logs go. Default `spike-logs/<timestamp>/` in the current directory. |
 | `--script <file>` | Run a test script (below), then quit. Exit code 1 if any check failed. |
 | `--auto-advance <seconds>` | Go to the next slide every N seconds, wrapping at the end. For soak runs without an operator. |
@@ -64,15 +65,21 @@ GPU load isn't logged by the app. Watch it with `sudo powermetrics --samplers gp
 
 For each run: machine, macOS version, displays, backend, fullscreen mode, video file, video mode, run length, and the summary from `frames.csv` (total frames, total late, worst interval, mean CPU, peak memory). Measure no-video first (framework overhead), then video on one output, then two (decode and render cost).
 
-First results: [docs/benchmarks/2026-11-20-p1-dev-m1-windowed.md](../../docs/benchmarks/2026-11-20-p1-dev-m1-windowed.md).
+First results: [docs/benchmarks/2026-11-20-p1-dev-m1-windowed.md](../../docs/benchmarks/2026-11-20-p1-dev-m1-windowed.md). Hot-plug and fullscreen on virtual displays: [docs/benchmarks/2026-11-21-p1-dev-m1-virtual-displays.md](../../docs/benchmarks/2026-11-21-p1-dev-m1-virtual-displays.md).
 
 ## Test scripts
 
 `./scripts/run-smoke.sh` runs `tests/operator-smoke.txt` (about 40 s, windows open on screen, nothing to press) and prints each check. Snapshots of every window after each step land in `spike-logs/smoke-<timestamp>/snapshots/`.
 
-A script is one step per line. The steps call the same commands as the operator window's keys and buttons, so the operator's real key presses and clicks aren't tested this way. Steps: `next`, `prev`, `goto <slide>`, `clear-text`, `background on|off`, `clear-all`, `mode shared|per-window`, `video <file>`, `assign <role> <screen key>`, `wait <ms>`, `snapshot <name>`, `expect <key> <op> <value>`, and `wait-for <key> <op> <value> [timeout ms]`. Operators are `=`, `!=`, `>=`, `<=`, and `~` (starts with). `src/scriptrunner.h` lists the state keys.
+A script is one step per line. The steps call the same commands as the operator window's keys and buttons, so the operator's real key presses and clicks aren't tested this way. Steps: `next`, `prev`, `goto <slide>`, `clear-text`, `background on|off`, `clear-all`, `mode shared|per-window`, `video <file>`, `assign <role> <screen key>`, `wait <ms>`, `mark <text>` (logs a marker for an outside script to wait for), `snapshot <name>`, `expect <key> <op> <value>`, and `wait-for <key> <op> <value> [timeout ms]`. Operators are `=`, `!=`, `>=`, `<=`, `~` (starts with), and `has` (contains). `src/scriptrunner.h` lists the state keys.
 
 `tests/hide-output.txt` hides the audience output mid-playback, as an unplugged display would, and checks that shared decoding keeps feeding the stage and resumes the audience when it comes back. Run it with `--video media/4k30-hevc.mp4 --video-mode shared --stage-video --script tests/hide-output.txt`. It ends by assigning the audience back to `Built-in Retina Display||`, so it only fits a Mac with that display.
 
-`assign` saves the display choice to the app's settings, the same as the operator window does. A snapshot stalls rendering for about 230 ms while Qt renders the window again to capture it, so keep snapshots out of measurement runs.
+### Hot-plug without external displays
+
+`./scripts/run-hotplug-test.sh [borderless|native]` (about 35 s) puts the outputs fullscreen on two virtual displays and plugs and unplugs them while `tests/hotplug.txt` checks placement and frame rate: unplug stage, a different display appears, replug stage, replug audience at 720p, unplug and replug both.
+
+The virtual displays come from `build/virtual-display` (`tools/virtual-display.m`), which uses `CGVirtualDisplay`, an undocumented macOS API. macOS treats each one like a plugged-in monitor until the process is killed, so plugging is starting it and unplugging is killing it. It's test tooling only and must never ship in the app. It can't stand in for the church Mac's GPU, real HDMI or projector behavior, or the phone-camera checks.
+
+`assign` saves the display choice to the app's settings, the same as the operator window does. The test scripts pass `--settings-dir` so tests never change the display choices of manual runs. A snapshot stalls rendering for about 230 ms while Qt renders the window again to capture it, so keep snapshots out of measurement runs.
 

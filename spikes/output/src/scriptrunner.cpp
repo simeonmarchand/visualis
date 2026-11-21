@@ -94,6 +94,7 @@ int ScriptRunner::run(const Line &line)
         return 0;
     }
     if (cmd == "wait") return rest.toInt();
+    if (cmd == "mark") { EventLog::write("mark " + rest); return 0; } // for outside scripts to sync on
     if (cmd == "snapshot") { snapshot(rest); return 0; }
     if (cmd == "locate") {
         // Walk the visual tree: QML doesn't always make layout children QObject children.
@@ -181,6 +182,7 @@ bool ScriptRunner::check(const QStringList &words, QString *detail) const
     else if (op == ">=") ok = numeric && a >= e;
     else if (op == "<=") ok = numeric && a <= e;
     else if (op == "~") ok = actual.startsWith(expected);
+    else if (op == "has") ok = actual.contains(expected);
     *detail = QStringLiteral("%1 is '%2'").arg(key, actual);
     return ok;
 }

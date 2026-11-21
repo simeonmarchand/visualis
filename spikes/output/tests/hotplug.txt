@@ -1,0 +1,56 @@
+# Display hot-plug with virtual displays. Run through scripts/run-hotplug-test.sh, which
+# plugs and unplugs the displays when this script logs each "mark".
+
+assign audience Fake Audience||
+assign stage Fake Stage||
+wait-for placement.audience has on Fake 5000
+wait-for placement.stage has on Fake 5000
+wait-for video-status ~ playing 5000
+wait 3000
+expect fps.audience >= 55
+expect fps.stage >= 55
+snapshot both-fullscreen
+
+# 1. Unplug the stage display: stage hides, audience and video carry on.
+mark unplug-stage
+wait-for placement.stage ~ waiting 10000
+wait 3000
+expect fps.audience >= 55
+expect video-status ~ playing
+
+# 2. A different display appears: stage must not jump onto it.
+mark plug-other
+wait 4000
+expect placement.stage ~ waiting
+
+# 3. The same stage display comes back: stage returns to it.
+mark replug-stage
+wait-for placement.stage has on Fake Stage 10000
+wait 3000
+expect fps.stage >= 55
+expect fps.audience >= 55
+
+# 4. Unplug the audience display, then plug it back at a different resolution.
+mark unplug-audience
+wait-for placement.audience ~ waiting 10000
+wait 2000
+expect fps.stage >= 55
+mark replug-audience-720p
+wait-for placement.audience has on Fake Audience 10000
+wait 3000
+expect fps.audience >= 55
+snapshot audience-720p
+
+# 5. Both displays gone, then both back.
+mark unplug-both
+wait-for placement.audience ~ waiting 10000
+wait-for placement.stage ~ waiting 10000
+wait 2000
+mark replug-both
+wait-for placement.audience has on Fake Audience 10000
+wait-for placement.stage has on Fake Stage 10000
+wait 3000
+expect fps.audience >= 55
+expect fps.stage >= 55
+expect video-status ~ playing
+snapshot all-back

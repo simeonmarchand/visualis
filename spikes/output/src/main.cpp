@@ -13,6 +13,7 @@
 #include <QQmlApplicationEngine>
 #include <QQmlComponent>
 #include <QQuickWindow>
+#include <QSettings>
 #include <QTimer>
 #include <QVideoSink>
 #include <memory>
@@ -45,13 +46,20 @@ int main(int argc, char *argv[])
     QCommandLineOption modeOpt("video-mode", "shared | per-window", "mode", "shared");
     QCommandLineOption stageVideoOpt("stage-video", "Show the video behind the stage text too.");
     QCommandLineOption backendOpt("backend", "Qt Multimedia backend: ffmpeg | darwin", "name");
-    QCommandLineOption fullscreenOpt("fullscreen", "native | borderless", "mode", "native");
+    QCommandLineOption fullscreenOpt("fullscreen", "borderless | native", "mode", "borderless");
     QCommandLineOption windowedOpt("windowed", "Outputs as ordinary windows (allowed on the operator screen).");
     QCommandLineOption logDirOpt("log-dir", "Log directory.", "dir");
     QCommandLineOption autoAdvanceOpt("auto-advance", "Go to the next slide every N seconds, wrapping (soak tests).", "seconds");
+    QCommandLineOption settingsDirOpt("settings-dir", "Keep settings (display choices) in an INI file in this directory instead of the user's preferences. For tests.", "dir");
     QCommandLineOption scriptOpt("script", "Run a test script, save snapshots to the log dir, then quit (exit 1 on a failed check).", "file");
-    parser.addOptions({videoOpt, modeOpt, stageVideoOpt, backendOpt, fullscreenOpt, windowedOpt, logDirOpt, autoAdvanceOpt, scriptOpt});
+    parser.addOptions({videoOpt, modeOpt, stageVideoOpt, backendOpt, fullscreenOpt, windowedOpt, logDirOpt, autoAdvanceOpt, scriptOpt, settingsDirOpt});
     parser.process(app);
+
+    if (parser.isSet(settingsDirOpt)) {
+        // Must happen before the first QSettings is created (OutputController reads it).
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, parser.value(settingsDirOpt));
+    }
 
     const QString videoMode = parser.value(modeOpt);
     if (videoMode != "shared" && videoMode != "per-window")

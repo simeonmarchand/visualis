@@ -18,7 +18,7 @@ if [[ "$(osascript -e 'tell application "System Events" to return UI elements en
     exit 2
 fi
 
-"$app" --script tests/keyboard-expect.txt --log-dir "$log_dir" > "$log_dir.out" 2>&1 &
+"$app" --script tests/keyboard-expect.txt --log-dir "$log_dir" --settings-dir "$log_dir/settings" > "$log_dir.out" 2>&1 &
 app_pid=$!
 
 # Wait for the operator window to exist.

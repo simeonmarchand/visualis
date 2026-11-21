@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.21)
 project(visualis_output_spike LANGUAGES CXX)
+if(APPLE)
+    enable_language(OBJCXX)
+endif()
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -26,9 +29,25 @@ qt_add_qml_module(visualis-output-spike
         src/videoengine.h src/videoengine.cpp
         src/outputcontroller.h src/outputcontroller.cpp
         src/scriptrunner.h src/scriptrunner.cpp
+        src/macwindow.h
 )
+
+if(APPLE)
+    target_sources(visualis-output-spike PRIVATE src/macwindow.mm)
+    target_link_libraries(visualis-output-spike PRIVATE "-framework AppKit")
+else()
+    target_sources(visualis-output-spike PRIVATE src/macwindow_other.cpp)
+endif()
 
 # The generated QML type registrations include the headers by bare name.
 target_include_directories(visualis-output-spike PRIVATE src)
 # GuiPrivate is how Qt ships the QRhi API (rhi/qrhi.h); its compatibility promise is weaker than public API.
 target_link_libraries(visualis-output-spike PRIVATE Qt6::Quick Qt6::Multimedia Qt6::GuiPrivate)
+
+# Test tool: a software display for hot-plug and multi-display tests without hardware (tools/virtual-display.m).
+if(APPLE)
+    enable_language(OBJC)
+    add_executable(virtual-display tools/virtual-display.m)
+    target_compile_options(virtual-display PRIVATE -fobjc-arc)
+    target_link_libraries(virtual-display PRIVATE "-framework Foundation" "-framework CoreGraphics")
+endif()
