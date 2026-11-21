@@ -16,6 +16,9 @@ class LiveState : public QObject
     Q_OBJECT
     Q_PROPERTY(bool hasSlide READ hasSlide NOTIFY changed)
     Q_PROPERTY(QString songTitle READ songTitle NOTIFY changed)
+    // The live song's id without braces, empty when nothing is live; lets a view tell
+    // whether the song it shows is the live one.
+    Q_PROPERTY(QString songId READ songId NOTIFY changed)
     Q_PROPERTY(int slideIndex READ slideIndex NOTIFY changed)
     Q_PROPERTY(int slideCount READ slideCount NOTIFY changed)
     Q_PROPERTY(QString currentText READ currentText NOTIFY changed)
@@ -52,6 +55,7 @@ public:
 
     bool hasSlide() const { return currentSlide() != nullptr; }
     QString songTitle() const { return m_song.title; }
+    QString songId() const { return m_song.id.isNull() ? QString() : m_song.id.toString(QUuid::WithoutBraces); }
     int slideIndex() const { return m_index; }   // -1 when no slide is showing
     int slideCount() const { return int(m_slides.size()); }
     // The slide's text even while cleared: each output decides what clearing hides
