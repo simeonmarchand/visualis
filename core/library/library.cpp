@@ -144,6 +144,30 @@ const std::vector<Migration> &Library::migrations()
     // Append only. Never edit a step that has shipped: libraries in the field already ran it.
     static const std::vector<Migration> all = {
         {1, {"CREATE TABLE setting (key TEXT PRIMARY KEY, value TEXT NOT NULL) WITHOUT ROWID"}},
+        // Songs (plan 5.2). Deleting a song removes its groups and arrangements; deleting a group
+        // removes it from every arrangement, as in ProPresenter.
+        {2, {"CREATE TABLE song ("
+             " id TEXT PRIMARY KEY, title TEXT NOT NULL,"
+             " ccli_number TEXT NOT NULL DEFAULT '', authors TEXT NOT NULL DEFAULT '',"
+             " copyright TEXT NOT NULL DEFAULT '', pco_song_id TEXT NOT NULL DEFAULT '',"
+             " default_arrangement TEXT REFERENCES arrangement(id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED,"
+             " created_at TEXT NOT NULL, updated_at TEXT NOT NULL)",
+             "CREATE INDEX song_title ON song(title COLLATE NOCASE)",
+             "CREATE TABLE song_group ("
+             " id TEXT PRIMARY KEY, song_id TEXT NOT NULL REFERENCES song(id) ON DELETE CASCADE,"
+             " position INTEGER NOT NULL, label TEXT NOT NULL, color TEXT NOT NULL,"
+             " slides TEXT NOT NULL)",   // JSON array of slide texts
+             "CREATE INDEX song_group_song ON song_group(song_id, position)",
+             "CREATE TABLE arrangement ("
+             " id TEXT PRIMARY KEY, song_id TEXT NOT NULL REFERENCES song(id) ON DELETE CASCADE,"
+             " position INTEGER NOT NULL, name TEXT NOT NULL, pco_arrangement_id TEXT NOT NULL DEFAULT '')",
+             "CREATE INDEX arrangement_song ON arrangement(song_id, position)",
+             "CREATE TABLE arrangement_step ("
+             " arrangement_id TEXT NOT NULL REFERENCES arrangement(id) ON DELETE CASCADE,"
+             " position INTEGER NOT NULL,"
+             " group_id TEXT NOT NULL REFERENCES song_group(id) ON DELETE CASCADE,"
+             " PRIMARY KEY (arrangement_id, position)) WITHOUT ROWID",
+             "CREATE INDEX arrangement_step_group ON arrangement_step(group_id)"}},
     };
     return all;
 }
@@ -196,6 +220,12 @@ Library::Library(const QString &folder, const QString &connectionName)
 
 Library::~Library()
 {
+    {
+        // Fold the write-ahead log back into library.sqlite, so a closed library is one
+        // complete file that can be copied or synced on its own.
+        QSqlDatabase db = database();
+        exec(db, "PRAGMA wal_checkpoint(TRUNCATE)");
+    }
     QSqlDatabase::database(m_connectionName, false).close();
     QSqlDatabase::removeDatabase(m_connectionName);
 }
@@ -237,7 +267,7 @@ bool Library::setSetting(const QString &key, const QString &value)
     q.prepare("INSERT INTO setting (key, value) VALUES (?, ?) "
               "ON CONFLICT(key) DO UPDATE SET value = excluded.value");
     q.addBindValue(key);
-    q.addBindValue(value);
+    q.addBindValue(value.isNull() ? QStringLiteral("") : value);   // Qt binds a null QString as NULL
     return q.exec();
 }
 
