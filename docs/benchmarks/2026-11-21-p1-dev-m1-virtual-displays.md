@@ -57,7 +57,9 @@ ProRes, 30 s runs:
 
 8. **The real app should stop the displays idle-sleeping while presenting** (an `IOPMAssertion`), so this never happens mid-service. Whether Qt Multimedia already holds one during playback is unchecked.
 
-System sleep (`scripts/run-sleep-test.sh system`) needs someone to wake the Mac and hasn't been run yet.
+**System sleep** (`scripts/run-sleep-test.sh system`, #4): the Mac slept for about 4 minutes and was woken by a key press. Afterwards both outputs were back on their own displays with the video playing, and the app didn't crash. One check failed (stage at 29 fps six seconds after wake), and the cause was outside the app:
+
+13. **A USB-C monitor can reconnect over and over after wake.** The portable monitor disconnected and reconnected about once a second for at least 12 s after the Mac woke, then settled. Each change briefly freezes every output (0.3–0.9 s), even on other displays. The app should wait for the display setup to settle (about 2 s with no changes) before re-placing outputs, and tell the operator "displays are reconnecting" meanwhile (#19).
 
 ## 2-hour soaks (incomplete)
 
