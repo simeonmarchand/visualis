@@ -235,6 +235,7 @@ void OutputController::onScreenRemoved(QScreen *screen)
             setStatus(it.key(), QStringLiteral("Waiting: display not connected"));
         }
     }
+    updateSleepBlocker();
     emit placementChanged();
     onDisplaysChanged("removed", screen);
 }
@@ -255,6 +256,7 @@ void OutputController::placeAll()
         if (QQuickWindow *window = m_outputs.value(role))
             place(role, window, m_placements.value(role));
     }
+    updateSleepBlocker();
     emit placementChanged();
 }
 
@@ -293,6 +295,19 @@ void OutputController::place(const QString &role, QQuickWindow *window, const Ou
                         : QStringLiteral("On %1 for now: the chosen display is the operator screen").arg(p.display.name));
     if (moved)
         qCInfo(lcOutput).noquote() << role << "placed on" << describe(*it);
+}
+
+void OutputController::updateSleepBlocker()
+{
+    const bool anyShowing = std::any_of(m_outputs.cbegin(), m_outputs.cend(),
+                                        [](const QPointer<QQuickWindow> &w) { return w && w->isVisible(); });
+    if (anyShowing == m_sleepBlocker.isActive())
+        return;
+    if (!m_sleepBlocker.setActive(anyShowing))
+        qCWarning(lcOutput) << "the system refused to keep the displays awake; they may sleep mid-service";
+    else
+        qCInfo(lcOutput) << (anyShowing ? "keeping displays awake: an output is showing"
+                                        : "displays may sleep: no output is showing");
 }
 
 void OutputController::setStatus(const QString &role, const QString &status)

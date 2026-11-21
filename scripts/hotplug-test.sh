@@ -12,6 +12,7 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 build=${1:-build/debug}
 app="$build/app/Visualis.app/Contents/MacOS/Visualis"
+app_name=Visualis
 vd="$build/tools/virtual-display"
 [[ -x "$app" && -x "$vd" ]] || { echo "build first: cmake --build --preset debug"; exit 2; }
 
@@ -53,6 +54,17 @@ expect_count() { # pattern count
     ((n == $2)) && pass "$1: $n" || fail "$1: $n times, expected $2"
 }
 settled() { wait_for "displays settled" 6; }
+# #26: whether the app holds the display-sleep assertion, as macOS reports it.
+awake_held() { pmset -g assertions | grep -q "($app_name).*PreventUserIdleDisplaySleep\|Visualis is presenting"; }
+expect_awake() { # yes|no
+    local polls=20
+    while ((polls-- > 0)); do
+        if awake_held; then [[ $1 == yes ]] && { pass "displays kept awake"; return; }
+        else [[ $1 == no ]] && { pass "display sleep allowed again"; return; }; fi
+        sleep 0.1
+    done
+    fail "display sleep assertion: expected $1"
+}
 
 plug "Fake Audience" 1
 plug "Fake Stage" 2
@@ -65,6 +77,7 @@ caffeinate -dimsu -w "$app_pid" &
 mark "start: each output on its own display"
 wait_for "audience placed on Fake Audience" 10
 wait_for "stage placed on Fake Stage" 10
+expect_awake yes
 
 mark "unplug stage: it hides at once, before the displays settle"
 unplug 2
@@ -106,10 +119,12 @@ unplug 1
 unplug 2
 wait_for "audience: Waiting: display not connected" 1
 wait_for "stage: Waiting: display not connected" 1
+expect_awake no   # no output showing
 plug "Fake Audience" 1
 plug "Fake Stage" 2
 wait_for "audience placed on Fake Audience" 6
 wait_for "stage placed on Fake Stage" 6
+expect_awake yes
 
 kill -0 "$app_pid" 2>/dev/null && pass "app still running" || fail "app exited"
 grep -iE "critical|fatal" "$log" | head -5
