@@ -36,3 +36,10 @@ spike-logs/
 # Scripture spike: downloaded Bibles and the built database
 spikes/scripture/data/
 __pycache__/
+
+# Planning Center tokens (never commit; plan 7.2)
+PAT PCO.rtf
+*.rtf
+
+# Planning Center spike dumps (can contain people's names)
+spikes/planning-center/data/
