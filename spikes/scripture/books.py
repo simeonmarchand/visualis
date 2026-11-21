@@ -1,0 +1,82 @@
+"""Canonical book list (66-book Protestant canon) and the names people type for each book.
+
+Codes are the Paratext/USFX three-character codes used in the data files. The parser is
+translation-independent: it maps text to a code, and the database is asked whether that
+translation has the book.
+"""
+
+# (code, display name, chapter count, extra aliases). Display name, code, and every alias are
+# accepted; see refparse.normalize for how numbered books ("1 Cor", "I Corinthians",
+# "First Corinthians", "1Co") are folded together.
+BOOKS = [
+    ("GEN", "Genesis", 50, ["gn", "ge"]),
+    ("EXO", "Exodus", 40, ["ex", "exod"]),
+    ("LEV", "Leviticus", 27, ["lv", "le"]),
+    ("NUM", "Numbers", 36, ["nm", "nu"]),
+    ("DEU", "Deuteronomy", 34, ["dt", "deut"]),
+    ("JOS", "Joshua", 24, ["josh", "jsh"]),
+    ("JDG", "Judges", 21, ["judg", "jg"]),
+    ("RUT", "Ruth", 4, ["ru", "rth"]),
+    ("1SA", "1 Samuel", 31, ["1 sam", "1 sm", "1 sa"]),
+    ("2SA", "2 Samuel", 24, ["2 sam", "2 sm", "2 sa"]),
+    ("1KI", "1 Kings", 22, ["1 kgs", "1 ki", "1 kin"]),
+    ("2KI", "2 Kings", 25, ["2 kgs", "2 ki", "2 kin"]),
+    ("1CH", "1 Chronicles", 29, ["1 chr", "1 chron", "1 ch"]),
+    ("2CH", "2 Chronicles", 36, ["2 chr", "2 chron", "2 ch"]),
+    ("EZR", "Ezra", 10, ["ezr"]),
+    ("NEH", "Nehemiah", 13, ["ne"]),
+    ("EST", "Esther", 10, ["esth", "es"]),
+    ("JOB", "Job", 42, ["jb"]),
+    ("PSA", "Psalms", 150, ["psalm", "ps", "pss", "psa", "psm"]),
+    ("PRO", "Proverbs", 31, ["prov", "prv", "pr"]),
+    ("ECC", "Ecclesiastes", 12, ["eccl", "eccles", "qoh"]),
+    ("SNG", "Song of Solomon", 8, ["song", "song of songs", "sos", "so", "canticles", "song of sol"]),
+    ("ISA", "Isaiah", 66, ["is"]),
+    ("JER", "Jeremiah", 52, ["jr"]),
+    ("LAM", "Lamentations", 5, ["la"]),
+    ("EZK", "Ezekiel", 48, ["ezek", "eze", "ezk"]),
+    ("DAN", "Daniel", 12, ["dn", "da"]),
+    ("HOS", "Hosea", 14, ["ho"]),
+    ("JOL", "Joel", 3, ["jl"]),
+    ("AMO", "Amos", 9, ["am"]),
+    ("OBA", "Obadiah", 1, ["obad", "ob"]),
+    ("JON", "Jonah", 4, ["jnh"]),
+    ("MIC", "Micah", 7, ["mi"]),
+    ("NAM", "Nahum", 3, ["nah", "na"]),
+    ("HAB", "Habakkuk", 3, ["hb"]),
+    ("ZEP", "Zephaniah", 3, ["zeph", "zp"]),
+    ("HAG", "Haggai", 2, ["hg"]),
+    ("ZEC", "Zechariah", 14, ["zech", "zc"]),
+    ("MAL", "Malachi", 4, ["ml"]),
+    ("MAT", "Matthew", 28, ["matt", "mt"]),
+    ("MRK", "Mark", 16, ["mk", "mr", "mrk"]),
+    ("LUK", "Luke", 24, ["lk", "lu"]),
+    ("JHN", "John", 21, ["jn", "jhn", "joh"]),
+    ("ACT", "Acts", 28, ["ac", "acts of the apostles"]),
+    ("ROM", "Romans", 16, ["ro", "rm"]),
+    ("1CO", "1 Corinthians", 16, ["1 cor", "1 co"]),
+    ("2CO", "2 Corinthians", 13, ["2 cor", "2 co"]),
+    ("GAL", "Galatians", 6, ["ga"]),
+    ("EPH", "Ephesians", 6, ["ephes"]),
+    ("PHP", "Philippians", 4, ["phil", "php"]),
+    ("COL", "Colossians", 4, ["col"]),
+    ("1TH", "1 Thessalonians", 5, ["1 thess", "1 th", "1 thes"]),
+    ("2TH", "2 Thessalonians", 3, ["2 thess", "2 th", "2 thes"]),
+    ("1TI", "1 Timothy", 6, ["1 tim", "1 ti", "1 tm"]),
+    ("2TI", "2 Timothy", 4, ["2 tim", "2 ti", "2 tm"]),
+    ("TIT", "Titus", 3, ["ti"]),
+    ("PHM", "Philemon", 1, ["philem", "phm", "pm"]),
+    ("HEB", "Hebrews", 13, []),
+    ("JAS", "James", 5, ["jas", "jm"]),
+    ("1PE", "1 Peter", 5, ["1 pet", "1 pt", "1 pe"]),
+    ("2PE", "2 Peter", 3, ["2 pet", "2 pt", "2 pe"]),
+    ("1JN", "1 John", 5, ["1 jn", "1 jo", "1 jhn"]),
+    ("2JN", "2 John", 1, ["2 jn", "2 jo", "2 jhn"]),
+    ("3JN", "3 John", 1, ["3 jn", "3 jo", "3 jhn"]),
+    ("JUD", "Jude", 1, ["jud", "jd"]),
+    ("REV", "Revelation", 22, ["rev", "re", "rv", "revelations", "apocalypse"]),
+]
+
+ORDER = {code: i + 1 for i, (code, *_rest) in enumerate(BOOKS)}
+NAME = {code: name for code, name, *_rest in BOOKS}
+SINGLE_CHAPTER = {code for code, _name, chapters, _aliases in BOOKS if chapters == 1}
