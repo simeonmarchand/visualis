@@ -182,6 +182,26 @@ private slots:
         QVERIFY(warnings.isEmpty());
     }
 
+    void multiTracksPaste()
+    {
+        // The shape copied from MultiTracks: plain headers each followed by a blank line, every
+        // section one block of short phrase lines, and repeated sections written out in full.
+        const QString text =
+            "Verse 1\n\nJoy to the world\nThe Lord is come\nLet earth\nReceive her King\n"
+            "Let every heart\nPrepare Him room\n\n"
+            "Chorus 1\n\nAnd heaven and nature sing\nAnd heaven and nature sing\n\n"
+            "Verse 2\n\nJoy to the earth\nThe Savior reigns\nLet men their songs employ\n\n"
+            "Chorus 1\n\nAnd heaven and nature sing\nAnd heaven and nature sing\n\n"
+            "Chorus 2\n\nAnd heaven and nature sing\n\n"
+            "Outro\n\nJoy to the world\nJoy to the world\n";
+        const PastedLyrics p = parsePastedLyrics(text, {2, {}});
+        QCOMPARE(labels(p), (QStringList{"Verse 1", "Chorus 1", "Verse 2", "Chorus 2", "Outro"}));
+        QCOMPARE(order(p), (QStringList{"Verse 1", "Chorus 1", "Verse 2", "Chorus 1", "Chorus 2", "Outro"}));
+        QCOMPARE(p.groups[0].slides, (QStringList{"Joy to the world\nThe Lord is come", "Let earth\nReceive her King",
+                                                  "Let every heart\nPrepare Him room"}));
+        QVERIFY(p.warnings.isEmpty());
+    }
+
     void messyWhitespace()
     {
         const PastedLyrics p = parsePastedLyrics(
