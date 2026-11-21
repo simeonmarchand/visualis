@@ -1,0 +1,9 @@
+Third-party software used by Visualis
+=====================================
+
+Listed per component as it is added. Plan section 7.1 explains the license policy.
+
+Spikes (Phase 0)
+----------------
+- Qt 6 (Qt Quick, Qt Multimedia), LGPLv3. https://www.qt.io/licensing
+  Qt Multimedia's FFmpeg backend is LGPL and dynamically linked.

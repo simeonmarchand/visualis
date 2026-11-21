@@ -1,0 +1,31 @@
+# Build output
+build/
+build-*/
+cmake-build-*/
+*.app/
+CMakeUserPresets.json
+
+# Qt Creator / IDE
+*.user
+*.user.*
+.qtcreator/
+.vscode/
+.idea/
+
+# macOS
+.DS_Store
+
+# Secrets (never commit; see plan 7.2)
+.env
+.env.*
+
+# Media never goes in the repo (plan 7.1). Test clips are generated locally.
+*.mp4
+*.mov
+*.m4v
+*.mkv
+*.webm
+spikes/output/media/
+
+# Spike logs and benchmark scratch output
+*.log
