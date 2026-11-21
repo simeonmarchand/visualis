@@ -152,7 +152,88 @@ private slots:
         QVERIFY(!tile(window, 0)->property("isCurrent").toBool());
     }
 
+    // #24: keys, as an operator or a clicker sends them.
+    void keysStepThroughSlides()
+    {
+        // Three slides, live at the first. Each key, then where it should land.
+        QQuickWindow *window = liveOperatorWindow();
+        const QList<std::pair<Qt::Key, int>> steps{
+            {Qt::Key_Right, 1}, {Qt::Key_Down, 2}, {Qt::Key_Space, 2},   // the end: stays
+            {Qt::Key_PageUp, 1}, {Qt::Key_Left, 0}, {Qt::Key_Up, 0},     // the start: stays
+            {Qt::Key_Space, 1}, {Qt::Key_PageDown, 2},
+        };
+        for (const auto &[key, expected] : steps) {
+            QTest::keyClick(window, key);
+            QCOMPARE(m_live->slideIndex(), expected);
+        }
+    }
+
+    void keysClearLayers()
+    {
+        QQuickWindow *window = liveOperatorWindow();
+        QTest::keyClick(window, Qt::Key_C);
+        QVERIFY(m_live->textCleared());
+        QVERIFY(!m_live->backgroundCleared());
+        QTest::keyClick(window, Qt::Key_Right);   // the next slide shows text again
+        QVERIFY(!m_live->textCleared());
+        QTest::keyClick(window, Qt::Key_B);
+        QVERIFY(m_live->backgroundCleared());
+        QVERIFY(!m_live->textCleared());
+        QTest::keyClick(window, Qt::Key_Escape);
+        QVERIFY(m_live->textCleared() && m_live->backgroundCleared());
+    }
+
+    void shiftLetterJumpsToAGroup()
+    {
+        QQuickWindow *window = liveOperatorWindow();
+        QTest::keyClick(window, Qt::Key_C, Qt::ShiftModifier);
+        QCOMPARE(m_live->groupLabel(), QStringLiteral("Chorus"));
+        QTest::keyClick(window, Qt::Key_V, Qt::ShiftModifier);   // wraps back to the verse
+        QCOMPARE(m_live->groupLabel(), QStringLiteral("Verse 1"));
+        QCOMPARE(m_live->slideIndex(), 0);
+    }
+
+    void typingInSearchDoesNotDriveSlides()
+    {
+        QQuickWindow *window = liveOperatorWindow();
+        auto *search = window->findChild<QQuickItem *>("songSearch");
+        click(window, search);
+        QTRY_VERIFY(search->hasActiveFocus());
+        for (char ch : {'c', ' ', 'b'})
+            QTest::keyClick(window, ch);
+        QCOMPARE(search->property("text").toString(), QStringLiteral("c b"));
+        QVERIFY(!m_live->textCleared() && !m_live->backgroundCleared());
+        QTest::keyClick(window, Qt::Key_Right);
+        QCOMPARE(m_live->slideIndex(), 0);
+        QTest::keyClick(window, Qt::Key_Escape);   // the panic key still works
+        QVERIFY(m_live->textCleared());
+    }
+
+    // P1 keyboard test row 8: after a click, the keys drive slides, not what was clicked.
+    void afterClickingATileKeysStillDriveSlides()
+    {
+        QQuickWindow *window = liveOperatorWindow();
+        click(window, window->findChild<QQuickItem *>("songSearch"));
+        click(window, tile(window, 1));
+        QCOMPARE(m_live->slideIndex(), 1);
+        QTest::keyClick(window, Qt::Key_Space);
+        QCOMPARE(m_live->slideIndex(), 2);
+    }
+
 private:
+    // The operator window with the 3-slide song live at its first slide, focus on nothing.
+    QQuickWindow *liveOperatorWindow()
+    {
+        if (!m_songs->createFromPaste("Amazing Grace", kLyrics))
+            qFatal("couldn't create the test song");
+        QQuickWindow *window = loadOperatorWindow();
+        window->requestActivate();
+        if (!QTest::qWaitForWindowActive(window))
+            qFatal("operator window didn't activate");
+        m_songs->goLive(0);
+        return window;
+    }
+
     QQuickWindow *loadOperatorWindow()
     {
         m_engine->loadFromModule("Visualis.Ui", "Main");

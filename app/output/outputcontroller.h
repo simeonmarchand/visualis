@@ -2,6 +2,7 @@
 
 #include "output/displayplacement.h"
 #include "output/displaysettle.h"
+#include "output/latencyprobe.h"
 
 #include <QLoggingCategory>
 #include <QObject>
@@ -45,6 +46,9 @@ public:
 
     Q_INVOKABLE void setOperatorWindow(QQuickWindow *window);
     Q_INVOKABLE void addOutput(const QString &role, QQuickWindow *window);
+    // A command is about to change the live state: time it to each output's next frame.
+    void markCommand(const QString &command);
+
     // Saves the choice. A role that had this display loses it. Choosing confirms identical displays.
     Q_INVOKABLE void assign(const QString &role, const QString &displayRef);
     // The operator checked that identical displays carry the right outputs; don't ask again.
@@ -60,6 +64,7 @@ signals:
     void displaysChanged();
     void placementChanged();
     void settlingChanged();
+    void latencyMeasured(const QString &role, const QString &command, double ms);
 
 private:
     QList<visualis::DisplayInfo> currentDisplays() const;
@@ -75,6 +80,7 @@ private:
     visualis::DisplaySettle m_settle;
     QPointer<QQuickWindow> m_operator;
     QMap<QString, QPointer<QQuickWindow>> m_outputs;
+    QList<LatencyProbe *> m_probes;
     QMap<QString, visualis::DisplayChoice> m_choices;   // saved ones plus this session's defaults
     QMap<QString, visualis::OutputPlacement> m_placements;
     QStringList m_confirmedIdentical;   // display keys

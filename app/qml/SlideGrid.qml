@@ -46,7 +46,10 @@ ColumnLayout {
             groupColor: modelData.groupColor
             isCurrent: pane.showingLiveSong && index === LiveState.slideIndex
             isNext: pane.showingLiveSong && index === LiveState.slideIndex + 1
-            onClicked: SongLibrary.goLive(index)
+            onClicked: {
+                pane.forceActiveFocus()   // out of the search field, so keys drive slides again
+                SongLibrary.goLive(index)
+            }
         }
     }
 }

@@ -1,3 +1,4 @@
+pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Dialogs
@@ -8,6 +9,8 @@ import Visualis.Ui
 ColumnLayout {
     id: pane
     spacing: 8
+
+    readonly property bool dialogOpen: pasteDialog.visible
 
     TextField {
         objectName: "songSearch"
@@ -31,7 +34,10 @@ ColumnLayout {
             highlighted: modelData.id === SongLibrary.selectedId
             // Doesn't take focus, so keys keep reaching the operator controls (#24).
             focusPolicy: Qt.NoFocus
-            onClicked: SongLibrary.select(modelData.id)
+            onClicked: {
+                pane.forceActiveFocus()   // out of the search field, so keys drive slides again
+                SongLibrary.select(modelData.id)
+            }
         }
 
         Label {

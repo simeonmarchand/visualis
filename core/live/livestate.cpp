@@ -41,6 +41,35 @@ bool LiveState::moveTo(int n)
     return true;
 }
 
+bool LiveState::goToGroupStartingWith(const QString &letter)
+{
+    if (letter.isEmpty())
+        return false;
+    // A group starts where its first slide is: indexInGroup 0. A repeated group starts
+    // again at each step of the arrangement that uses it.
+    QList<int> starts;
+    for (int i = 0; i < m_slides.size(); ++i) {
+        const SongSlide &s = m_slides[i];
+        if (s.indexInGroup == 0 && s.groupLabel.startsWith(letter, Qt::CaseInsensitive))
+            starts.append(i);
+    }
+    if (starts.isEmpty())
+        return false;
+    for (int i : starts) {
+        if (i > m_index)
+            return moveTo(i);
+    }
+    return moveTo(starts.first());
+}
+
+void LiveState::showBackground()
+{
+    if (!m_backgroundCleared)
+        return;
+    m_backgroundCleared = false;
+    emit changed();
+}
+
 void LiveState::clearText()
 {
     if (m_textCleared)

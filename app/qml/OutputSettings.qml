@@ -13,7 +13,10 @@ ColumnLayout {
         id: backgroundDialog
         title: "Choose a background video"
         nameFilters: ["Video (*.mp4 *.mov *.m4v)", "All files (*)"]
-        onAccepted: VideoEngine.source = selectedFile
+        onAccepted: {
+            VideoEngine.source = selectedFile
+            Commands.run("show_background")   // choosing one brings a cleared background back
+        }
     }
 
     // Background video: a stopgap until the media library and service items.
@@ -27,12 +30,21 @@ ColumnLayout {
         }
         Button {
             text: "Choose video…"
+            focusPolicy: Qt.NoFocus
             onClicked: backgroundDialog.open()
         }
         Button {
             text: "None"
+            focusPolicy: Qt.NoFocus
             enabled: VideoEngine.source.toString() !== ""
             onClicked: VideoEngine.source = ""
+        }
+        Button {
+            objectName: "showBackground"
+            text: "Show (cleared)"
+            focusPolicy: Qt.NoFocus
+            visible: LiveState.backgroundCleared
+            onClicked: Commands.run("show_background")
         }
         Label {
             objectName: "backgroundStatus"
@@ -60,6 +72,7 @@ ColumnLayout {
         }
         Button {
             text: "They're right"
+            focusPolicy: Qt.NoFocus
             onClicked: OutputController.confirmIdenticalDisplays()
         }
     }
@@ -88,6 +101,7 @@ ColumnLayout {
                 id: choice
                 objectName: row.modelData.role + "DisplayChoice"
                 Layout.preferredWidth: 320
+                focusPolicy: Qt.NoFocus   // arrow keys belong to the slides
                 model: OutputController.displays
                 textRole: "label"
                 valueRole: "ref"
