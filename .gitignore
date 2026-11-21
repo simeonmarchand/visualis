@@ -43,3 +43,7 @@ PAT PCO.rtf
 
 # Planning Center spike dumps (can contain people's names)
 spikes/planning-center/data/
+
+# PowerPoint spike: real sermon decks are church content, never committed
+spikes/powerpoint/decks/
+spikes/powerpoint/out/

@@ -258,7 +258,7 @@ Core entities. IDs are UUIDs, and timestamps are UTC.
 Library
  ├─ Song { id, title, aliases[], ccli_number?, authors, copyright, pco_song_id?,
  │         default_template_id?, default_background_id? }
- │    ├─ Section { id, label (Verse 1, Chorus...), lyrics_text, slide_breaks[] }
+ │    ├─ Section { id, label (Verse 1, Chorus...), color, lyrics_text, slide_breaks[] }
  │    └─ Arrangement { id, name, pco_arrangement_id?, sequence: [section_id...] }
  ├─ ScriptureTranslation { id, abbrev, name, license_basis, attribution_text, source }
  ├─ Presentation { id, kind: rendered_pptx | native, source_file_hash, slides[] }
@@ -272,6 +272,8 @@ Service { id, title, date, pco_plan_id?, pco_service_type_id?, last_imported_at 
                   ref_id?, pco_item_id?, arrangement_id?, overrides { template, background, slide edits },
                   import_snapshot (raw PCO fields for diffing) }
 ```
+
+**Groups.** A `Section` is what ProPresenter calls a group: a labeled, colored block of slides (Verse 1, Chorus, Bridge), and an arrangement is an ordered list of groups that may repeat one ("V1 C V2 C B C C"). Operators work in groups: the slide list shows each group's label and color, a group can be jumped to directly by key or MIDI cue ("go to Chorus", even when the arrangement doesn't have it next), and editing a group's lyrics changes every place the arrangement uses it. Imports map onto groups: ProPresenter groups and arrangements directly (7.4), Planning Center arrangement sections and sequences (5.3), and pasted lyrics by their section labels. Song credits (CCLI number, copyright) are optional; a church that doesn't use CCLI leaves them empty, and the credit line is a template setting.
 
 Rendering pipeline (shared by preview and live output):
 `ServiceItem → expand (arrangement or passage or deck) → Slide[] → apply Template → Layers {background, content, lower_third} → Output(role)`.

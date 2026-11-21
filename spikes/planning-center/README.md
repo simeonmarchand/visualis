@@ -33,7 +33,8 @@ From a sandbox organization with one hand-made plan (2026-11-21). Not yet from t
 3. **Items have a type** (`item_type`: `song`, `header`, `media`, or `item`), a position, and a `service_position` (pre, during, or post service).
 4. **A service can change a song's section order for that day only** (`custom_arrangement_sequence` on the item). The import has to prefer it over the arrangement's default sequence.
 5. **Planning Center has its own projector settings** per item (`selected_background`, `selected_layout`). Worth checking whether the church uses them.
-6. **Every plan has a link back to Planning Center** (`planning_center_url`), useful for an "open in Planning Center" button.
+6. **There's no scripture item type.** A reading is a plain item whose title is the reference ("Acts 2:38"). The P5 parser picks out the reference and rejects other titles, so the import can recognize scripture items. Real titles may wrap the reference in other words ("Scripture Reading: Acts 2:38"), so the parser will need to find a reference inside a title.
+7. **Every plan has a link back to Planning Center** (`planning_center_url`), useful for an "open in Planning Center" button.
 
 ## Still to learn (needs songs in a plan)
 
