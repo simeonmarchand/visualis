@@ -10,7 +10,10 @@
 namespace visualis {
 
 struct PasteOptions {
-    int maxLinesPerSlide = 4;   // longer stanzas are split as evenly as possible
+    // Longer stanzas are split as evenly as possible. 2 matches the church's library (52% of
+    // its ProPresenter slides) and pairs MultiTracks' short phrases into sentences (#14).
+    // Belongs to the lyrics template once templates are stored (Phase 3).
+    int maxLinesPerSlide = 2;
     QString title;              // a first line equal to this (pastes often start with it) is dropped
 };
 
