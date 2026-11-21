@@ -171,6 +171,44 @@ bool SongLibrary::createFromPaste(const QString &title, const QString &lyrics)
     return true;
 }
 
+bool SongLibrary::removeSong(const QString &id)
+{
+    if (!m_store || !m_store->remove(QUuid::fromString(id)))
+        return false;
+    if (m_selected && m_selected->id == QUuid::fromString(id)) {
+        m_selected.reset();
+        emit selectionChanged();
+    }
+    emit songsChanged();
+    return true;
+}
+
+std::optional<Song> SongLibrary::loadSong(const QUuid &id) const
+{
+    return m_store ? m_store->load(id) : std::nullopt;
+}
+
+bool SongLibrary::saveSong(Song &song, QString *error)
+{
+    if (!m_store) {
+        if (error)
+            *error = QStringLiteral("The song library isn't open.");
+        return false;
+    }
+    const SongStore::Result r = m_store->save(song);
+    if (!r.ok) {
+        if (error)
+            *error = r.error;
+        return false;
+    }
+    emit songsChanged();   // the title may have changed
+    if (m_selected && m_selected->id == song.id) {
+        m_selected = song;
+        emit selectionChanged();
+    }
+    return true;
+}
+
 void SongLibrary::setReport(const QString &report)
 {
     m_report = report;

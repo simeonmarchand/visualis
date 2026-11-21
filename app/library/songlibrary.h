@@ -57,6 +57,12 @@ public:
     // Creates a song from pasted lyrics and selects it. Returns false (with `report` saying
     // why) when there's no title or no lyrics.
     Q_INVOKABLE bool createFromPaste(const QString &title, const QString &lyrics);
+    // Deletes a song. What's live keeps showing (LiveState holds its own copy).
+    Q_INVOKABLE bool removeSong(const QString &id);
+
+    // For the song editor: load a song, and save it whole (every edit saves at once).
+    std::optional<visualis::Song> loadSong(const QUuid &id) const;
+    bool saveSong(visualis::Song &song, QString *error);
 
     QString folder() const;
     QString error() const { return m_error; }
