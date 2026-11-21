@@ -42,6 +42,22 @@ Window {
         anchors.margins: 16
         spacing: 8
 
+        RowLayout {
+            objectName: "identicalDisplays"
+            visible: OutputController.identicalDisplays.length > 0
+            spacing: 12
+
+            Label {
+                text: "Identical displays (" + OutputController.identicalDisplays.join(", ")
+                      + ") are told apart by position. Check each output is on the right one."
+                color: "#e0b040"
+            }
+            Button {
+                text: "They're right"
+                onClicked: OutputController.confirmIdenticalDisplays()
+            }
+        }
+
         Label {
             objectName: "displaysSettling"
             visible: OutputController.settling
@@ -68,7 +84,7 @@ Window {
                     Layout.preferredWidth: 320
                     model: OutputController.displays
                     textRole: "label"
-                    valueRole: "key"
+                    valueRole: "ref"
                     currentIndex: assignedIndex()
                     displayText: currentIndex < 0 ? "Choose a display" : currentText
                     function assignedIndex() { return indexOfValue(OutputController.assignments[row.modelData.role] ?? "") }

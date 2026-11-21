@@ -2,6 +2,7 @@
 
 #include <QList>
 #include <QMap>
+#include <QPoint>
 #include <QRect>
 #include <QString>
 #include <QStringList>
@@ -12,33 +13,61 @@ namespace visualis {
 // below are testable without real screens.
 struct DisplayInfo
 {
-    QString key;        // stable identity across replugs and restarts (see app/output/platformdisplay.h)
+    QString key;        // identity across replugs and restarts (see app/output/platformdisplay.h)
     QString name;       // for showing to the operator
     QRect geometry;
     bool isOperator = false;
 };
 
-struct OutputPlacement
+// The display an output was put on. The position tells apart identical monitors, which
+// share a key because they report no serial number (#20).
+struct DisplayChoice
 {
-    enum class Status { Placed, NoDisplayChosen, DisplayMissing, OperatorScreen };
-    Status status = Status::NoDisplayChosen;
-    DisplayInfo display;   // set when Placed
+    QString key;
+    QPoint position;
+
+    bool isValid() const { return !key.isEmpty(); }
+    bool operator==(const DisplayChoice &) const = default;
 };
 
-// Where an output assigned to the display `key` goes. It is never placed on the operator
-// screen (plan 5.5), and when its display is missing it waits for that same display rather
-// than moving to another one.
-OutputPlacement placeOutput(const QString &key, const QList<DisplayInfo> &displays);
+struct OutputPlacement
+{
+    enum class Status {
+        Placed,
+        PlacedInstead,      // the chosen display is the operator screen; on a free one meanwhile
+        NoDisplayChosen,    // nothing chosen and no display free
+        DisplayMissing,
+        OperatorScreen,     // the chosen display is the operator screen and none is free
+    };
+    Status status = Status::NoDisplayChosen;
+    DisplayInfo display;   // set when Placed or PlacedInstead
 
-// Gives each role without a display the next free one, left to right. Free means not the
-// operator screen and not already chosen for another role, so two outputs never share a
-// display. Roles stay unassigned when no display is free.
-QMap<QString, QString> withDefaultDisplays(const QStringList &roles, QMap<QString, QString> assignments,
-                                           const QList<DisplayInfo> &displays);
+    bool isPlaced() const { return status == Status::Placed || status == Status::PlacedInstead; }
+};
 
-// Assigns `key` to `role`. Another role that had that display loses it, so the two
-// outputs never stack on one display.
-QMap<QString, QString> withDisplayChosen(QMap<QString, QString> assignments, const QString &role,
-                                         const QString &key);
+// Decides where every output goes, all at once so two never share a display:
+// - An output goes on its chosen display: the one with that key, or among identical ones,
+//   the one nearest the saved position. When identical displays are fewer than the outputs
+//   that chose them, the nearest choice wins and the others wait.
+// - It's never put on the operator screen (plan 5.5). If that's the chosen display, it goes
+//   on the next free display instead, left to right, or waits if none is free.
+// - When its display is missing, it waits for it rather than moving to another one.
+QMap<QString, OutputPlacement> placeOutputs(const QStringList &roles, const QMap<QString, DisplayChoice> &choices,
+                                            const QList<DisplayInfo> &displays);
+
+// Gives each role without a choice the next free display, left to right. Free means not
+// the operator screen and not where another role's choice puts it. Roles stay unassigned
+// when no display is free.
+QMap<QString, DisplayChoice> withDefaultDisplays(const QStringList &roles, QMap<QString, DisplayChoice> choices,
+                                                 const QList<DisplayInfo> &displays);
+
+// Records `choice` for `role`. Another role that had chosen the same display loses its
+// choice, so the two outputs never stack on one display.
+QMap<QString, DisplayChoice> withDisplayChosen(QMap<QString, DisplayChoice> choices, const QString &role,
+                                               const DisplayChoice &choice, const QList<DisplayInfo> &displays);
+
+// Keys shared by more than one connected display: identical monitors that only their
+// position tells apart.
+QStringList sharedKeys(const QList<DisplayInfo> &displays);
 
 } // namespace visualis

@@ -23,6 +23,33 @@ QString describe(const QScreen *s)
     return QStringLiteral("%1 (%2x%3)").arg(s->name()).arg(s->geometry().width()).arg(s->geometry().height());
 }
 
+QString refOf(const DisplayInfo &d)
+{
+    return QStringLiteral("%1@%2,%3").arg(d.key).arg(d.geometry.x()).arg(d.geometry.y());
+}
+
+QString sizeLabel(const DisplayInfo &d)
+{
+    return QStringLiteral("%1 (%2x%3)").arg(d.name).arg(d.geometry.width()).arg(d.geometry.height());
+}
+
+// Identical displays get their position in the name: "W156F1 (1920x1080), left".
+QString labelOf(const DisplayInfo &d, const QList<DisplayInfo> &displays)
+{
+    QList<int> xs;
+    for (const DisplayInfo &other : displays) {
+        if (other.key == d.key)
+            xs.append(other.geometry.x());
+    }
+    if (xs.size() < 2)
+        return sizeLabel(d);
+    std::sort(xs.begin(), xs.end());
+    const int n = int(xs.indexOf(d.geometry.x()));
+    if (xs.size() == 2)
+        return sizeLabel(d) + (n == 0 ? ", left" : ", right");
+    return sizeLabel(d) + QStringLiteral(", %1 of %2 from left").arg(n + 1).arg(xs.size());
+}
+
 } // namespace
 
 OutputController::OutputController(QObject *parent)
@@ -33,8 +60,9 @@ OutputController::OutputController(QObject *parent)
     for (const QString &role : kRoles) {
         const QString key = settings.value("outputs/" + role).toString();
         if (!key.isEmpty())
-            m_assignments[role] = key;
+            m_choices[role] = {key, settings.value("outputs/" + role + "-position").toPoint()};
     }
+    m_confirmedIdentical = settings.value("outputs/confirmed-identical").toStringList();
 
     connect(&m_settle, &DisplaySettle::settlingChanged, this, [this](bool settling) {
         qCInfo(lcOutput) << (settling ? "displays settling" : "displays settled");
@@ -83,21 +111,67 @@ void OutputController::addOutput(const QString &role, QQuickWindow *window)
         placeAll();
 }
 
-void OutputController::assign(const QString &role, const QString &key)
+void OutputController::assign(const QString &role, const QString &ref)
 {
-    m_assignments = withDisplayChosen(m_assignments, role, key);
-    QSettings settings;
-    for (const QString &r : kRoles) {
-        if (m_assignments.contains(r))
-            settings.setValue("outputs/" + r, m_assignments.value(r));
-        else
-            settings.remove("outputs/" + r);
+    const QList<DisplayInfo> displays = currentDisplays();
+    const auto it = std::find_if(displays.cbegin(), displays.cend(), [&](const DisplayInfo &d) { return refOf(d) == ref; });
+    if (it == displays.cend()) {
+        qCWarning(lcOutput).noquote() << "assign" << role << ": no display" << ref;   // unplugged meanwhile
+        emit placementChanged();
+        return;
     }
-    qCInfo(lcOutput).noquote() << "assign" << role << "->" << key;
+    m_choices = withDisplayChosen(m_choices, role, {it->key, it->geometry.topLeft()}, displays);
+    saveChoices();
+    qCInfo(lcOutput).noquote() << "assign" << role << "->" << ref;
+    // Picking a display while identical ones are connected is the operator telling them apart.
+    if (!identicalDisplays().isEmpty())
+        confirmIdenticalDisplays();
     if (m_settle.isSettling())
         emit placementChanged();   // placed once the displays settle
     else
         placeAll();
+}
+
+void OutputController::confirmIdenticalDisplays()
+{
+    for (const QString &key : sharedKeys(currentDisplays())) {
+        if (!m_confirmedIdentical.contains(key))
+            m_confirmedIdentical.append(key);
+    }
+    QSettings().setValue("outputs/confirmed-identical", m_confirmedIdentical);
+    emit displaysChanged();
+}
+
+QStringList OutputController::identicalDisplays() const
+{
+    const QList<DisplayInfo> displays = currentDisplays();
+    QStringList names;
+    for (const QString &key : sharedKeys(displays)) {
+        if (m_confirmedIdentical.contains(key))
+            continue;
+        for (const DisplayInfo &d : displays) {
+            if (d.key == key) {
+                names.append(d.name);
+                break;
+            }
+        }
+    }
+    return names;
+}
+
+void OutputController::saveChoices() const
+{
+    // Only explicit choices are saved; defaults are recomputed each session.
+    QSettings settings;
+    for (const QString &r : kRoles) {
+        if (m_choices.contains(r)) {
+            settings.setValue("outputs/" + r, m_choices.value(r).key);
+            settings.setValue("outputs/" + r + "-position", m_choices.value(r).position);
+        } else {
+            settings.remove("outputs/" + r);
+            settings.remove("outputs/" + r + "-position");
+        }
+    }
 }
 
 QScreen *OutputController::operatorScreen() const
@@ -116,14 +190,11 @@ QList<DisplayInfo> OutputController::currentDisplays() const
 
 QVariantList OutputController::displays() const
 {
+    const QList<DisplayInfo> all = currentDisplays();
     QVariantList list;
-    for (const DisplayInfo &d : currentDisplays()) {
-        if (d.isOperator)
-            continue;
-        list.append(QVariantMap{
-            {"key", d.key},
-            {"label", QStringLiteral("%1 (%2x%3)").arg(d.name).arg(d.geometry.width()).arg(d.geometry.height())},
-        });
+    for (const DisplayInfo &d : all) {
+        if (!d.isOperator)
+            list.append(QVariantMap{{"ref", refOf(d)}, {"label", labelOf(d, all)}});
     }
     return list;
 }
@@ -131,8 +202,10 @@ QVariantList OutputController::displays() const
 QVariantMap OutputController::assignments() const
 {
     QVariantMap map;
-    for (auto it = m_assignments.cbegin(); it != m_assignments.cend(); ++it)
-        map[it.key()] = it.value();
+    for (const QString &role : kRoles) {
+        const OutputPlacement p = m_placements.value(role);
+        map[role] = p.status == OutputPlacement::Status::Placed ? refOf(p.display) : QString();
+    }
     return map;
 }
 
@@ -162,32 +235,37 @@ void OutputController::placeAll()
     const QList<DisplayInfo> displays = currentDisplays();
     // Defaults aren't saved: until the operator chooses, an unassigned output takes the next
     // free display each time, including one plugged in later.
-    m_assignments = withDefaultDisplays(kRoles, m_assignments, displays);
+    m_choices = withDefaultDisplays(kRoles, m_choices, displays);
+    m_placements = placeOutputs(kRoles, m_choices, displays);
+    if (const QStringList shared = sharedKeys(displays); shared != m_loggedShared) {
+        m_loggedShared = shared;
+        if (!shared.isEmpty())
+            qCInfo(lcOutput).noquote() << "identical displays:" << identicalDisplays().join(", ");
+    }
     for (const QString &role : kRoles) {
         if (QQuickWindow *window = m_outputs.value(role))
-            place(role, window, displays);
+            place(role, window, m_placements.value(role));
     }
     emit placementChanged();
 }
 
-void OutputController::place(const QString &role, QQuickWindow *window, const QList<DisplayInfo> &displays)
+void OutputController::place(const QString &role, QQuickWindow *window, const OutputPlacement &p)
 {
-    const OutputPlacement p = placeOutput(m_assignments.value(role), displays);
-    if (p.status != OutputPlacement::Status::Placed) {
+    switch (p.status) {
+    case OutputPlacement::Status::Placed:
+    case OutputPlacement::Status::PlacedInstead:
+        break;
+    case OutputPlacement::Status::NoDisplayChosen:
         window->hide();
-        switch (p.status) {
-        case OutputPlacement::Status::NoDisplayChosen:
-            setStatus(role, QStringLiteral("Waiting: no free display"));
-            break;
-        case OutputPlacement::Status::DisplayMissing:
-            setStatus(role, QStringLiteral("Waiting: display not connected"));
-            break;
-        case OutputPlacement::Status::OperatorScreen:
-            setStatus(role, QStringLiteral("Waiting: chosen display is the operator screen"));
-            break;
-        case OutputPlacement::Status::Placed:
-            break;
-        }
+        setStatus(role, QStringLiteral("Waiting: no free display"));
+        return;
+    case OutputPlacement::Status::DisplayMissing:
+        window->hide();
+        setStatus(role, QStringLiteral("Waiting: display not connected"));
+        return;
+    case OutputPlacement::Status::OperatorScreen:
+        window->hide();
+        setStatus(role, QStringLiteral("Waiting: chosen display is the operator screen, and no other is free"));
         return;
     }
 
@@ -201,7 +279,9 @@ void OutputController::place(const QString &role, QQuickWindow *window, const QL
     window->setGeometry((*it)->geometry());
     window->show();
     raiseAboveMenuBar(window);
-    setStatus(role, QStringLiteral("On %1").arg(p.display.name));
+    setStatus(role, p.status == OutputPlacement::Status::Placed
+                        ? QStringLiteral("On %1").arg(p.display.name)
+                        : QStringLiteral("On %1 for now: the chosen display is the operator screen").arg(p.display.name));
     if (moved)
         qCInfo(lcOutput).noquote() << role << "placed on" << describe(*it);
 }
