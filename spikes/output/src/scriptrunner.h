@@ -14,6 +14,8 @@
 //   mode shared|per-window | video <file> | assign <role> <screen key>
 //   wait <ms>
 //   snapshot <name>                      saves a PNG of every visible window
+//   locate <objectName>                  logs "located <name> at <x> <y>": the item's centre in
+//                                        global screen points, so an outside script can click it
 //   expect <key> <op> <value>            op: =  !=  >=  <=  ~ (starts with)
 //   wait-for <key> <op> <value> [ms]     polls until true, fails after the timeout (default 5000)
 //   # comment

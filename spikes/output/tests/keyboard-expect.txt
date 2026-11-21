@@ -1,0 +1,41 @@
+# Expected states for scripts/run-keyboard-test.sh, which sends real key presses
+# and clicks through macOS (osascript) while this script waits for each result in order.
+# Each wait-for must match the key sequence in run-keyboard-test.sh.
+
+wait-for placement.audience ~ windowed 5000
+expect slide = 1
+
+# Right, Space, Page Down advance
+wait-for slide = 2 15000
+wait-for slide = 3 5000
+wait-for slide = 4 5000
+
+# Left, Up, Page Up go back
+wait-for slide = 3 5000
+wait-for slide = 2 5000
+wait-for slide = 1 5000
+
+# Down advances
+wait-for slide = 2 5000
+
+# C clears text, Right brings it back on the next slide
+wait-for text-cleared = true 5000
+wait-for slide = 3 5000
+expect text-cleared = false
+
+# B toggles the background off and on
+wait-for background = false 5000
+wait-for background = true 5000
+
+# Esc clears all
+wait-for background = false 5000
+expect text-cleared = true
+
+# Row 8: click "Previous" (back to slide 2), then Space must advance to 3,
+# not press the focused button again (which would go to slide 1).
+# locate tells run-keyboard-test.sh where on screen to click.
+locate prevButton
+wait-for slide = 2 5000
+wait 1500
+expect slide = 3
+snapshot after-click-then-space

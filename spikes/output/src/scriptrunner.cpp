@@ -9,6 +9,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QQuickItem>
 #include <QTimer>
 
 ScriptRunner::ScriptRunner(const QString &scriptPath, const QString &outDir,
@@ -94,6 +95,28 @@ int ScriptRunner::run(const Line &line)
     }
     if (cmd == "wait") return rest.toInt();
     if (cmd == "snapshot") { snapshot(rest); return 0; }
+    if (cmd == "locate") {
+        // Walk the visual tree: QML doesn't always make layout children QObject children.
+        QQuickItem *item = nullptr;
+        QList<QQuickItem *> todo;
+        for (const auto &window : std::as_const(m_windows)) {
+            if (window)
+                todo << window->contentItem();
+        }
+        while (!todo.isEmpty() && !item) {
+            QQuickItem *next = todo.takeFirst();
+            if (next->objectName() == rest)
+                item = next;
+            todo << next->childItems();
+        }
+        if (!item) {
+            fail(line, QStringLiteral("no item named '%1'").arg(rest));
+            return 0;
+        }
+        const QPointF c = item->mapToGlobal(QPointF(item->width() / 2, item->height() / 2));
+        EventLog::write(QStringLiteral("located %1 at %2 %3").arg(rest).arg(qRound(c.x())).arg(qRound(c.y())));
+        return 0;
+    }
 
     if (cmd == "expect" && w.size() >= 4) {
         ++m_checks;

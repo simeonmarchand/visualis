@@ -74,7 +74,7 @@ ApplicationWindow {
 
             RowLayout {
                 spacing: 8
-                Button { text: "◀ Previous"; focusPolicy: Qt.NoFocus; onClicked: LiveState.prev() }
+                Button { objectName: "prevButton"; text: "◀ Previous"; focusPolicy: Qt.NoFocus; onClicked: LiveState.prev() }
                 Button { text: "Next ▶"; focusPolicy: Qt.NoFocus; onClicked: LiveState.next() }
                 Button { text: "Clear text (C)"; focusPolicy: Qt.NoFocus; onClicked: LiveState.clearText() }
                 Button {
