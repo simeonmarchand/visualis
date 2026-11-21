@@ -5,7 +5,7 @@ on:
   push:
     branches: [main]
 
-# A newer push to the same branch cancels the older run, to save macOS minutes
+# A newer push to the same branch cancels the older run, to save CI minutes
 # (private repos count them 10x).
 concurrency:
   group: ci-${{ github.ref }}
@@ -43,3 +43,60 @@ jobs:
 
       - name: Lint QML
         run: cmake --build --preset ci --target all_qmllint
+
+  # Compile-only (plan §4, D1: macOS first, keep the code portable). Nothing runs: outputs,
+  # AVFoundation, and display identity are macOS-only for now.
+  linux:
+    name: Build only (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.12.0"
+          host: linux
+          target: desktop
+          arch: linux_gcc_64
+          modules: qtmultimedia
+          cache: true
+
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y ninja-build libgl-dev libxkbcommon-dev
+
+      - name: Configure
+        run: cmake --preset ci
+
+      - name: Build
+        run: cmake --build --preset ci
+
+  windows:
+    name: Build only (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.12.0"
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          modules: qtmultimedia
+          cache: true
+
+      - name: Set up MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install Ninja
+        uses: seanmiddleditch/gha-setup-ninja@v5
+
+      - name: Configure
+        run: cmake --preset ci
+
+      - name: Build
+        run: cmake --build --preset ci
