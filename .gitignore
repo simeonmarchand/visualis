@@ -47,3 +47,7 @@ spikes/planning-center/data/
 # PowerPoint spike: real sermon decks are church content, never committed
 spikes/powerpoint/decks/
 spikes/powerpoint/out/
+
+# ProPresenter spike: real song files are church content (and copyrighted lyrics), never committed
+spikes/propresenter/songs/
+spikes/propresenter/out/
