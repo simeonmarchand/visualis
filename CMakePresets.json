@@ -45,6 +45,15 @@
         "CMAKE_BUILD_TYPE": "Debug",
         "CMAKE_PREFIX_PATH": "$env{QT_ROOT_DIR}"
       }
+    },
+    {
+      "name": "asan",
+      "inherits": "macos-base",
+      "description": "Debug with AddressSanitizer and UBSan, for code that reads untrusted files",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_CXX_FLAGS": "-fsanitize=address,undefined -fno-omit-frame-pointer"
+      }
     }
   ],
   "buildPresets": [
@@ -59,6 +68,10 @@
     {
       "name": "ci",
       "configurePreset": "ci"
+    },
+    {
+      "name": "asan",
+      "configurePreset": "asan"
     }
   ],
   "testPresets": [
@@ -85,6 +98,16 @@
     {
       "name": "ci",
       "configurePreset": "ci",
+      "output": {
+        "outputOnFailure": true
+      },
+      "environment": {
+        "QT_QPA_PLATFORM": "offscreen"
+      }
+    },
+    {
+      "name": "asan",
+      "configurePreset": "asan",
       "output": {
         "outputOnFailure": true
       },

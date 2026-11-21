@@ -20,7 +20,7 @@ cmake --build --preset debug
 ctest --preset debug          # runs offscreen; no display needed
 ```
 
-Run the tests before calling any work done, and say plainly if any fail.
+Run the tests before calling any work done, and say plainly if any fail. Code that reads files from outside (imports) should also pass under the `asan` preset (`cmake --preset asan && cmake --build --preset asan && ctest --preset asan`).
 
 ## Workflow
 

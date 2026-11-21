@@ -5,13 +5,14 @@ Listed per component as it is added. Plan section 7.1 explains the license polic
 
 App
 ---
-- Qt 6 (Qt Core, Qt Gui, Qt Quick, Qt Test), LGPLv3. https://www.qt.io/licensing
+- Qt 6 (Qt Core, Qt Gui, Qt Quick, Qt SQL, Qt Test), LGPLv3. https://www.qt.io/licensing
   Dynamically linked from the system or bundled Qt frameworks.
+- ProPresenter 7 file field numbers (core/import/propresenter.cpp), from
+  github.com/greyshirtguy/ProPresenter7-Proto, MIT License, Copyright (c) 2023 greyshirtguy.
 
 Spikes (Phase 0)
 ----------------
 - Qt 6 (Qt Quick, Qt Multimedia), LGPLv3. https://www.qt.io/licensing
   Qt Multimedia's FFmpeg backend is LGPL and dynamically linked.
-- ProPresenter 7 schema field numbers (spikes/propresenter/pro7.py), from
-  github.com/greyshirtguy/ProPresenter7-Proto, MIT License, Copyright (c) 2023 greyshirtguy.
+- ProPresenter 7 schema field numbers (spikes/propresenter/pro7.py): same source as above.
 - League Gothic and Open Sans (spike test fonts, downloaded locally, not committed), SIL Open Font License 1.1.
