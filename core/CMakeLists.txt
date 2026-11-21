@@ -5,6 +5,7 @@ qt_add_library(visualis_core STATIC
     song/song.h song/song.cpp
     song/labels.h song/labels.cpp
     song/lyricspaste.h song/lyricspaste.cpp
+    song/slidelist.h song/slidelist.cpp
     song/songstore.h song/songstore.cpp
 )
 target_include_directories(visualis_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
