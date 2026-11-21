@@ -73,6 +73,8 @@ private slots:
             QVERIFY(r.library->setSetting("church.name", "Grace Fellowship"));
             QVERIFY(r.library->setSetting("church.name", "Grace Church"));   // overwrite
             QCOMPARE(r.library->setting("missing", "fallback"), QStringLiteral("fallback"));
+            QVERIFY(r.library->setSetting("empty", QString()));   // a null QString is stored as ""
+            QCOMPARE(r.library->setting("empty", "fallback"), QString(""));
         }
         auto r = Library::open(tmp.path());
         QCOMPARE(r.error, E::None);
@@ -168,6 +170,7 @@ private slots:
     void detectsADamagedLibrary()
     {
         QTemporaryDir tmp;
+        int rootPage = 0, pageSize = 0;
         {
             auto r = Library::open(tmp.path());
             QSqlDatabase db = r.library->database();
@@ -175,13 +178,19 @@ private slots:
             for (int i = 0; i < 3000; ++i)
                 r.library->setSetting(QStringLiteral("key-%1").arg(i), QString(60, QChar('x')));
             db.commit();
+            // Find the settings table's own pages, so later tables can't move the target.
+            QSqlQuery q(db);
+            QVERIFY(q.exec("SELECT rootpage FROM sqlite_schema WHERE name = 'setting'") && q.next());
+            rootPage = q.value(0).toInt();
+            pageSize = pragma(*r.library, "page_size").toInt();
         }
-        // Scribble over a page in the middle of the file (not the header page).
+        // Overwrite the table's whole root page. (Partial scribbles can land in a page's free
+        // space and leave the data intact; SQLite is then right to call the file fine.)
+        QVERIFY(rootPage > 1);
         QFile f(tmp.filePath("library.sqlite"));
         QVERIFY(f.open(QIODevice::ReadWrite));
-        QVERIFY(f.size() > 8 * 4096);
-        f.seek(5 * 4096 + 100);
-        f.write(QByteArray(2000, '\xA5'));
+        f.seek(qint64(rootPage - 1) * pageSize);
+        f.write(QByteArray(pageSize, '\xA5'));
         f.close();
 
         auto r = Library::open(tmp.path());
@@ -201,6 +210,22 @@ private slots:
     void reportsAFolderThatCannotBeCreated()
     {
         QCOMPARE(Library::open("/System/visualis-test-library").error, E::CannotCreate);
+    }
+
+    void closedLibraryIsOneCompleteFile()
+    {
+        QTemporaryDir tmp;
+        {
+            auto r = Library::open(tmp.path());
+            r.library->setSetting("church.name", "Grace Church");
+        }
+        // Copy only library.sqlite, as a sync tool might, and the data must be in it.
+        const QString copy = tmp.filePath("copy");
+        QVERIFY(QDir().mkpath(copy));
+        QVERIFY(QFile::copy(tmp.filePath("library.sqlite"), copy + "/library.sqlite"));
+        auto r = Library::open(copy);
+        QCOMPARE(r.error, E::None);
+        QCOMPARE(r.library->setting("church.name"), QStringLiteral("Grace Church"));
     }
 
     void openingTwiceSkipsTheBackup()
