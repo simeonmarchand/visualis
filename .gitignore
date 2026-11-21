@@ -58,3 +58,5 @@ spikes/propresenter/proto-download/
 # MIDI spike build output and logs
 spikes/midi/build/
 spikes/midi/out/
+spikes/powerpoint/fonts-download/
+spikes/powerpoint/build/
