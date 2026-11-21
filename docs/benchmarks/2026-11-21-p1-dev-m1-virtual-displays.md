@@ -59,6 +59,24 @@ ProRes, 30 s runs:
 
 System sleep (`scripts/run-sleep-test.sh system`) needs someone to wake the Mac and hasn't been run yet.
 
+## 2-hour soaks (incomplete)
+
+`scripts/run-bench.sh <clip> 7200 --backend <name>`, four runs planned back to back from 00:43. Claude Code stopped the batch at 03:02, during the second run, because the whole Mac ran critically low on memory. Our app's memory stayed between 65 and 175 MB, and the cause wasn't identified. The FFmpeg runs didn't start.
+
+Late frames per 10 minutes, audience / stage (about 36,000 frames per output in each bin):
+
+| Time | darwin, 1080p30 H.264 | Note |
+|---|---|---|
+| 00:43–01:00 | 72 / 8504 | Video froze for 3.0, 3.2, and **11.5 s** at loop points around 00:58 (frames stopped arriving; the outputs kept drawing) |
+| 01:00–02:43, each bin | 2–13 / 1–9 | Clean for 1 h 43 min |
+
+| Time | darwin, 4K30 HEVC | Note |
+|---|---|---|
+| 02:43–03:02 | 13,199 / 2,484 | Bad from the start; a **13.5 s** video freeze at 03:02, as memory ran out |
+
+9. **The video can freeze for seconds while the outputs keep drawing.** Seen four times, all during periods of poor performance: the first 15 minutes of run 1 (cause unknown, possibly other activity on the Mac) and the end of run 2 (system out of memory). The 1 h 43 min in between was clean. This needs a rerun on a quiet machine. If freezes happen without outside pressure, it's a blocker. The real app also needs a watchdog that notices when video frames stop arriving.
+10. **No memory leak.** The app's resident memory went down over the run (175 → 65 MB) as macOS compressed it, with CPU steady at about 24%.
+
 ## Not covered by virtual displays
 
 - The church Mac's GPU and decode load, and 2-hour runs there.
