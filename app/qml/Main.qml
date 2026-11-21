@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Dialogs
 import QtQuick.Layouts
 import Visualis.Ui
 
@@ -26,6 +27,13 @@ Window {
         OutputController.addOutput("stage", stageOutput)
     }
 
+    FileDialog {
+        id: backgroundDialog
+        title: "Choose a background video"
+        nameFilters: ["Video (*.mp4 *.mov *.m4v)", "All files (*)"]
+        onAccepted: VideoEngine.source = selectedFile
+    }
+
     Text {
         anchors.centerIn: parent
         text: "Visualis"
@@ -41,6 +49,38 @@ Window {
         anchors.bottom: parent.bottom
         anchors.margins: 16
         spacing: 8
+
+        // Background video: a stopgap until the media library and service items.
+        RowLayout {
+            spacing: 12
+
+            Label {
+                text: "Background"
+                color: "#d0d3d8"
+                Layout.preferredWidth: 80
+            }
+            Button {
+                text: "Choose video…"
+                onClicked: backgroundDialog.open()
+            }
+            Button {
+                text: "None"
+                enabled: VideoEngine.source.toString() !== ""
+                onClicked: VideoEngine.source = ""
+            }
+            Label {
+                objectName: "backgroundStatus"
+                text: VideoEngine.status
+                color: "#8b8f96"
+            }
+        }
+
+        Label {
+            objectName: "backgroundAlert"
+            visible: VideoEngine.alert !== ""
+            text: VideoEngine.alert
+            color: "#e0b040"
+        }
 
         RowLayout {
             objectName: "identicalDisplays"

@@ -11,10 +11,13 @@ qt_add_qml_module(visualis_ui
     SOURCES
         output/outputcontroller.h output/outputcontroller.cpp
         output/platformdisplay.h
+        video/videoengine.h video/videoengine.cpp
 )
 # The generated QML type registrations include headers by file name alone.
-target_include_directories(visualis_ui PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/output)
-target_link_libraries(visualis_ui PRIVATE Qt6::Quick visualis_core)
+target_include_directories(visualis_ui PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/output
+    ${CMAKE_CURRENT_SOURCE_DIR}/video)
+# GuiPrivate for QRhi: the video hub's own GPU context (ADR 0001, kept in videoengine.cpp).
+target_link_libraries(visualis_ui PRIVATE Qt6::Quick Qt6::Multimedia Qt6::GuiPrivate visualis_core)
 if(APPLE)
     enable_language(OBJCXX)
     target_sources(visualis_ui PRIVATE output/platformdisplay_mac.mm)
@@ -29,5 +32,5 @@ set_target_properties(Visualis PROPERTIES
     MACOSX_BUNDLE_BUNDLE_VERSION ${PROJECT_VERSION}
     MACOSX_BUNDLE_SHORT_VERSION_STRING ${PROJECT_VERSION}
 )
-target_link_libraries(Visualis PRIVATE Qt6::Quick visualis_ui visualis_uiplugin visualis_core)
+target_link_libraries(Visualis PRIVATE Qt6::Quick Qt6::Multimedia visualis_ui visualis_uiplugin visualis_core)
 target_include_directories(Visualis PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

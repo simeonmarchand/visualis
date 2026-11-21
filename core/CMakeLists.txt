@@ -14,6 +14,7 @@ qt_add_library(visualis_core STATIC
     live/livestate.h live/livestate.cpp
     output/displayplacement.h output/displayplacement.cpp
     output/displaysettle.h output/displaysettle.cpp
+    video/framewatchdog.h video/framewatchdog.cpp
 )
 target_include_directories(visualis_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(visualis_core PUBLIC Qt6::Core Qt6::Sql)

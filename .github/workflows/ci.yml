@@ -26,6 +26,7 @@ jobs:
           host: mac
           target: desktop
           arch: clang_64
+          modules: qtmultimedia
           cache: true
 
       - name: Install Ninja
