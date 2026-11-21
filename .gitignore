@@ -54,3 +54,7 @@ spikes/propresenter/out/
 
 # ProPresenter spike: downloaded third-party schema (field numbers are credited in pro7.py)
 spikes/propresenter/proto-download/
+
+# MIDI spike build output and logs
+spikes/midi/build/
+spikes/midi/out/
