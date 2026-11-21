@@ -8,3 +8,4 @@ function(visualis_add_test name)
 endfunction()
 
 visualis_add_test(tst_uistartup Qt6::Quick visualis_ui visualis_uiplugin)
+visualis_add_test(tst_library visualis_core)

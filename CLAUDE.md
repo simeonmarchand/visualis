@@ -30,6 +30,7 @@ Work is tracked as GitHub issues on `simeonmarchand/visualis`, grouped by phase 
 2. Branch from `main`: `<issue number>-<short-slug>`, e.g. `12-song-data-model`.
 3. Commit in Conventional Commits style (`feat:`, `fix:`, `test:`, `docs:`, `chore:`, `refactor:`), explaining why.
 4. Open a pull request whose body says `Closes #<n>`, summarizes what changed and how it was tested, and lists anything left for later. Simeon reviews and merges; never merge or push to `main` directly.
+   CI (`.github/workflows/ci.yml`) builds, tests, and lints every pull request on macOS. GitHub can't enforce it on this private repo, so the rule is a convention: don't ask for a merge while the check is red, and wait for it to finish before saying a pull request is ready.
 5. If an issue turns out bigger or different than written, say so on the issue before going further.
 
 Labels: `type:` and `area:` describe the work; `needs-church`, `needs-hardware`, and `needs-decision` mean it's blocked on Simeon, the church, or hardware. Don't start those without asking.
