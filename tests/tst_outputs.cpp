@@ -97,6 +97,33 @@ private slots:
         QVERIFY2(bright > 100, qPrintable(QStringLiteral("%1 bright pixels").arg(bright)));
     }
 
+    void slidesCutByDefault()
+    {
+        QQuickWindow *w = output("audience");
+        m_live->show(sample(), {}, 1);
+        QTRY_COMPARE(shownLyrics(w), QStringLiteral("Joy to the world\nThe Lord is come"));
+        m_live->next();
+        // No waiting: the new slide is fully shown and the old one gone at once.
+        QCOMPARE(visibleLyrics(w)->opacity(), 1.0);
+        QCOMPARE(hiddenLyrics(w)->opacity(), 0.0);
+    }
+
+    void theFadeTransitionCrossfades()
+    {
+        auto *tmpl = m_engine->singletonInstance<QObject *>("Visualis.Ui", "LyricsTemplate");
+        QVERIFY(tmpl);
+        tmpl->setProperty("transition", "fade");
+        QQuickWindow *w = output("audience");
+        m_live->show(sample(), {}, 1);
+        QTRY_COMPARE(visibleLyrics(w)->opacity(), 1.0);
+        m_live->next();
+        QTest::qWait(50);
+        QVERIFY(visibleLyrics(w)->opacity() < 1.0);   // still fading in
+        QTRY_COMPARE(visibleLyrics(w)->opacity(), 1.0);
+        QTRY_COMPARE(hiddenLyrics(w)->opacity(), 0.0);
+        tmpl->setProperty("transition", "cut");
+    }
+
     void clearedTextLeavesTheAudienceAndStaysOnStage()
     {
         QQuickWindow *audience = output("audience");
@@ -203,6 +230,12 @@ private:
         if (!layer)
             return nullptr;
         return w->findChild<QQuickItem *>(layer->property("showingA").toBool() ? "lyricsA" : "lyricsB");
+    }
+
+    static QQuickItem *hiddenLyrics(QQuickWindow *w)
+    {
+        auto *layer = w->findChild<QObject *>("audienceLyrics");
+        return w->findChild<QQuickItem *>(layer->property("showingA").toBool() ? "lyricsB" : "lyricsA");
     }
 
     static QString shownLyrics(QQuickWindow *w)

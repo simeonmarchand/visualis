@@ -2,12 +2,13 @@ import QtQuick
 import QtQuick.Effects
 import Visualis.Ui
 
-// Centered lyrics inside the safe area, crossfading between slides. Two Text items take
-// turns: the new slide fades in on one while the old one fades out on the other.
+// Centered lyrics inside the safe area. Two Text items take turns, so with the "fade"
+// transition the new slide fades in on one while the old one fades out on the other;
+// with "cut" the swap is instant.
 Item {
     id: root
 
-    // What to show; empty fades the text out (cleared text, no slide).
+    // What to show; empty clears the text (cleared text, no slide).
     property string text: LiveState.hasSlide && !LiveState.textCleared ? LiveState.currentText : ""
     property bool showingA: true
 
@@ -37,7 +38,10 @@ Item {
         font.weight: LyricsTemplate.fontWeight
         lineHeight: LyricsTemplate.lineHeight
         color: LyricsTemplate.textColor
-        Behavior on opacity { NumberAnimation { duration: LyricsTemplate.fadeMs } }
+        Behavior on opacity {
+            enabled: LyricsTemplate.transition === "fade"
+            NumberAnimation { duration: LyricsTemplate.fadeMs }
+        }
     }
 
     Item {

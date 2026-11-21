@@ -24,7 +24,9 @@ QtObject {
     readonly property real shadowBlur: 0.5          // 0–1, MultiEffect's scale
     readonly property real shadowOffset: 0.003      // of the output's height, down and right
 
-    // Slide changes crossfade, so the screen never flashes blank between slides
+    // How the lyrics change between slides: "cut" (instant) or "fade" (crossfade over
+    // fadeMs). Writable so it can be set per template once templates are stored (Phase 3).
+    property string transition: "cut"
     readonly property int fadeMs: 300
     readonly property int backgroundFadeMs: 600
 }
