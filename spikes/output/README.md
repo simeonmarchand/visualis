@@ -72,5 +72,7 @@ First results: [docs/benchmarks/2026-11-20-p1-dev-m1-windowed.md](../../docs/ben
 
 A script is one step per line. The steps call the same commands as the operator window's keys and buttons, so the operator's real key presses and clicks aren't tested this way. Steps: `next`, `prev`, `goto <slide>`, `clear-text`, `background on|off`, `clear-all`, `mode shared|per-window`, `video <file>`, `assign <role> <screen key>`, `wait <ms>`, `snapshot <name>`, `expect <key> <op> <value>`, and `wait-for <key> <op> <value> [timeout ms]`. Operators are `=`, `!=`, `>=`, `<=`, and `~` (starts with). `src/scriptrunner.h` lists the state keys.
 
+`tests/hide-output.txt` hides the audience output mid-playback, as an unplugged display would, and checks that shared decoding keeps feeding the stage and resumes the audience when it comes back. Run it with `--video media/4k30-hevc.mp4 --video-mode shared --stage-video --script tests/hide-output.txt`. It ends by assigning the audience back to `Built-in Retina Display||`, so it only fits a Mac with that display.
+
 `assign` saves the display choice to the app's settings, the same as the operator window does. A snapshot stalls rendering for about 230 ms while Qt renders the window again to capture it, so keep snapshots out of measurement runs.
 

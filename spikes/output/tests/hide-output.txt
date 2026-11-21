@@ -1,0 +1,15 @@
+# Shared decoding keeps feeding one output while the other is hidden, as when its display is unplugged.
+# Run with: --video media/4k30-hevc.mp4 --video-mode shared --stage-video
+wait-for video-status ~ playing 5000
+wait 2000
+assign audience missing-display
+wait-for placement.audience ~ waiting 2000
+wait 3000
+expect fps.stage >= 55
+expect video-status ~ playing
+assign audience Built-in Retina Display||
+wait-for placement.audience ~ windowed 2000
+wait 3000
+expect fps.audience >= 55
+expect fps.stage >= 55
+snapshot restored

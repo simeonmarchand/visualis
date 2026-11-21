@@ -7,12 +7,14 @@
 #include <QQmlEngine>
 #include <QUrl>
 #include <QVideoSink>
+#include <rhi/qrhi.h>
 #include <memory>
 #include <vector>
 
 // Plays the looping background into each output's VideoOutput sink.
 //   shared:     one QMediaPlayer decodes into a hub sink; every frame is handed to all
-//               output sinks (QVideoFrame copies share the buffer, so no pixel copy).
+//               output sinks (QVideoFrame copies share the buffer, so no pixel copy). The hub
+//               has its own QRhi so frames stay GPU textures; see hubRhi().
 //   per-window: one QMediaPlayer per output, each writing straight to its sink.
 class VideoEngine : public QObject
 {
@@ -59,14 +61,18 @@ private:
         QString label;
         qint64 lastStartUs = -1;
         qint64 lastFrameNs = 0;
+        bool loggedFirstFrame = false;
     };
 
+    QRhi *hubRhi();
     void rebuild();
     void watchFrames(Player *p, QVideoSink *sink);
     void setStatus(const QString &status);
 
     static VideoEngine *s_instance;
     std::vector<Target> m_targets;
+    std::unique_ptr<QRhi> m_hubRhi; // declared before m_players so it outlives the decoder
+    bool m_hubRhiFailed = false;
     std::vector<std::unique_ptr<Player>> m_players;
     QElapsedTimer m_clock;
     QString m_mode;
@@ -75,4 +81,5 @@ private:
     QString m_status = QStringLiteral("no video");
     double m_lastLoopGapMs = -1;
     int m_loopCount = 0;
+    int m_rebuildGeneration = 0;
 };

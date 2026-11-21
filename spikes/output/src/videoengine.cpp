@@ -1,6 +1,8 @@
 #include "videoengine.h"
 #include "eventlog.h"
 
+#include <QTimer>
+#include <rhi/qrhi.h>
 #include <QVideoFrame>
 
 VideoEngine *VideoEngine::s_instance = nullptr;
@@ -64,8 +66,24 @@ void VideoEngine::setStatus(const QString &status)
     emit changed();
 }
 
+// The hub's own GPU context, so shared decoding doesn't depend on any output window being alive.
+// Its textures are drawn by the output windows' contexts; on Metal they share the one MTLDevice.
+QRhi *VideoEngine::hubRhi()
+{
+#ifdef Q_OS_APPLE
+    if (!m_hubRhi && !m_hubRhiFailed) {
+        QRhiMetalInitParams params;
+        m_hubRhi.reset(QRhi::create(QRhi::Metal, &params));
+        m_hubRhiFailed = !m_hubRhi;
+        EventLog::write(m_hubRhi ? "hub GPU context: own Metal QRhi" : "hub GPU context: Metal QRhi failed, borrowing an output's");
+    }
+#endif
+    return m_hubRhi.get();
+}
+
 void VideoEngine::rebuild()
 {
+    const int generation = ++m_rebuildGeneration; // a newer rebuild cancels a pending retry
     m_players.clear();
     for (auto &t : m_targets) {
         if (t.sink)
@@ -93,11 +111,32 @@ void VideoEngine::rebuild()
     };
 
     if (m_mode == "shared") {
+        // Without an RHI the hub gets frames in CPU memory (measured: ~2x CPU, ~2.5x memory at 4K).
+        QRhi *rhi = hubRhi();
+        if (!rhi) {
+            // Fallback: borrow an output window's. It only exists once that window's scene graph
+            // starts, and it dies with the window, so this path isn't safe across hot-plug.
+            for (auto &t : m_targets) {
+                if (t.sink && t.sink->rhi()) {
+                    rhi = t.sink->rhi();
+                    break;
+                }
+            }
+        }
+        if (!rhi) {
+            setStatus("waiting for output GPU context");
+            QTimer::singleShot(50, this, [this, generation] {
+                if (generation == m_rebuildGeneration)
+                    rebuild();
+            });
+            return;
+        }
         auto p = std::make_unique<Player>();
         p->label = "shared";
         p->player = std::make_unique<QMediaPlayer>();
         p->hub = std::make_unique<QVideoSink>();
         QVideoSink *hub = p->hub.get();
+        hub->setRhi(rhi);
         // Fan out on the decoder's thread: VideoOutput sinks accept frames from any thread.
         connect(hub, &QVideoSink::videoFrameChanged, hub, [this](const QVideoFrame &frame) {
             for (auto &t : m_targets) {
@@ -127,9 +166,18 @@ void VideoEngine::rebuild()
 // wall-clock gap between the last frame and the first frame of the next loop was.
 void VideoEngine::watchFrames(Player *p, QVideoSink *sink)
 {
-    connect(sink, &QVideoSink::videoFrameChanged, p->player.get(), [this, p](const QVideoFrame &frame) {
+    connect(sink, &QVideoSink::videoFrameChanged, p->player.get(), [this, p, sink](const QVideoFrame &frame) {
         if (!frame.isValid())
             return;
+        if (!p->loggedFirstFrame) {
+            // Tells whether the decoder hands over GPU textures or CPU memory (plan 5.6 question).
+            p->loggedFirstFrame = true;
+            EventLog::write(QStringLiteral("first frame %1: handle=%2 format=%3 sink-rhi=%4")
+                                .arg(p->label)
+                                .arg(frame.handleType() == QVideoFrame::RhiTextureHandle ? "rhi-texture" : "none")
+                                .arg(QVideoFrameFormat::pixelFormatToString(frame.pixelFormat()))
+                                .arg(sink->rhi() ? "yes" : "no"));
+        }
         const qint64 now = m_clock.nsecsElapsed();
         const qint64 startUs = frame.startTime();
         if (p->lastStartUs >= 0 && startUs >= 0 && startUs + 500'000 < p->lastStartUs) {
