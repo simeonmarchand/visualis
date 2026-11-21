@@ -57,7 +57,9 @@ ProRes, 30 s runs:
 
 8. **The real app should stop the displays idle-sleeping while presenting** (an `IOPMAssertion`), so this never happens mid-service. Whether Qt Multimedia already holds one during playback is unchecked.
 
-System sleep (`scripts/run-sleep-test.sh system`) needs someone to wake the Mac and hasn't been run yet.
+**System sleep** (`scripts/run-sleep-test.sh system`, #4): the Mac slept for about 4 minutes and was woken by a key press. Afterwards both outputs were back on their own displays with the video playing, and the app didn't crash. One check failed (stage at 29 fps six seconds after wake), and the cause was outside the app:
+
+13. **A USB-C monitor can reconnect over and over after wake.** The portable monitor disconnected and reconnected about once a second for at least 12 s after the Mac woke, then settled. Each change briefly freezes every output (0.3–0.9 s), even on other displays. The app should wait for the display setup to settle (about 2 s with no changes) before re-placing outputs, and tell the operator "displays are reconnecting" meanwhile (#19).
 
 ## 2-hour soaks (incomplete)
 
@@ -76,6 +78,18 @@ Late frames per 10 minutes, audience / stage (about 36,000 frames per output in 
 
 9. **The video can freeze for seconds while the outputs keep drawing.** Seen four times, all during periods of poor performance: the first 15 minutes of run 1 (cause unknown, possibly other activity on the Mac) and the end of run 2 (system out of memory). The 1 h 43 min in between was clean. This needs a rerun on a quiet machine. If freezes happen without outside pressure, it's a blocker. The real app also needs a watchdog that notices when video frames stop arriving.
 10. **No memory leak.** The app's resident memory went down over the run (175 → 65 MB) as macOS compressed it, with CPU steady at about 24%.
+
+## A real monitor and a real cable (#3)
+
+A 15.6" portable USB-C monitor ("W156F1", 1920x1080 at 60 Hz) as the audience output, with the stage on a virtual display, 1080p30 H.264 shared decoding, borderless. The cable was pulled and plugged back in by hand. All 11 checks passed.
+
+| Event | Audience | Stage (the other output) |
+|---|---|---|
+| Unplug | hidden about 50 ms after macOS reported the display gone | kept playing; froze 0.35 s |
+| Replug | back on the same monitor about 20 ms after macOS reported it, 60 fps | froze **0.84 s** |
+
+11. **A real replug freezes the other outputs longer than a virtual one** (0.84 s against 0.1–0.3 s). This is macOS reconfiguring its displays. Plugging a projector in mid-service could make the stage display hitch for nearly a second.
+12. **What identifies a display.** For both the built-in display and this real monitor, Qt reported only the **name**; manufacturer, model, and serial were empty. CoreGraphics reported more (vendor 25389, model 5478), but **serial 0**, which is common for portable and inexpensive monitors. The **macOS display UUID** (`CGDisplayCreateUUIDFromDisplayID`) and the display ID **were the same before and after the replug**. So the app should key displays by that UUID, keep the name for showing to the operator, and expect two identical serial-less monitors to possibly share a UUID. If that happens, it should tell them apart by position (#19, #20).
 
 ## Not covered by virtual displays
 
