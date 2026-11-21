@@ -1,0 +1,24 @@
+# Display or system sleep in the middle of playback. Run through scripts/run-sleep-test.sh,
+# which puts the Mac to sleep when this logs "mark sleep" and wakes it (or you do).
+
+assign audience Fake Audience||
+assign stage Fake Stage||
+wait-for video-status ~ playing 10000
+wait 3000
+expect fps.audience >= 55
+expect fps.stage >= 55
+mark sleep
+# The shell wakes the displays after about 15 s, so check after that. Timers don't run during a
+# system sleep, so after one this wait ends 20 s after wake. Virtual displays don't sleep with
+# the real ones, so display sleep here only shows that the app survives the event.
+wait 20000
+wait-for fps.audience >= 55 600000
+wait-for fps.stage >= 55 30000
+mark awake
+wait 5000
+expect fps.audience >= 55
+expect fps.stage >= 55
+expect placement.audience has on Fake Audience
+expect placement.stage has on Fake Stage
+expect video-status ~ playing
+snapshot after-wake

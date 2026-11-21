@@ -81,5 +81,11 @@ A script is one step per line. The steps call the same commands as the operator 
 
 The virtual displays come from `build/virtual-display` (`tools/virtual-display.m`), which uses `CGVirtualDisplay`, an undocumented macOS API. macOS treats each one like a plugged-in monitor until the process is killed, so plugging is starting it and unplugging is killing it. It's test tooling only and must never ship in the app. It can't stand in for the church Mac's GPU, real HDMI or projector behavior, or the phone-camera checks.
 
+### Benchmarks and sleep without external displays
+
+`./scripts/run-bench.sh <clip> <seconds> [app options]` runs the outputs fullscreen on two virtual displays, advancing slides every 2 s, keeps the Mac awake, and prints the summary. For the 2-hour acceptance runs use 7200 seconds.
+
+`./scripts/run-sleep-test.sh display` sleeps and wakes the displays mid-playback, unattended. `./scripts/run-sleep-test.sh system` puts the Mac to sleep; wake it by hand after about 15 s.
+
 `assign` saves the display choice to the app's settings, the same as the operator window does. The test scripts pass `--settings-dir` so tests never change the display choices of manual runs. A snapshot stalls rendering for about 230 ms while Qt renders the window again to capture it, so keep snapshots out of measurement runs.
 

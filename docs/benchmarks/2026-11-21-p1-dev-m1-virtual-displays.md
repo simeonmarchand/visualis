@@ -29,6 +29,36 @@ In every run, each output went back to its own display after a replug (by saved 
 5. **A display choice saved in windowed mode carries into fullscreen mode.** If an output was saved on the built-in screen, in fullscreen mode it waits with "assigned display is the operator screen" even when free displays exist. The real app should fall back to a free display, or ask.
 6. **Right after a display is added, Qt reports it with an empty name.** The name arrives with a geometry change a few milliseconds later. The spike places outputs again on that change, so it works, but the real app shouldn't treat the first "screen added" event as final.
 
+## All test clips, fullscreen on virtual displays
+
+`scripts/run-bench.sh <clip> 60`: borderless outputs on both virtual displays, shared decoding, stage video on, slides every 2 s, default backend (FFmpeg).
+
+| Clip | CPU mean | Peak memory | Late frames (audience / stage, of ~3540) | Command → swap, median | Loop gaps beyond one frame |
+|---|---|---|---|---|---|
+| 1080p30 H.264 | 23.2% | 135 MB | 1 / 2 | 16.1 ms | 16.2, 16.3 ms |
+| 1080p60 H.264 | 27.0% | 137 MB | 2 / 2 | 10.2 ms | 16.3, 16.3 ms |
+| 4K30 HEVC | 23.1% | 135 MB | 1 / 0 | 7.8 ms | 16.4, −0.5 ms |
+| 1080p30 ProRes 422 | 16.5% | 139 MB | 1 / **1472** (stage at 38.7 fps) | 23.4 ms | 18.3, 17.9 ms |
+
+ProRes, 30 s runs:
+
+| Backend | Mode | Late frames (audience / stage) |
+|---|---|---|
+| FFmpeg | shared | 1 / 2, then 227 / 1 (plus the 60 s run above) |
+| FFmpeg | per-window | 0 / 0 |
+| darwin (AVFoundation) | shared | 0 / 0 |
+| darwin (AVFoundation) | per-window | 0 / 0 |
+
+7. **FFmpeg with shared decoding paces ProRes badly, intermittently** (2 of 3 runs). Frames still arrive as GPU textures (`BGRA8888`, `rhi-texture`). FFmpeg decodes ProRes in software, so each frame is uploaded through the hub's own `QRhi`, which has no render loop pacing it. That's the likely cause, but not confirmed. AVFoundation uses Apple's ProRes decoder and was clean in both modes, as it was on every other clip. **This points to the darwin backend on macOS** for ADR 0001.
+
+## Sleep
+
+`scripts/run-sleep-test.sh display` turns the displays off with `pmset displaysleepnow` mid-playback and wakes them 15 s later. It passes: same placement, video still playing, 60 fps after wake. Both outputs stalled once for 1.1 s when the displays went off. Virtual displays don't sleep with the real ones, so the outputs kept rendering during the sleep. This only shows the app survives the event.
+
+8. **The real app should stop the displays idle-sleeping while presenting** (an `IOPMAssertion`), so this never happens mid-service. Whether Qt Multimedia already holds one during playback is unchecked.
+
+System sleep (`scripts/run-sleep-test.sh system`) needs someone to wake the Mac and hasn't been run yet.
+
 ## Not covered by virtual displays
 
 - The church Mac's GPU and decode load, and 2-hour runs there.
