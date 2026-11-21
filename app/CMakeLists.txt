@@ -3,6 +3,8 @@ qt_add_library(visualis_ui STATIC)
 qt_add_qml_module(visualis_ui
     URI Visualis.Ui
     VERSION 1.0
+    # Qt's QML tooling (qmllint) expects the build folder to match the module name.
+    OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/qml/Visualis/Ui
     QML_FILES
         qml/Main.qml
 )
