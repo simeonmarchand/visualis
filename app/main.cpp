@@ -1,6 +1,8 @@
 #include "output/outputcontroller.h"
+#include "video/videoengine.h"
 
 #include <QCommandLineParser>
+#include <QFileInfo>
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
 #include <QScreen>
@@ -11,18 +13,25 @@ Q_IMPORT_QML_PLUGIN(Visualis_UiPlugin)
 
 int main(int argc, char *argv[])
 {
+#ifdef Q_OS_MACOS
+    // AVFoundation, not Qt's default FFmpeg backend: it paced ProRes cleanly where FFmpeg
+    // didn't, and uses Apple's hardware decoders (ADR 0001). Must be set before Qt Multimedia starts.
+    if (!qEnvironmentVariableIsSet("QT_MEDIA_BACKEND"))
+        qputenv("QT_MEDIA_BACKEND", "darwin");
+#endif
     QGuiApplication app(argc, argv);
     QCoreApplication::setOrganizationName("Visualis");
     QCoreApplication::setApplicationName("Visualis");
 
-    // Test options, used by scripts/hotplug-test.sh.
+    // Test options, used by scripts/hotplug-test.sh and soak runs.
     QCommandLineParser parser;
     parser.addHelpOption();
     const QCommandLineOption settingsDirOpt("settings-dir",
         "Keep settings in an INI file in this directory instead of the user's preferences.", "dir");
     const QCommandLineOption assignOpt("assign",
         "Put an output on the display with this name, e.g. stage=\"Fake Stage\". Repeatable.", "role=name");
-    parser.addOptions({settingsDirOpt, assignOpt});
+    const QCommandLineOption backgroundOpt("background", "Play this video as the background.", "file");
+    parser.addOptions({settingsDirOpt, assignOpt, backgroundOpt});
     parser.process(app);
 
     if (parser.isSet(settingsDirOpt)) {
@@ -50,6 +59,10 @@ int main(int argc, char *argv[])
             if (!found)
                 qCWarning(lcOutput).noquote() << "--assign: no display named" << name;
         }
+    }
+    if (parser.isSet(backgroundOpt)) {
+        if (auto *video = engine.singletonInstance<VideoEngine *>("Visualis.Ui", "VideoEngine"))
+            video->setSource(QUrl::fromLocalFile(QFileInfo(parser.value(backgroundOpt)).absoluteFilePath()));
     }
     return app.exec();
 }

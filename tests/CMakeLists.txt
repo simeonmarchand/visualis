@@ -18,3 +18,11 @@ visualis_add_test(tst_songjson visualis_core)
 target_compile_definitions(tst_songjson PRIVATE FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
 visualis_add_test(tst_livestate visualis_core)
 visualis_add_test(tst_displayplacement visualis_core)
+visualis_add_test(tst_framewatchdog visualis_core)
+visualis_add_test(tst_videoengine Qt6::Multimedia visualis_ui visualis_core)
+target_include_directories(tst_videoengine PRIVATE ${CMAKE_SOURCE_DIR}/app)
+if(APPLE)
+    # AVFoundation delivers no frames under the offscreen platform. This test opens no
+    # windows, so the normal one is fine.
+    set_tests_properties(tst_videoengine PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=cocoa")
+endif()

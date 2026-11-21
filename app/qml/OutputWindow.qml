@@ -1,9 +1,14 @@
 import QtQuick
+import QtMultimedia
+import Visualis.Ui
 
-// An audience or stage output. OutputController places, shows, and hides it; the content
-// (lyrics over the background) arrives with the lyrics template in #22.
+// An audience or stage output. OutputController places, shows, and hides it; the lyrics
+// arrive with the template in #22.
 Window {
+    id: root
     required property string role
+    // The stage display shows text only (plan 5.5).
+    readonly property bool showsBackground: role === "audience"
 
     objectName: role + "Output"
     title: "Visualis " + role
@@ -12,4 +17,18 @@ Window {
     flags: Qt.Window | Qt.FramelessWindowHint
     color: "black"
     visible: false
+
+    // Background layer: independent of the text, so slide changes never touch it.
+    VideoOutput {
+        id: background
+        objectName: "background"
+        anchors.fill: parent
+        fillMode: VideoOutput.PreserveAspectCrop
+        visible: root.showsBackground
+    }
+
+    Component.onCompleted: {
+        if (showsBackground)
+            VideoEngine.addTarget(background.videoSink)
+    }
 }
