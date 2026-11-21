@@ -51,3 +51,6 @@ spikes/powerpoint/out/
 # ProPresenter spike: real song files are church content (and copyrighted lyrics), never committed
 spikes/propresenter/songs/
 spikes/propresenter/out/
+
+# ProPresenter spike: downloaded third-party schema (field numbers are credited in pro7.py)
+spikes/propresenter/proto-download/

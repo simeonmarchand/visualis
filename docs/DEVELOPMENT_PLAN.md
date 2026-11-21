@@ -456,10 +456,14 @@ Test media: 1080p30 H.264, 1080p60 H.264, 4K30 HEVC, and one ProRes file, since 
 
 ### 7.4 Migration from ProPresenter
 
-- No ProPresenter file parsing (out of scope). Migration paths:
-  1. Songs from Planning Center arrangements, if P3 confirms lyrics are available.
-  2. Plain-text lyrics import with section headers (covers copy-paste from any source, including ProPresenter's own text export, if it has one [Unverified]).
-  3. Manual re-entry for the remaining songs, done gradually by usage frequency. The 50 most used songs probably cover most Sundays [Assumption].
+Changed 2026-11-21: this section first ruled out reading ProPresenter files. The ProPresenter spike (`spikes/propresenter/`) read all 151 files of the church's library in 0.25 s with no failures, and P3 showed Planning Center usually has no lyrics as text, so `.pro` import is now the primary path.
+
+- Migration paths:
+  1. **ProPresenter 7 `.pro` import** (primary): songs with their groups (names and colors), slides, and arrangements. The format is undocumented protobuf; field numbers come from the MIT-licensed reverse-engineered schema (github.com/greyshirtguy/ProPresenter7-Proto), so the importer must fail soft and report files it can't read. Use the file name as the title (the name stored inside is often "Untitled").
+  2. Plain-text lyrics import with section headers (covers copy-paste from any source).
+  3. Manual entry.
+- Each week, Planning Center supplies the order: the import matches each song to the library, then matches Planning Center's sequence labels ("Pre Chorus 1") to the song's groups ("PreChorus") forgivingly, and lists what didn't match for the operator (5.2, 5.3).
+- ProPresenter text presentations (sermon notes, pasted scripture such as "Acts 16 22-26 NLT") import as plain text slides.
 - Media files are reused from their original folders by importing them into the library.
 - Templates are rebuilt by hand. There are usually only a few.
 
