@@ -2,8 +2,8 @@ import QtQuick
 import QtMultimedia
 import Visualis.Ui
 
-// An audience or stage output. OutputController places, shows, and hides it; the lyrics
-// arrive with the template in #22.
+// An audience or stage output: a view of LiveState (plan 5.2) that owns no state of its
+// own. OutputController places, shows, and hides it.
 Window {
     id: root
     required property string role
@@ -25,6 +25,19 @@ Window {
         anchors.fill: parent
         fillMode: VideoOutput.PreserveAspectCrop
         visible: root.showsBackground
+        opacity: LiveState.backgroundCleared ? 0 : 1
+        Behavior on opacity { NumberAnimation { duration: LyricsTemplate.backgroundFadeMs } }
+    }
+
+    AudienceLyrics {
+        objectName: "audienceLyrics"
+        anchors.fill: parent
+        visible: root.role === "audience"
+    }
+
+    StageDisplay {
+        anchors.fill: parent
+        visible: root.role === "stage"
     }
 
     Component.onCompleted: {

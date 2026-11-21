@@ -90,7 +90,7 @@ private slots:
     void lyricLinesThatMentionSectionsStayLyrics()
     {
         const PastedLyrics p = parsePastedLyrics(
-            "Verse 1\nBridge over the river wide\nThe chorus of the angels sings\nTag along with me\n");
+            "Verse 1\nBridge over the river wide\nThe chorus of the angels sings\nTag along with me\n", {4, {}});
         QCOMPARE(labels(p), QStringList{"Verse 1"});
         QCOMPARE(p.groups[0].slides[0].count('\n'), 2);   // all three lines kept as lyrics
     }
@@ -151,11 +151,19 @@ private slots:
                 out << s.count('\n') + 1;
             return out;
         };
-        QCOMPARE(sizes(parsePastedLyrics(lines(4))), QList<int>{4});
-        QCOMPARE(sizes(parsePastedLyrics(lines(6))), (QList<int>{3, 3}));      // not 4 + 2
-        QCOMPARE(sizes(parsePastedLyrics(lines(7))), (QList<int>{4, 3}));
-        QCOMPARE(sizes(parsePastedLyrics(lines(9))), (QList<int>{3, 3, 3}));
+        const PasteOptions four{4, {}};
+        QCOMPARE(sizes(parsePastedLyrics(lines(4), four)), QList<int>{4});
+        QCOMPARE(sizes(parsePastedLyrics(lines(6), four)), (QList<int>{3, 3}));      // not 4 + 2
+        QCOMPARE(sizes(parsePastedLyrics(lines(7), four)), (QList<int>{4, 3}));
+        QCOMPARE(sizes(parsePastedLyrics(lines(9), four)), (QList<int>{3, 3, 3}));
         QCOMPARE(sizes(parsePastedLyrics(lines(5), {2, {}})), (QList<int>{2, 2, 1}));
+    }
+
+    void defaultIsTwoLinesPerSlide()
+    {
+        const PastedLyrics p = parsePastedLyrics("Verse 1\nline 1\nline 2\nline 3\nline 4\n");
+        QCOMPARE(p.groups[0].slides.size(), 2);
+        QCOMPARE(p.groups[0].slides[0], QStringLiteral("line 1\nline 2"));
     }
 
     void songSelectPaste()

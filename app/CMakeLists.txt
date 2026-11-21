@@ -1,3 +1,5 @@
+set_source_files_properties(qml/LyricsTemplate.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
+
 # The UI is a QML module library so tests can load it without the app executable.
 qt_add_library(visualis_ui STATIC)
 qt_add_qml_module(visualis_ui
@@ -8,14 +10,18 @@ qt_add_qml_module(visualis_ui
     QML_FILES
         qml/Main.qml
         qml/OutputWindow.qml
+        qml/AudienceLyrics.qml
+        qml/StageDisplay.qml
+        qml/LyricsTemplate.qml
     SOURCES
         output/outputcontroller.h output/outputcontroller.cpp
         output/platformdisplay.h
         video/videoengine.h video/videoengine.cpp
+        live/livestateqml.h
 )
 # The generated QML type registrations include headers by file name alone.
 target_include_directories(visualis_ui PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/output
-    ${CMAKE_CURRENT_SOURCE_DIR}/video)
+    ${CMAKE_CURRENT_SOURCE_DIR}/video ${CMAKE_CURRENT_SOURCE_DIR}/live)
 # GuiPrivate for QRhi: the video hub's own GPU context (ADR 0001, kept in videoengine.cpp).
 target_link_libraries(visualis_ui PRIVATE Qt6::Quick Qt6::Multimedia Qt6::GuiPrivate visualis_core)
 if(APPLE)
