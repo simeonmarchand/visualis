@@ -12,5 +12,8 @@ enable_testing()
 add_subdirectory(core)
 add_subdirectory(app)
 add_subdirectory(tests)
+if(APPLE)
+    add_subdirectory(tools)
+endif()
 
 # spikes/ are throwaway prototypes with their own builds; they're not part of the app.
