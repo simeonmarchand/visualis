@@ -1,0 +1,19 @@
+{
+  "format": "visualis-song",
+  "version": 1,
+  "title": "Holy, Holy, Holy",
+  "credits": { "authors": "Reginald Heber, John Bacchus Dykes", "copyright": "Public Domain" },
+  "groups": [
+    { "label": "Verse 1", "color": "#0078cc", "slides": [
+      "Holy, holy, holy\nLord God Almighty",
+      "Early in the morning\nOur song shall rise to Thee"
+    ] },
+    { "label": "Chorus", "color": "#cc004f", "slides": [
+      "Holy, holy, holy\nMerciful and mighty",
+      "God in three persons\nBlessed Trinity"
+    ] },
+    { "label": "Spanish - Chorus", "color": "#cc004f", "slides": [
+      "¡Santo, santo, santo!\nGrande, compasivo"
+    ] }
+  ]
+}
