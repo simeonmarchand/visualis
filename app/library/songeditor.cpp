@@ -81,7 +81,7 @@ void SongEditor::applyLyrics(const QString &text)
     m_song = edit.song;
     m_warnings = edit.warnings;
     if (!m_arrangement.isNull() && !m_song.arrangement(m_arrangement))
-        m_arrangement = {};
+        m_arrangement = QUuid();
     save();
 }
 
@@ -215,7 +215,7 @@ void SongEditor::removeArrangement(const QString &id)
         return;
     m_song.arrangements.removeIf([&](const Arrangement &a) { return a.id == uuid; });
     if (m_song.defaultArrangement == uuid)
-        m_song.defaultArrangement = {};
+        m_song.defaultArrangement = QUuid();
     if (m_arrangement == uuid)
         m_arrangement = m_song.arrangements.isEmpty() ? QUuid() : m_song.arrangements.first().id;
     save();
@@ -265,7 +265,7 @@ bool SongEditor::deleteSong()
     if (!loaded() || !lib || !lib->removeSong(songId()))
         return false;
     m_song = Song{};
-    m_arrangement = {};
+    m_arrangement = QUuid();
     emit changed();
     emit lyricsReset();
     return true;
