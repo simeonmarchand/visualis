@@ -1,4 +1,7 @@
 #include "library/songlibrary.h"
+#include "live/commandsqml.h"
+#include "live/livestate.h"
+#include "live/recovery.h"
 #include "output/outputcontroller.h"
 #include "video/videoengine.h"
 
@@ -24,7 +27,7 @@ int main(int argc, char *argv[])
     QCoreApplication::setOrganizationName("Visualis");
     QCoreApplication::setApplicationName("Visualis");
 
-    // Test options, used by scripts/hotplug-test.sh and soak runs.
+    // Test options, used by scripts/hotplug-test.sh, scripts/crash-test.sh, and soak runs.
     QCommandLineParser parser;
     parser.addHelpOption();
     const QCommandLineOption settingsDirOpt("settings-dir",
@@ -34,7 +37,11 @@ int main(int argc, char *argv[])
     const QCommandLineOption backgroundOpt("background", "Play this video as the background.", "file");
     const QCommandLineOption libraryOpt("library",
         "Use the song library in this folder instead of ~/Documents/Visualis.", "dir");
-    parser.addOptions({settingsDirOpt, assignOpt, backgroundOpt, libraryOpt});
+    const QCommandLineOption journalOpt("journal",
+        "Keep the crash-recovery journal in this file instead of Application Support.", "file");
+    const QCommandLineOption commandOpt("command",
+        "Run an operator command after startup, e.g. next_slide or goto_slide=2. Repeatable.", "name[=arg]");
+    parser.addOptions({settingsDirOpt, assignOpt, backgroundOpt, libraryOpt, journalOpt, commandOpt});
     parser.process(app);
 
     if (parser.isSet(settingsDirOpt)) {
@@ -52,6 +59,17 @@ int main(int argc, char *argv[])
     if (auto *songs = engine.singletonInstance<SongLibrary *>("Visualis.Ui", "SongLibrary"))
         songs->openLibrary(parser.isSet(libraryOpt) ? parser.value(libraryOpt) : SongLibrary::defaultFolder());
 
+    // Back to what was live if the last run crashed (#25), then journal every change.
+    auto *live = engine.singletonInstance<visualis::LiveState *>("Visualis.Ui", "LiveState");
+    auto *video = engine.singletonInstance<VideoEngine *>("Visualis.Ui", "VideoEngine");
+    if (auto *recovery = engine.singletonInstance<Recovery *>("Visualis.Ui", "Recovery"); recovery && live) {
+        const QString journal = parser.isSet(journalOpt) ? parser.value(journalOpt) : Recovery::defaultJournalPath();
+        if (recovery->start(journal, live, video) && !live->songId().isEmpty()) {
+            if (auto *songs = engine.singletonInstance<SongLibrary *>("Visualis.Ui", "SongLibrary"))
+                songs->select(live->songId());   // the operator sees its slides (if it's in the library)
+        }
+    }
+
     if (auto *outputs = engine.singletonInstance<OutputController *>("Visualis.Ui", "OutputController")) {
         for (const QString &a : parser.values(assignOpt)) {
             const QString role = a.section('=', 0, 0);
@@ -67,9 +85,11 @@ int main(int argc, char *argv[])
                 qCWarning(lcOutput).noquote() << "--assign: no display named" << name;
         }
     }
-    if (parser.isSet(backgroundOpt)) {
-        if (auto *video = engine.singletonInstance<VideoEngine *>("Visualis.Ui", "VideoEngine"))
-            video->setSource(QUrl::fromLocalFile(QFileInfo(parser.value(backgroundOpt)).absoluteFilePath()));
+    if (parser.isSet(backgroundOpt) && video)
+        video->setSource(QUrl::fromLocalFile(QFileInfo(parser.value(backgroundOpt)).absoluteFilePath()));
+    if (auto *commands = engine.singletonInstance<Commands *>("Visualis.Ui", "Commands")) {
+        for (const QString &c : parser.values(commandOpt))
+            commands->run(c.section('=', 0, 0), c.contains('=') ? QVariant(c.section('=', 1)) : QVariant());
     }
     return app.exec();
 }

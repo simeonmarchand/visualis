@@ -25,6 +25,7 @@ qt_add_qml_module(visualis_ui
         video/videoengine.h video/videoengine.cpp
         live/livestateqml.h
         live/commandsqml.h live/commandsqml.cpp
+        live/recovery.h live/recovery.cpp
         library/songlibrary.h library/songlibrary.cpp
 )
 # The generated QML type registrations include headers by file name alone.

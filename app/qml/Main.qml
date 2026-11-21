@@ -83,6 +83,25 @@ Window {
         anchors.margins: 16
         spacing: 12
 
+        RowLayout {
+            objectName: "recoveryMessage"
+            Layout.fillWidth: true
+            visible: Recovery.message !== ""
+            spacing: 12
+
+            Label {
+                Layout.fillWidth: true
+                text: Recovery.message
+                wrapMode: Text.WordWrap
+                color: "#e0b040"
+            }
+            Button {
+                text: "OK"
+                focusPolicy: Qt.NoFocus
+                onClicked: Recovery.dismiss()
+            }
+        }
+
         Label {
             objectName: "libraryError"
             Layout.fillWidth: true
