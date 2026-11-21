@@ -45,6 +45,7 @@ Options:
 | `--fullscreen native\|borderless` | macOS native fullscreen (own Space) or a borderless window sized to the display. Default `native`. |
 | `--windowed` | Outputs as ordinary windows, allowed on the operator screen. Turned on automatically with only one display. |
 | `--log-dir <dir>` | Where logs go. Default `spike-logs/<timestamp>/` in the current directory. |
+| `--script <file>` | Run a test script (below), then quit. Exit code 1 if any check failed. |
 | `--auto-advance <seconds>` | Go to the next slide every N seconds, wrapping at the end. For soak runs without an operator. |
 
 ## Logs
@@ -64,3 +65,12 @@ GPU load isn't logged by the app. Watch it with `sudo powermetrics --samplers gp
 For each run: machine, macOS version, displays, backend, fullscreen mode, video file, video mode, run length, and the summary from `frames.csv` (total frames, total late, worst interval, mean CPU, peak memory). Measure no-video first (framework overhead), then video on one output, then two (decode and render cost).
 
 First results: [docs/benchmarks/2026-11-20-p1-dev-m1-windowed.md](../../docs/benchmarks/2026-11-20-p1-dev-m1-windowed.md).
+
+## Test scripts
+
+`./scripts/run-smoke.sh` runs `tests/operator-smoke.txt` (about 40 s, windows open on screen, nothing to press) and prints each check. Snapshots of every window after each step land in `spike-logs/smoke-<timestamp>/snapshots/`.
+
+A script is one step per line. The steps call the same commands as the operator window's keys and buttons, so the operator's real key presses and clicks aren't tested this way. Steps: `next`, `prev`, `goto <slide>`, `clear-text`, `background on|off`, `clear-all`, `mode shared|per-window`, `video <file>`, `assign <role> <screen key>`, `wait <ms>`, `snapshot <name>`, `expect <key> <op> <value>`, and `wait-for <key> <op> <value> [timeout ms]`. Operators are `=`, `!=`, `>=`, `<=`, and `~` (starts with). `src/scriptrunner.h` lists the state keys.
+
+`assign` saves the display choice to the app's settings, the same as the operator window does. A snapshot stalls rendering for about 230 ms while Qt renders the window again to capture it, so keep snapshots out of measurement runs.
+

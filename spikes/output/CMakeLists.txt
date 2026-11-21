@@ -25,6 +25,7 @@ qt_add_qml_module(visualis-output-spike
         src/framestats.h src/framestats.cpp
         src/videoengine.h src/videoengine.cpp
         src/outputcontroller.h src/outputcontroller.cpp
+        src/scriptrunner.h src/scriptrunner.cpp
 )
 
 # The generated QML type registrations include the headers by bare name.

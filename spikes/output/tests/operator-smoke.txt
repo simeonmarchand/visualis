@@ -1,0 +1,92 @@
+# Operator smoke test: rows 1-12 of the hand walkthrough, driven through the same
+# commands the keys and buttons call. Real key presses aren't covered here.
+# Run: ./scripts/run-smoke.sh   (paths are relative to spikes/output)
+
+# Startup
+wait-for placement.audience ~ windowed 3000
+wait-for placement.stage ~ windowed 3000
+expect slide = 1
+expect text-cleared = false
+expect background = true
+video media/1080p30-h264.mp4
+wait-for video-status ~ playing 5000
+wait 800
+snapshot start
+
+# Row 1: next crossfades in and the stage shows the new current/next
+next
+expect slide = 2
+wait 500
+snapshot slide-2
+
+# Row 2: previous, and it stops at slide 1
+prev
+prev
+expect slide = 1
+
+# Row 3: jump to a slide
+goto 7
+expect slide = 7
+wait 500
+snapshot slide-7
+
+# Row 4: clear text keeps the video
+clear-text
+expect text-cleared = true
+expect background = true
+wait 500
+snapshot text-cleared
+
+# Row 5: next brings the text back
+next
+expect slide = 8
+expect text-cleared = false
+
+# Row 6: background off and on, lyrics stay
+background off
+expect background = false
+wait 600
+snapshot background-off
+background on
+expect background = true
+
+# Row 7: clear all
+clear-all
+expect text-cleared = true
+expect background = false
+wait 600
+snapshot cleared-all
+next
+background on
+
+# Last slide: next doesn't go past 10
+goto 10
+next
+expect slide = 10
+
+# Row 9: per-window decoding
+mode per-window
+expect video-mode = per-window
+wait-for video-status ~ playing (per-window 5000
+wait 800
+snapshot per-window
+
+# Row 10: switch clip
+video media/4k30-hevc.mp4
+expect video-source = 4k30-hevc.mp4
+wait-for video-status ~ playing 5000
+wait 800
+snapshot hevc-4k
+
+# Row 12: frame rate and latency while it runs
+wait 2000
+expect fps.audience >= 55
+expect fps.stage >= 55
+expect late.audience <= 2
+expect exposed.audience = true
+expect exposed.stage = true
+expect last-latency-ms.audience <= 50
+
+# Row 11: the 20 s clip loops and the gap is measured
+wait-for loops >= 1 25000
+expect loop-gap-ms <= 40

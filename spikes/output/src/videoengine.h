@@ -41,6 +41,7 @@ public:
     void setBackgroundVisible(bool visible);
     QString status() const { return m_status; }
     double lastLoopGapMs() const { return m_lastLoopGapMs; }
+    int loopCount() const { return m_loopCount; }
 
 signals:
     void changed();
@@ -73,4 +74,5 @@ private:
     bool m_backgroundVisible = true;
     QString m_status = QStringLiteral("no video");
     double m_lastLoopGapMs = -1;
+    int m_loopCount = 0;
 };

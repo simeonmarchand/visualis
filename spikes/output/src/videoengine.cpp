@@ -141,6 +141,7 @@ void VideoEngine::watchFrames(Player *p, QVideoSink *sink)
                                 .arg(p->label).arg(wallMs, 0, 'f', 1).arg(nominalMs, 0, 'f', 1).arg(gapMs, 0, 'f', 1));
             QMetaObject::invokeMethod(this, [this, gapMs] {
                 m_lastLoopGapMs = gapMs;
+                ++m_loopCount;
                 emit loopGapChanged();
             }, Qt::QueuedConnection);
         }

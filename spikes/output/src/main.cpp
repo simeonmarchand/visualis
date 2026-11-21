@@ -2,6 +2,7 @@
 #include "framestats.h"
 #include "livestate.h"
 #include "outputcontroller.h"
+#include "scriptrunner.h"
 #include "videoengine.h"
 
 #include <QCommandLineParser>
@@ -14,6 +15,7 @@
 #include <QQuickWindow>
 #include <QTimer>
 #include <QVideoSink>
+#include <memory>
 
 static QVideoSink *videoSinkOf(QQuickWindow *window)
 {
@@ -47,7 +49,8 @@ int main(int argc, char *argv[])
     QCommandLineOption windowedOpt("windowed", "Outputs as ordinary windows (allowed on the operator screen).");
     QCommandLineOption logDirOpt("log-dir", "Log directory.", "dir");
     QCommandLineOption autoAdvanceOpt("auto-advance", "Go to the next slide every N seconds, wrapping (soak tests).", "seconds");
-    parser.addOptions({videoOpt, modeOpt, stageVideoOpt, backendOpt, fullscreenOpt, windowedOpt, logDirOpt, autoAdvanceOpt});
+    QCommandLineOption scriptOpt("script", "Run a test script, save snapshots to the log dir, then quit (exit 1 on a failed check).", "file");
+    parser.addOptions({videoOpt, modeOpt, stageVideoOpt, backendOpt, fullscreenOpt, windowedOpt, logDirOpt, autoAdvanceOpt, scriptOpt});
     parser.process(app);
 
     const QString videoMode = parser.value(modeOpt);
@@ -90,6 +93,7 @@ int main(int argc, char *argv[])
     struct OutputSpec { QString role; QString type; bool video; };
     const QList<OutputSpec> specs{{"audience", "AudienceOutput", true}, {"stage", "StageOutput", stageVideo}};
     QList<QObject *> created;
+    QMap<QString, QQuickWindow *> windowsByName{{"operator", qobject_cast<QQuickWindow *>(engine.rootObjects().first())}};
     for (const auto &spec : specs) {
         QQmlComponent component(&engine, "Visualis.Spike", spec.type);
         QObject *obj = component.createWithInitialProperties({{"showVideo", spec.video}});
@@ -99,6 +103,7 @@ int main(int argc, char *argv[])
             return 1;
         }
         created << obj;
+        windowsByName[spec.role] = window;
         frameStats.track(window, spec.role);
         outputs.addOutput(spec.role, window);
         if (spec.video) {
@@ -125,6 +130,12 @@ int main(int argc, char *argv[])
         });
         autoAdvance.start(int(seconds * 1000));
         EventLog::write(QStringLiteral("auto-advance every %1 s").arg(seconds));
+    }
+
+    std::unique_ptr<ScriptRunner> script;
+    if (parser.isSet(scriptOpt)) {
+        script = std::make_unique<ScriptRunner>(parser.value(scriptOpt), logDir, windowsByName);
+        script->start();
     }
 
     const int result = app.exec();
