@@ -43,7 +43,7 @@ int main(int argc, char *argv[])
             bool found = false;
             for (const QVariant &d : outputs->displays()) {
                 if (d.toMap().value("label").toString().startsWith(name + " (")) {
-                    outputs->assign(role, d.toMap().value("key").toString());
+                    outputs->assign(role, d.toMap().value("ref").toString());
                     found = true;
                 }
             }

@@ -82,7 +82,8 @@ unplug 3
 plug "Fake Stage" 2
 wait_for "stage placed on Fake Stage" 6
 
-# Not covered: a display coming back at a different resolution. macOS gives a virtual display
+# Not covered: identical monitors (macOS refuses two virtual displays with the same serial;
+# tst_displayplacement covers the rules), and a display coming back at a different resolution. macOS gives a virtual display
 # a new UUID when its mode changes, which a real monitor (identified by its EDID) doesn't do.
 mark "audience display unplugged and replugged"
 unplug 1
