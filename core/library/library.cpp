@@ -168,6 +168,25 @@ const std::vector<Migration> &Library::migrations()
              " group_id TEXT NOT NULL REFERENCES song_group(id) ON DELETE CASCADE,"
              " PRIMARY KEY (arrangement_id, position)) WITHOUT ROWID",
              "CREATE INDEX arrangement_step_group ON arrangement_step(group_id)"}},
+        // Services (plan 5.2, #50). An item refers to what it shows by id (`ref_id`), not by a
+        // foreign key, because it may be a song, media, or a presentation; a song item whose
+        // song is gone loads as a placeholder (ServiceStore).
+        {3, {"CREATE TABLE service ("
+             " id TEXT PRIMARY KEY, title TEXT NOT NULL, date TEXT NOT NULL DEFAULT '',"
+             " pco_plan_id TEXT NOT NULL DEFAULT '', pco_service_type_id TEXT NOT NULL DEFAULT '',"
+             " last_imported_at TEXT NOT NULL DEFAULT '',"
+             " created_at TEXT NOT NULL, updated_at TEXT NOT NULL)",
+             "CREATE INDEX service_date ON service(date)",
+             "CREATE TABLE service_item ("
+             " id TEXT PRIMARY KEY, service_id TEXT NOT NULL REFERENCES service(id) ON DELETE CASCADE,"
+             " position INTEGER NOT NULL, kind TEXT NOT NULL, title TEXT NOT NULL DEFAULT '',"
+             " ref_id TEXT NOT NULL DEFAULT '', arrangement_id TEXT NOT NULL DEFAULT '',"
+             " custom_sequence TEXT NOT NULL DEFAULT '[]',"   // JSON array of group labels
+             " body TEXT NOT NULL DEFAULT '', service_position TEXT NOT NULL DEFAULT '',"
+             " pco_item_id TEXT NOT NULL DEFAULT '',"
+             " overrides TEXT NOT NULL DEFAULT '{}', import_snapshot TEXT NOT NULL DEFAULT '{}')",
+             "CREATE INDEX service_item_service ON service_item(service_id, position)",
+             "CREATE INDEX service_item_pco ON service_item(pco_item_id)"}},
     };
     return all;
 }
