@@ -56,6 +56,16 @@ private slots:
         QCOMPARE(live.groupColor(), QStringLiteral("#0078cc"));
     }
 
+    void songIdNamesTheLiveSong()
+    {
+        LiveState live;
+        QVERIFY(live.songId().isEmpty());
+        Song s = sample();
+        s.id = QUuid::createUuid();
+        live.show(s);
+        QCOMPARE(live.songId(), s.id.toString(QUuid::WithoutBraces));
+    }
+
     void nextCrossesGroups()
     {
         LiveState live;

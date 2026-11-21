@@ -13,15 +13,22 @@ qt_add_qml_module(visualis_ui
         qml/AudienceLyrics.qml
         qml/StageDisplay.qml
         qml/LyricsTemplate.qml
+        qml/OutputSettings.qml
+        qml/SongListPane.qml
+        qml/PasteSongDialog.qml
+        qml/SlideGrid.qml
+        qml/SlideTile.qml
     SOURCES
         output/outputcontroller.h output/outputcontroller.cpp
         output/platformdisplay.h
         video/videoengine.h video/videoengine.cpp
         live/livestateqml.h
+        library/songlibrary.h library/songlibrary.cpp
 )
 # The generated QML type registrations include headers by file name alone.
 target_include_directories(visualis_ui PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/output
-    ${CMAKE_CURRENT_SOURCE_DIR}/video ${CMAKE_CURRENT_SOURCE_DIR}/live)
+    ${CMAKE_CURRENT_SOURCE_DIR}/video ${CMAKE_CURRENT_SOURCE_DIR}/live
+    ${CMAKE_CURRENT_SOURCE_DIR}/library)
 # GuiPrivate for QRhi: the video hub's own GPU context (ADR 0001, kept in videoengine.cpp).
 target_link_libraries(visualis_ui PRIVATE Qt6::Quick Qt6::Multimedia Qt6::GuiPrivate visualis_core)
 if(APPLE)

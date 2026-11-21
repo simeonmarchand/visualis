@@ -1,3 +1,4 @@
+#include "library/songlibrary.h"
 #include "output/outputcontroller.h"
 #include "video/videoengine.h"
 
@@ -31,7 +32,9 @@ int main(int argc, char *argv[])
     const QCommandLineOption assignOpt("assign",
         "Put an output on the display with this name, e.g. stage=\"Fake Stage\". Repeatable.", "role=name");
     const QCommandLineOption backgroundOpt("background", "Play this video as the background.", "file");
-    parser.addOptions({settingsDirOpt, assignOpt, backgroundOpt});
+    const QCommandLineOption libraryOpt("library",
+        "Use the song library in this folder instead of ~/Documents/Visualis.", "dir");
+    parser.addOptions({settingsDirOpt, assignOpt, backgroundOpt, libraryOpt});
     parser.process(app);
 
     if (parser.isSet(settingsDirOpt)) {
@@ -44,6 +47,10 @@ int main(int argc, char *argv[])
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app,
                      [] { QCoreApplication::exit(1); }, Qt::QueuedConnection);
     engine.loadFromModule("Visualis.Ui", "Main");
+
+    // After the window is up, so a library that can't be opened shows its error there.
+    if (auto *songs = engine.singletonInstance<SongLibrary *>("Visualis.Ui", "SongLibrary"))
+        songs->openLibrary(parser.isSet(libraryOpt) ? parser.value(libraryOpt) : SongLibrary::defaultFolder());
 
     if (auto *outputs = engine.singletonInstance<OutputController *>("Visualis.Ui", "OutputController")) {
         for (const QString &a : parser.values(assignOpt)) {
