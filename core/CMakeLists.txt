@@ -13,6 +13,7 @@ qt_add_library(visualis_core STATIC
     song/songstore.h song/songstore.cpp
     live/livestate.h live/livestate.cpp
     live/commands.h live/commands.cpp
+    live/livejournal.h live/livejournal.cpp
     output/displayplacement.h output/displayplacement.cpp
     output/displaysettle.h output/displaysettle.cpp
     video/framewatchdog.h video/framewatchdog.cpp

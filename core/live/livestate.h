@@ -37,6 +37,10 @@ public:
     // live so the operator can pick another slide.
     bool show(const Song &song, const QUuid &arrangement = {}, int index = 0);
 
+    // Puts back a state saved earlier (crash recovery, #25): the song at that slide with its
+    // clears. An index that no longer fits leaves the song live with no slide, as show() does.
+    void restore(const Song &song, const QUuid &arrangement, int index, bool textCleared, bool backgroundCleared);
+
     // Step through the slides, crossing groups. At either end nothing changes and they
     // return false. A step shows the text again if it was cleared.
     Q_INVOKABLE bool next();
@@ -57,6 +61,7 @@ public:
     Q_INVOKABLE void showBackground();
 
     const Song &song() const { return m_song; }
+    QUuid arrangementId() const { return m_arrangement; }   // as passed to show(); null for the default
     const QList<SongSlide> &slides() const { return m_slides; }
     const SongSlide *currentSlide() const;   // null when no slide is showing
 
@@ -81,6 +86,7 @@ private:
     bool moveTo(int n);
 
     Song m_song;
+    QUuid m_arrangement;
     QList<SongSlide> m_slides;
     int m_index = -1;
     bool m_textCleared = false;

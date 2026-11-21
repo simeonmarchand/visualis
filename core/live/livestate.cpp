@@ -10,12 +10,25 @@ LiveState::LiveState(QObject *parent)
 bool LiveState::show(const Song &song, const QUuid &arrangement, int index)
 {
     m_song = song;
+    m_arrangement = arrangement;
     m_slides = songSlides(song, arrangement);
     const bool valid = index >= 0 && index < m_slides.size();
     m_index = valid ? index : -1;
     m_textCleared = false;
     emit changed();
     return valid;
+}
+
+void LiveState::restore(const Song &song, const QUuid &arrangement, int index, bool textCleared,
+                        bool backgroundCleared)
+{
+    m_song = song;
+    m_arrangement = arrangement;
+    m_slides = songSlides(song, arrangement);
+    m_index = index >= 0 && index < m_slides.size() ? index : -1;
+    m_textCleared = textCleared;
+    m_backgroundCleared = backgroundCleared;
+    emit changed();
 }
 
 bool LiveState::next()
