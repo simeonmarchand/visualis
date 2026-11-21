@@ -11,6 +11,7 @@ qt_add_library(visualis_core STATIC
     import/rtf.h import/rtf.cpp
     import/propresenter.h import/propresenter.cpp
     song/songstore.h song/songstore.cpp
+    live/livestate.h live/livestate.cpp
 )
 target_include_directories(visualis_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(visualis_core PUBLIC Qt6::Core Qt6::Sql)
