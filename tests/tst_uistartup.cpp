@@ -43,6 +43,10 @@ private slots:
             QVERIFY2(output, name);
             QVERIFY2(!output->isVisible(), name);
         }
+        // Nothing showing, so nothing holds the displays awake (#26).
+        auto *outputs = engine.singletonInstance<QObject *>("Visualis.Ui", "OutputController");
+        QVERIFY(outputs);
+        QVERIFY(!outputs->property("keepingDisplaysAwake").toBool());
     }
 };
 

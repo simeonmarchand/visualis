@@ -4,6 +4,26 @@
 #include <QWindow>
 
 #import <AppKit/AppKit.h>
+#include <IOKit/pwr_mgt/IOPMLib.h>
+
+bool DisplaySleepBlocker::setActive(bool active)
+{
+    if (active == isActive())
+        return true;
+    if (!active) {
+        IOPMAssertionRelease(m_id);
+        m_id = 0;
+        return true;
+    }
+    IOPMAssertionID id = kIOPMNullAssertionID;
+    const IOReturn result = IOPMAssertionCreateWithName(kIOPMAssertionTypePreventUserIdleDisplaySleep,
+                                                        kIOPMAssertionLevelOn,
+                                                        CFSTR("Visualis is presenting to an output display"), &id);
+    if (result != kIOReturnSuccess)
+        return false;
+    m_id = id;
+    return true;
+}
 
 QString displayKey(const QScreen *screen)
 {

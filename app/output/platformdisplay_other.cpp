@@ -8,3 +8,8 @@ QString displayKey(const QScreen *screen)
 }
 
 void raiseAboveMenuBar(QWindow *) {}
+
+bool DisplaySleepBlocker::setActive(bool)
+{
+    return true;   // not implemented off macOS yet
+}

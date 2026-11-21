@@ -3,6 +3,7 @@
 #include "output/displayplacement.h"
 #include "output/displaysettle.h"
 #include "output/latencyprobe.h"
+#include "output/platformdisplay.h"
 
 #include <QLoggingCategory>
 #include <QObject>
@@ -37,6 +38,8 @@ class OutputController : public QObject
     // Role -> a line for the operator, e.g. "On W156F1" or "Waiting: display not connected".
     Q_PROPERTY(QVariantMap status READ status NOTIFY placementChanged)
     Q_PROPERTY(bool settling READ settling NOTIFY settlingChanged)
+    // True while an output is showing, so the displays are kept from sleeping (#26).
+    Q_PROPERTY(bool keepingDisplaysAwake READ keepingDisplaysAwake NOTIFY placementChanged)
     // Names of identical connected displays (same identity, told apart only by position)
     // that the operator hasn't yet confirmed are on the right outputs.
     Q_PROPERTY(QStringList identicalDisplays READ identicalDisplays NOTIFY displaysChanged)
@@ -58,6 +61,7 @@ public:
     QVariantMap assignments() const;
     QVariantMap status() const { return m_status; }
     bool settling() const { return m_settle.isSettling(); }
+    bool keepingDisplaysAwake() const { return m_sleepBlocker.isActive(); }
     QStringList identicalDisplays() const;
 
 signals:
@@ -76,11 +80,13 @@ private:
     void place(const QString &role, QQuickWindow *window, const visualis::OutputPlacement &p);
     void setStatus(const QString &role, const QString &status);
     void saveChoices() const;
+    void updateSleepBlocker();
 
     visualis::DisplaySettle m_settle;
     QPointer<QQuickWindow> m_operator;
     QMap<QString, QPointer<QQuickWindow>> m_outputs;
     QList<LatencyProbe *> m_probes;
+    DisplaySleepBlocker m_sleepBlocker;
     QMap<QString, visualis::DisplayChoice> m_choices;   // saved ones plus this session's defaults
     QMap<QString, visualis::OutputPlacement> m_placements;
     QStringList m_confirmedIdentical;   // display keys

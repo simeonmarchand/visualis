@@ -37,7 +37,7 @@ target_link_libraries(visualis_ui PRIVATE Qt6::Quick Qt6::Multimedia Qt6::GuiPri
 if(APPLE)
     enable_language(OBJCXX)
     target_sources(visualis_ui PRIVATE output/platformdisplay_mac.mm)
-    target_link_libraries(visualis_ui PRIVATE "-framework AppKit")
+    target_link_libraries(visualis_ui PRIVATE "-framework AppKit" "-framework IOKit")
 else()
     target_sources(visualis_ui PRIVATE output/platformdisplay_other.cpp)
 endif()
