@@ -36,10 +36,12 @@ From a sandbox organization with one hand-made plan (2026-11-21). Not yet from t
 6. **There's no scripture item type.** A reading is a plain item whose title is the reference ("Acts 2:38"). The P5 parser picks out the reference and rejects other titles, so the import can recognize scripture items. Real titles may wrap the reference in other words ("Scripture Reading: Acts 2:38"), so the parser will need to find a reference inside a title.
 7. **Every plan has a link back to Planning Center** (`planning_center_url`), useful for an "open in Planning Center" button.
 
-## Still to learn (needs songs in a plan)
+8. **Songs come with full credits**, as from a SongSelect import: CCLI number, authors, copyright (with stray leading spaces to trim), key, BPM, meter, and length.
+9. **The arrangement sequence is the full song map**, with repeats and sections that have no lyrics: "Intro, Verse 1, Verse 2, Pre Chorus 1, Chorus, Turnaround, … Bridge 1, Bridge 1, … Interlude ×7, Refrain ×3, Chorus, Ending" (36 entries). Lyric-less sections (Intro, Turnaround, Interlude, Ending) need to become blank slides or be skipped.
+10. **Lyrics usually aren't in Planning Center as text.** The arrangement's lyrics field held only placeholder text, and the real lyrics were a PDF attachment. Sections are derived from labels in that text, so without labelled lyrics everything is one "General" section. **Planning Center is the source of the order (songs, sequence, key), not the lyrics.** Lyrics and groups will come from the ProPresenter library (plan 7.4) and editing in Visualis. The import has to match Planning Center's sequence labels ("Pre Chorus 1") to the library's group names ("Pre-Chorus"), forgivingly, and show the operator what didn't match.
+11. **Attachments list filename, type, and what they're attached to** (`Arrangement`, `Item`, and so on). Sermon decks will mostly come from a file the pastor sends, not from a plan attachment, so pulling them from Planning Center is a bonus path.
 
-- Whether arrangement lyrics and section labels come through, and how sections are marked (plan 6.4).
-- How the sequence ("V1 C V2 C B C") maps to the lyric sections.
-- CCLI numbers, authors, and copyright, for the CCLI line on slides.
-- What attachments look like for a sermon item (the `.pptx` for P4).
-- What a lower-permission token can't see.
+## Still to learn
+
+- Real church data with a church token: several songs, item notes, and what a lower-permission token can't see.
+- Downloading an attachment (needs a separate "open" request per file).

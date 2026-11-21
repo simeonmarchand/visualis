@@ -117,8 +117,8 @@ def main():
                 "item_sequence": a.get("custom_arrangement_sequence"),  # this service's order, if changed
                 "lyrics": fa.get("lyrics"), "chord_chart": bool(fa.get("chord_chart")),
                 "bpm": fa.get("bpm"), "meter": fa.get("meter"), "length_s": fa.get("length"),
-                "sections": sections.get("data", [{}])[0].get("attributes", {}).get("sections")
-                            if sections.get("data") else None,
+                # One object, not a list: {"sections": [{"label", "lyrics", "breaks_at"}, ...]}
+                "sections": (sections.get("data") or {}).get("attributes", {}).get("sections"),
             }
         if key:
             entry["key"] = key["attributes"].get("name") or a.get("key_name")
