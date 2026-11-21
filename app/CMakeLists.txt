@@ -7,8 +7,21 @@ qt_add_qml_module(visualis_ui
     OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/qml/Visualis/Ui
     QML_FILES
         qml/Main.qml
+        qml/OutputWindow.qml
+    SOURCES
+        output/outputcontroller.h output/outputcontroller.cpp
+        output/platformdisplay.h
 )
+# The generated QML type registrations include headers by file name alone.
+target_include_directories(visualis_ui PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/output)
 target_link_libraries(visualis_ui PRIVATE Qt6::Quick visualis_core)
+if(APPLE)
+    enable_language(OBJCXX)
+    target_sources(visualis_ui PRIVATE output/platformdisplay_mac.mm)
+    target_link_libraries(visualis_ui PRIVATE "-framework AppKit")
+else()
+    target_sources(visualis_ui PRIVATE output/platformdisplay_other.cpp)
+endif()
 
 qt_add_executable(Visualis MACOSX_BUNDLE WIN32 main.cpp)
 set_target_properties(Visualis PROPERTIES
@@ -17,3 +30,4 @@ set_target_properties(Visualis PROPERTIES
     MACOSX_BUNDLE_SHORT_VERSION_STRING ${PROJECT_VERSION}
 )
 target_link_libraries(Visualis PRIVATE Qt6::Quick visualis_ui visualis_uiplugin visualis_core)
+target_include_directories(Visualis PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

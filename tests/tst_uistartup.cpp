@@ -27,6 +27,23 @@ private slots:
         QVERIFY(QTest::qWaitForWindowExposed(window));
         QVERIFY2(warnings.isEmpty(), qPrintable(warnings.value(0).toString()));
     }
+
+    // The offscreen platform has one display, which the operator window is on, so both
+    // outputs must stay hidden rather than cover it.
+    void outputsNeverCoverTheOperatorScreen()
+    {
+        QQmlApplicationEngine engine;
+        engine.loadFromModule("Visualis.Ui", "Main");
+        auto *root = qobject_cast<QQuickWindow *>(engine.rootObjects().value(0));
+        QVERIFY(root);
+        QVERIFY(QTest::qWaitForWindowExposed(root));
+
+        for (const char *name : {"audienceOutput", "stageOutput"}) {
+            auto *output = root->findChild<QQuickWindow *>(name);
+            QVERIFY2(output, name);
+            QVERIFY2(!output->isVisible(), name);
+        }
+    }
 };
 
 QTEST_MAIN(UiStartup)
