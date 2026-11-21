@@ -44,10 +44,10 @@ Each workflow has an ID used later in the feature list and roadmap.
 - **W1. Prepare service from Planning Center.** Operator picks a service type and a plan date. The app imports the ordered items (songs, headers, media, other items), their titles, and for songs the Planning Center song and arrangement identity. It shows the result as a service list.
 - **W2. Match songs to the library.** Each imported song is matched to a library song, first by stored Planning Center song ID, then by CCLI number, then by fuzzy title. Unmatched items become visible **placeholders** that can be filled later (create a new song from pasted lyrics, link to an existing song, or leave as a blank slide). Re-importing the same plan updates order without destroying manual work.
 - **W3. Edit songs and slides.** Edit lyrics by section (Verse 1, Chorus, Bridge), set the arrangement order (V1 C V2 C B C), split sections into slides, and preview the result in the assigned template.
-- **W4. Edit templates (themes).** Define text style, safe area, and layout for audience lyrics, scripture, lower thirds, and stage display. Change a template once and every song using it updates.
+- **W4. Edit templates (themes).** Define the text style (font, size, weight, color, shadow and outline), where each text box sits on the screen, the safe area, and the transitions (cut, fade, and others) for audience lyrics, scripture, lower thirds, and stage display. Change a template once and every song using it updates. A slide can override any of these for itself without changing the template (5.4).
 - **W5. Show scripture.** Look up a passage (e.g. "John 3:16-18"), choose one or more translations, auto-split into slides by length, and show with reference and attribution.
 - **W6. Import and show a sermon PowerPoint.** Import a `.pptx` received during the week (often late Saturday). It shows faithfully as slides on the audience screen and appears in the stage display with notes if available.
-- **W7. Backgrounds.** Assign a still image or looping video background to a song, a section, or the whole service. Lyrics change without restarting or glitching the background video.
+- **W7. Backgrounds.** Assign a still image or looping video background to a song, a section, or the whole service, or click a media item (motion or still) to put it up on its own. Lyrics change without restarting or glitching the background video. Slides are layered like a Photoshop file: a lyric slide that has no background of its own leaves the current background alone, so a motion clicked before a song keeps playing under every lyric slide (5.2).
 - **W8. Live output.** Send the audience presentation to the main projector or TV and a different stage layout to the stage monitor, each fullscreen on its assigned display. Optionally show a lower third, routed per template to the main screen, the livestream output, or both.
 - **W9. Operate the service.** Click slides, use the keyboard (arrows, space, number keys, clear shortcuts) and a presentation clicker (which usually sends keystrokes). Clear text, clear background, go to black, and go to logo with one action each.
 - **W10. MIDI automation.** Playback (MultiTracks) or Ableton Live sends MIDI cues over a virtual or hardware MIDI port. The app maps them to actions such as next slide, go to slide N of the current song, jump to a song section, select a service item, or clear. The operator can always override.
@@ -78,6 +78,7 @@ These exist to answer the risks in section 6. They are not features.
 - Text slide editor: text boxes in a template, without free-form design tools.
 - Scripture: KJV stored locally; NLT, CSB, NKJV, and ESV through pasted passages or a licensed API source (see 7.1); multi-translation display, either side by side or alternating slides (W5).
 - PowerPoint import as **non-editable rendered slides** through LibreOffice, plus direct PDF import, with speaker notes extracted for the stage display (W6). See 5.7.
+- Layered slides: background, content (lyrics, scripture, slides), and lower third are separate layers. A slide changes only the layers it carries, and each layer can be cleared on its own (W7, 5.2).
 - Still and video backgrounds with loop, mute, and fade; backgrounds survive slide changes (W7).
 - Audience output, one stage output, and a livestream output window (W8).
 - Lower thirds that can be routed to the main screen, the livestream output, or both, chosen per template and overridable per item. The livestream output can show lower thirds over a solid key color or a transparent-style black background for the encoder (W8).
@@ -158,10 +159,12 @@ Acceptance criteria:
 
 ### Phase 3: Templates and backgrounds (about 5 to 7 weeks)
 
-Deliverables: template editor (text styles, safe areas, layouts), per-item and per-service background assignment, video loop engine from the winning P1 approach, media library with thumbnails, and fade transitions.
+Deliverables: template editor (font, size, weight, color, shadow and outline, alignment, each text box's position and size on screen, safe areas), per-slide overrides of those, per-layer transitions (cut by default, fade, and others) set per template and overridable per slide, still-image backgrounds, media items that set the background layer, per-item and per-service background assignment, video loop engine from the winning P1 approach, and a media library with thumbnails.
 
 Acceptance criteria:
-- Changing the lyrics template's font updates every song in the open service.
+- Changing the lyrics template's font updates every song in the open service, except properties a slide overrides.
+- A motion or still image clicked before a song stays up, unchanged and without restarting, through every lyric slide of that song.
+- Moving the lyrics text box in the template moves it on every slide that uses the template.
 - A 2-hour run of a real service, with lyrics changing every 5 to 15 seconds over looping video, shows no background restart and no visible stutter.
 - Missing media shows a clear warning before the service, not a black screen during it.
 
@@ -278,6 +281,16 @@ Service { id, title, date, pco_plan_id?, pco_service_type_id?, last_imported_at 
 Rendering pipeline (shared by preview and live output):
 `ServiceItem → expand (arrangement or passage or deck) → Slide[] → apply Template → Layers {background, content, lower_third} → Output(role)`.
 
+**Layers.** A slide is layered like a Photoshop file, and each layer is live on its own:
+
+| Layer | Holds | Set by |
+|---|---|---|
+| `background` | a looping video or a still image | a media item, or a song, section, or service default |
+| `content` | lyrics, scripture, a text or presentation slide | each slide |
+| `lower_third` | a name or announcement bar | lower-third items (Phase 6) |
+
+The rule: **a slide changes only the layers it carries.** A lyric slide with no background of its own leaves the live background alone, so a motion clicked before a song keeps playing, unrestarted, under every lyric slide. A song or section with a default background sets it when it goes live; clicking a media item replaces it. Each layer clears on its own (`clear_text` clears `content`, `clear_background` clears `background`), and each layer changes with its own transition (5.4). Later layers (props, a logo) follow the same rule.
+
 The key rule is that **outputs are views of one live state**. The live state holds the current item, slide index, and layer contents. The audience, stage, and lower-third outputs each render that state through their own layout. Nothing in an output window owns state, so a crashed or reopened window just re-renders.
 
 ### 5.3 Planning Center import
@@ -293,8 +306,10 @@ The key rule is that **outputs are views of one live state**. The live state hol
 
 ### 5.4 Slide editor and template system
 
-- Templates are declarative JSON: named text regions (frame, font, size range, alignment, shadow/outline, line-height, auto-shrink), plus a background slot and safe-area margins. Stored in the library and versioned.
-- The slide editor in v1 edits **text and region assignment only**. Free-form design (shapes, arbitrary images) is later. This keeps the editor small and makes every song consistent.
+- Templates are declarative JSON: named text regions, each with a frame (where it sits on screen and how big it is), font family, size range, weight, color, alignment, shadow/outline, line-height, and auto-shrink; plus a background slot, safe-area margins, and a transition per layer. Stored in the library and versioned.
+- **Transitions** are set per layer in the template and can be overridden per slide: `cut` (the default; Simeon prefers direct cuts), `fade` with a duration, and others later (e.g. slide or dissolve). The background layer's transition is separate from the text's.
+- **Per-slide overrides:** a slide can override any template property (font, size, weight, color, position, transition) for itself. Overridden properties stick; everything else still follows the template, so changing the template updates every slide except what each slide overrides. The editor shows which properties a slide overrides and can reset them.
+- Free-form design (shapes, arbitrary images on the content layer) is later. Styling and positioning text regions, per template and per slide, is in scope.
 - Lyrics editing is text-first: a plain-text editor with `[Verse 1]` style headers and blank-line slide breaks, with a live preview. This is fast for volunteers and easy to import from Planning Center, SongSelect exports, or ProPresenter text exports.
 - Text rendering must handle auto-fit, explicit line breaks, and non-Latin scripts. Qt Quick Text and Skia both do shaping via HarfBuzz [Unverified for Avalonia].
 
@@ -308,7 +323,8 @@ The key rule is that **outputs are views of one live state**. The live state hol
 
 ### 5.6 Still-image and video backgrounds
 
-- The background layer is independent of the content layer, so changing slides never touches the video.
+- The background layer is independent of the content layer, so changing slides never touches the video. A background stays until something replaces or clears it: a media item, a song or section default, or `clear_background` (5.2, Layers).
+- **Stills and video:** the background layer shows either a looping video or a still image. Switching between them uses the background layer's transition.
 - **Decode once, show many:** where possible, one decoder feeds every output that shows the same background. In Qt, `QMediaPlayer` has a single output [Verified], so P1 must test a `QVideoSink` that fans frames out to several scene-graph textures, versus one player per window kept roughly in sync.
 - **Seamless looping:** `QMediaPlayer.loops = Infinite` exists [Verified], but whether the loop point is gapless is not documented. Test it in P1. A fallback is two players crossfading.
 - **Media pipeline:** on import, probe the codec, resolution, frame rate, and duration. Generate thumbnails. Warn about codecs that won't hardware-decode on the target machine. Optionally offer to transcode to a known-good profile (e.g. H.264 or HEVC 1080p) with an external FFmpeg, as a later feature.
@@ -345,7 +361,7 @@ Rendering PDF pages needs a PDF rasterizer in the app. Qt PDF is a candidate, bu
 
 ### 5.8 Keyboard, mouse, and MIDI input
 
-- **Command layer:** every operator action is a named command (`next_slide`, `prev_slide`, `goto_slide(n)`, `goto_section(label)`, `goto_item(n)`, `clear_text`, `clear_background`, `clear_all`, `black`, `logo`). Keyboard shortcuts, mouse clicks, clicker keys, and MIDI all dispatch the same commands. This gives one place for logging, testing, and an "ignore external input" safety switch.
+- **Command layer:** every operator action is a named command (`next_slide`, `prev_slide`, `goto_slide(n)`, `goto_section(label)`, `goto_item(n)`, `show_background(media)`, `clear_text`, `clear_background`, `clear_all`, `black`, `logo`). Keyboard shortcuts, mouse clicks, clicker keys, and MIDI all dispatch the same commands. This gives one place for logging, testing, and an "ignore external input" safety switch.
 - **Keyboard:** shortcuts work when the operator window is focused. Global hotkeys when other apps are focused are a later item and need macOS Accessibility permission [Unverified].
 - **MIDI:** CoreMIDI through RtMidi (C++) or the chosen stack's equivalent. The app listens on chosen sources and optionally creates its own virtual destination (supported on CoreMIDI) [Verified: RtMidi docs]. On macOS the IAC Driver lets apps on the same Mac exchange MIDI over named buses [Verified: Apple Audio MIDI Setup guide]. Ableton can send Program Change messages [Verified: Ableton help article title; read the article during P2].
 - **What Playback sends:** cues have an editable MIDI bus, message type, value, and velocity [Verified: MultiTracks help center], but the exact message types available must be confirmed in P2. Their default cues are designed for ProPresenter playlists; the app must define its **own** mapping scheme rather than copying ProPresenter's.
@@ -524,6 +540,7 @@ Decided by Simeon on 2026-11-21 unless marked open.
 | D9 | Which presentation computer and displays the church uses | **Open.** Record the model, macOS version, and display models during Phase 0. |
 | D10 | Planning Center sign-in for other churches | **Open, later.** Tokens first; OAuth approach (PKCE, exchange service, or per-church app) decided after checking Planning Center's support (7.5). |
 | D11 | Paying for code signing (Apple Developer Program, later a Windows certificate) | **Open, later.** Only needed when other churches start downloading builds. |
+| D12 | Slide layers and template editing | **Layered like Photoshop**: a slide changes only the layers it carries, so a background clicked before a song survives its lyric slides (5.2). Users edit font, size, weight, position, and transitions per template, and can override them per slide (5.4). **Cuts by default**, fade and others as options. |
 
 ---
 
