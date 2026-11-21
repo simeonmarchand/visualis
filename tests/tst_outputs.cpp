@@ -1,4 +1,5 @@
 #include "live/livestate.h"
+#include "output/latencyprobe.h"
 
 #include <QJSValue>
 #include <QQmlApplicationEngine>
@@ -197,6 +198,27 @@ private slots:
         QCOMPARE(video->opacity(), 1.0);
         m_live->clearBackground();
         QTRY_COMPARE(video->opacity(), 0.0);
+    }
+
+    // #24 acceptance: a command reaches the output's next frame in under 50 ms.
+    void commandsReachTheOutputQuickly()
+    {
+        QQuickWindow *w = output("audience");
+        m_live->show(sample(), {}, 1);
+        QTest::qWait(200);
+        LatencyProbe probe(w, "audience");
+        QSignalSpy measured(&probe, &LatencyProbe::measured);
+        QList<double> times;
+        for (int i = 0; i < 5; ++i) {
+            probe.arm("next_slide");
+            i % 2 ? m_live->previous() : m_live->next();
+            QVERIFY(measured.wait(1000));
+            times << measured.takeFirst().at(2).toDouble();
+            QTest::qWait(50);
+        }
+        qInfo() << "command -> frame, ms:" << times;
+        for (double ms : times)
+            QVERIFY2(ms < 50, qPrintable(QString::number(ms)));
     }
 
     // Plan 5.2: an output owns no state, so a reopened window shows what's live.

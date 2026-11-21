@@ -1,3 +1,4 @@
+pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -17,6 +18,56 @@ Window {
     color: "#1e1f22"
 
     onClosing: Qt.quit()   // visible output windows would otherwise keep the app running
+
+    // Keys (#24). Application-wide, so they work whichever window has focus; buttons, lists,
+    // and the grid don't take focus, so Space never presses a button instead (P1 keyboard
+    // test, row 8). While typing in a text field the keys type instead, and while a dialog
+    // is open even Esc belongs to the dialog.
+    readonly property bool editingText: activeFocusItem instanceof TextInput || activeFocusItem instanceof TextEdit
+    readonly property bool keysEnabled: !editingText && !songList.dialogOpen
+
+    Shortcut {
+        sequences: ["Right", "Down", "Space", "PgDown"]   // clickers send Page Down / Page Up
+        context: Qt.ApplicationShortcut
+        enabled: root.keysEnabled
+        onActivated: Commands.run("next_slide")
+    }
+    Shortcut {
+        sequences: ["Left", "Up", "PgUp"]
+        context: Qt.ApplicationShortcut
+        enabled: root.keysEnabled
+        onActivated: Commands.run("prev_slide")
+    }
+    Shortcut {
+        sequence: "C"
+        context: Qt.ApplicationShortcut
+        enabled: root.keysEnabled
+        onActivated: Commands.run("clear_text")
+    }
+    Shortcut {
+        sequence: "B"
+        context: Qt.ApplicationShortcut
+        enabled: root.keysEnabled
+        onActivated: Commands.run("clear_background")
+    }
+    Shortcut {
+        sequence: "Esc"   // the panic key: works even while typing in search
+        context: Qt.ApplicationShortcut
+        enabled: !songList.dialogOpen
+        onActivated: Commands.run("clear_all")
+    }
+    // Shift + a group's first letter: Shift+C the next Chorus, Shift+V the next Verse...
+    Instantiator {
+        model: 26
+        delegate: Shortcut {
+            required property int index
+            readonly property string letter: String.fromCharCode(65 + index)
+            sequence: "Shift+" + letter
+            context: Qt.ApplicationShortcut
+            enabled: root.keysEnabled
+            onActivated: Commands.run("goto_group", letter)
+        }
+    }
 
     OutputWindow { id: audienceOutput; role: "audience" }
     OutputWindow { id: stageOutput; role: "stage" }
@@ -47,6 +98,7 @@ Window {
             spacing: 16
 
             SongListPane {
+                id: songList
                 // Fixed width: the grid gets the rest.
                 Layout.preferredWidth: 300
                 Layout.maximumWidth: 300

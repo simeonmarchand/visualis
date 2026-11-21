@@ -43,11 +43,18 @@ public:
     Q_INVOKABLE bool previous();
     // Also brings back cleared text when n is the current slide.
     Q_INVOKABLE bool goToSlide(int n);
+    // Jumps to the start of the next group whose label starts with `letter` (ignoring
+    // case), searching ahead of the current slide and wrapping to the start, so pressing it
+    // again steps Verse 1 -> Verse 2 and "go to Chorus" works when the arrangement doesn't
+    // have it next. False when no group in the arrangement starts with it.
+    Q_INVOKABLE bool goToGroupStartingWith(const QString &letter);
 
     // Clearing keeps the song and position, so Next carries on from where it was.
     Q_INVOKABLE void clearText();
     Q_INVOKABLE void clearBackground();
     Q_INVOKABLE void clearAll();
+    // Brings a cleared background back (plan 5.8 show_background).
+    Q_INVOKABLE void showBackground();
 
     const Song &song() const { return m_song; }
     const QList<SongSlide> &slides() const { return m_slides; }

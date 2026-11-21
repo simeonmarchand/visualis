@@ -12,6 +12,7 @@ qt_add_library(visualis_core STATIC
     import/propresenter.h import/propresenter.cpp
     song/songstore.h song/songstore.cpp
     live/livestate.h live/livestate.cpp
+    live/commands.h live/commands.cpp
     output/displayplacement.h output/displayplacement.cpp
     output/displaysettle.h output/displaysettle.cpp
     video/framewatchdog.h video/framewatchdog.cpp

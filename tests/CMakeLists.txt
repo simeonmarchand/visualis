@@ -9,6 +9,7 @@ endfunction()
 
 visualis_add_test(tst_uistartup Qt6::Quick visualis_ui visualis_uiplugin)
 visualis_add_test(tst_outputs Qt6::Quick visualis_ui visualis_uiplugin visualis_core)
+target_include_directories(tst_outputs PRIVATE ${CMAKE_SOURCE_DIR}/app)
 visualis_add_test(tst_library visualis_core)
 visualis_add_test(tst_songs visualis_core)
 visualis_add_test(tst_labels visualis_core)

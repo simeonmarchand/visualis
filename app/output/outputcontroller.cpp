@@ -107,8 +107,17 @@ void OutputController::setOperatorWindow(QQuickWindow *window)
 void OutputController::addOutput(const QString &role, QQuickWindow *window)
 {
     m_outputs[role] = window;
+    auto *probe = new LatencyProbe(window, role, this);
+    connect(probe, &LatencyProbe::measured, this, &OutputController::latencyMeasured);
+    m_probes.append(probe);
     if (!m_settle.isSettling())
         placeAll();
+}
+
+void OutputController::markCommand(const QString &command)
+{
+    for (LatencyProbe *probe : std::as_const(m_probes))
+        probe->arm(command);
 }
 
 void OutputController::assign(const QString &role, const QString &ref)

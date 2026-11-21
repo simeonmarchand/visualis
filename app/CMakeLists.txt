@@ -21,8 +21,10 @@ qt_add_qml_module(visualis_ui
     SOURCES
         output/outputcontroller.h output/outputcontroller.cpp
         output/platformdisplay.h
+        output/latencyprobe.h output/latencyprobe.cpp
         video/videoengine.h video/videoengine.cpp
         live/livestateqml.h
+        live/commandsqml.h live/commandsqml.cpp
         library/songlibrary.h library/songlibrary.cpp
 )
 # The generated QML type registrations include headers by file name alone.

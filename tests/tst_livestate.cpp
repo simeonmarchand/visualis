@@ -1,3 +1,4 @@
+#include "live/commands.h"
 #include "live/livestate.h"
 
 #include <QSignalSpy>
@@ -20,6 +21,25 @@ Song sample()
     };
     const auto &g = s.groups;
     s.arrangements = {Arrangement{QUuid::createUuid(), "Default", {g[0].id, g[1].id, g[2].id, g[2].id}, {}}};
+    return s;
+}
+
+// Verse 1 (2 slides), Chorus, Verse 2, Bridge, and a Tag the arrangement doesn't use,
+// arranged V1 C V2 C B C. Slides: 0 V1a, 1 V1b, 2 C, 3 V2, 4 C, 5 B, 6 C.
+Song arranged()
+{
+    Song s;
+    s.title = "Arranged";
+    s.groups = {
+        Group{QUuid::createUuid(), "Verse 1", "", {"v1a", "v1b"}},
+        Group{QUuid::createUuid(), "Chorus", "", {"c"}},
+        Group{QUuid::createUuid(), "Verse 2", "", {"v2"}},
+        Group{QUuid::createUuid(), "Bridge", "", {"b"}},
+        Group{QUuid::createUuid(), "Tag", "", {"t"}},
+    };
+    const auto &g = s.groups;
+    s.arrangements = {Arrangement{QUuid::createUuid(), "Default",
+                                  {g[0].id, g[1].id, g[2].id, g[1].id, g[3].id, g[1].id}, {}}};
     return s;
 }
 
@@ -54,6 +74,100 @@ private slots:
         QCOMPARE(live.nextText(), QStringLiteral("Let earth receive her King"));
         QCOMPARE(live.groupLabel(), QStringLiteral("Verse 1"));
         QCOMPARE(live.groupColor(), QStringLiteral("#0078cc"));
+    }
+
+    void goToGroupJumpsToTheNextOneAhead()
+    {
+        LiveState live;
+        live.show(arranged(), {}, 3);   // Verse 2
+        QVERIFY(live.goToGroupStartingWith("c"));
+        QCOMPARE(live.slideIndex(), 4);   // the Chorus after Verse 2, not the first one
+        QVERIFY(live.goToGroupStartingWith("C"));
+        QCOMPARE(live.slideIndex(), 6);
+        QVERIFY(live.goToGroupStartingWith("c"));   // none ahead: wraps to the first
+        QCOMPARE(live.slideIndex(), 2);
+    }
+
+    void goToGroupStepsThroughGroupsWithTheSameLetter()
+    {
+        LiveState live;
+        live.show(arranged(), {}, 0);
+        QVERIFY(live.goToGroupStartingWith("v"));
+        QCOMPARE(live.groupLabel(), QStringLiteral("Verse 2"));
+        QVERIFY(live.goToGroupStartingWith("v"));
+        QCOMPARE(live.groupLabel(), QStringLiteral("Verse 1"));
+        QCOMPARE(live.slideIndex(), 0);   // its first slide
+    }
+
+    void goToGroupFromTheMiddleOfAGroupGoesToTheNextStart()
+    {
+        LiveState live;
+        live.show(arranged(), {}, 1);   // second slide of Verse 1
+        QVERIFY(live.goToGroupStartingWith("b"));
+        QCOMPARE(live.slideIndex(), 5);
+    }
+
+    void goToGroupNotInTheArrangementDoesNothing()
+    {
+        LiveState live;
+        live.show(arranged(), {}, 2);
+        QSignalSpy spy(&live, &LiveState::changed);
+        QVERIFY(!live.goToGroupStartingWith("t"));   // Tag isn't arranged
+        QVERIFY(!live.goToGroupStartingWith("x"));
+        QVERIFY(!live.goToGroupStartingWith(""));
+        QCOMPARE(live.slideIndex(), 2);
+        QCOMPARE(spy.count(), 0);
+    }
+
+    void goToGroupBringsBackClearedText()
+    {
+        LiveState live;
+        live.show(arranged(), {}, 0);
+        live.clearText();
+        QVERIFY(live.goToGroupStartingWith("c"));
+        QVERIFY(!live.textCleared());
+    }
+
+    void showBackgroundUndoesClearBackground()
+    {
+        LiveState live;
+        live.clearAll();
+        live.showBackground();
+        QVERIFY(!live.backgroundCleared());
+        QVERIFY(live.textCleared());   // only the background layer
+    }
+
+    void commandsRunByName()
+    {
+        LiveState live;
+        live.show(arranged(), {}, 0);
+        QVERIFY(runCommand(live, "next_slide"));
+        QCOMPARE(live.slideIndex(), 1);
+        QVERIFY(runCommand(live, "prev_slide"));
+        QVERIFY(runCommand(live, "goto_slide", 5));
+        QCOMPARE(live.slideIndex(), 5);
+        QVERIFY(runCommand(live, "goto_group", "Chorus"));   // only the first letter counts
+        QCOMPARE(live.slideIndex(), 6);
+        QVERIFY(runCommand(live, "clear_text"));
+        QVERIFY(live.textCleared());
+        QVERIFY(runCommand(live, "clear_background"));
+        QVERIFY(live.backgroundCleared());
+        QVERIFY(runCommand(live, "show_background"));
+        QVERIFY(!live.backgroundCleared());
+        QVERIFY(runCommand(live, "clear_all"));
+        QVERIFY(live.textCleared() && live.backgroundCleared());
+    }
+
+    void badCommandsAreRefused()
+    {
+        LiveState live;
+        live.show(arranged(), {}, 6);
+        QVERIFY(!runCommand(live, "next_slide"));       // already at the end
+        QVERIFY(!runCommand(live, "goto_slide"));       // no index
+        QVERIFY(!runCommand(live, "goto_slide", "x"));
+        QVERIFY(!runCommand(live, "launch_rockets"));
+        QCOMPARE(live.slideIndex(), 6);
+        QCOMPARE(commandNames().size(), 8);
     }
 
     void songIdNamesTheLiveSong()
