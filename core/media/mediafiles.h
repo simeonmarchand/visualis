@@ -34,6 +34,11 @@ struct PartialCopy {
 PartialCopy copyToPartial(const QString &source, const QString &mediaFolder, qint64 maxBytes,
                           const std::atomic_bool *stop = nullptr);
 
+// media/.partial/ as an absolute path, created if `create`; empty if it's missing or isn't the
+// library's own folder (a link elsewhere). Copies are staged there, inside media/, so
+// publishing is a rename on one filesystem.
+QString partialFolder(const QString &mediaFolder, bool create);
+
 // A new, unique path in media/.partial/ ending in `suffix` (e.g. ".jpg"), for a file that's
 // published later.
 QString newPartialPath(const QString &mediaFolder, const QString &suffix);
@@ -60,7 +65,8 @@ struct Publish {
     bool ok() const { return error.isEmpty(); }
 };
 
-// Moves a partial copy to `relative` (validated) in the media folder. When a file is already
+// Moves a partial copy to `relative` (validated) in the media folder, by a rename that never
+// falls back to copying: one across volumes fails instead. When a file is already
 // there of the same size, it's the same content (the name is the hash). That's another import
 // winning a race, or a file left by a crash. The partial is then dropped and `existed` is set.
 Publish publishPartial(const QString &partialPath, const QString &mediaFolder, const QString &relative);

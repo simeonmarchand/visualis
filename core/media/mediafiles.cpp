@@ -10,11 +10,30 @@
 #include <QTimeZone>
 #include <QUuid>
 
+#include <cerrno>
+#include <cstdio>
+
 namespace visualis {
 
 namespace {
 constexpr qint64 kChunkBytes = 1024 * 1024;
 const QString kPartialFolder = QStringLiteral(".partial");
+
+// Renames within one filesystem, or fails. QFile::rename falls back to copying when the two
+// paths are on different volumes, which for a video would be a multi-GB copy on the GUI
+// thread (#97 review); a failed rename instead fails the import.
+bool renameWithoutCopying(const QString &from, const QString &to, int *error)
+{
+#ifdef Q_OS_WIN
+    const bool ok = _wrename(reinterpret_cast<const wchar_t *>(QDir::toNativeSeparators(from).utf16()),
+                             reinterpret_cast<const wchar_t *>(QDir::toNativeSeparators(to).utf16()))
+                    == 0;
+#else
+    const bool ok = ::rename(QFile::encodeName(from).constData(), QFile::encodeName(to).constData()) == 0;
+#endif
+    *error = ok ? 0 : errno;
+    return ok;
+}
 
 QString extensionOf(const QString &fileName)
 {
@@ -41,6 +60,14 @@ std::optional<MediaAsset::Kind> mediaKindFor(const QString &fileName)
     return std::nullopt;
 }
 
+QString partialFolder(const QString &mediaFolder, bool create)
+{
+    if (create && (!QDir().mkpath(mediaFolder) || !QDir(mediaFolder).mkpath(kPartialFolder)))
+        return {};
+    const QString path = containedPath(mediaFolder, kPartialFolder);
+    return !path.isEmpty() && QFileInfo(path).isDir() ? path : QString();
+}
+
 QString newPartialPath(const QString &mediaFolder, const QString &suffix)
 {
     return QDir(mediaFolder).filePath(kPartialFolder + '/' + QUuid::createUuid().toString(QUuid::WithoutBraces) + suffix);
@@ -59,8 +86,8 @@ PartialCopy copyToPartial(const QString &source, const QString &mediaFolder, qin
                         .arg(in.size() / (1024 * 1024)).arg(maxBytes / (1024 * 1024));
         return out;
     }
-    if (!QDir(mediaFolder).mkpath(kPartialFolder)) {
-        out.error = QStringLiteral("couldn't create the media folder");
+    if (partialFolder(mediaFolder, true).isEmpty()) {
+        out.error = QStringLiteral("the media folder's .partial folder is missing, or a link elsewhere");
         return out;
     }
     out.extension = extensionOf(source);
@@ -167,12 +194,15 @@ Publish publishPartial(const QString &partialPath, const QString &mediaFolder, c
         }
         if (QFileInfo::exists(target))   // a damaged leftover of the wrong size: replace it
             QFile::remove(target);
-        if (QFile::rename(partialPath, target))
+        int error = 0;
+        if (renameWithoutCopying(partialPath, target, &error))
             return out;
         // Another import may have published the same content first.
         if (!sameAlreadyThere()) {
             QFile::remove(partialPath);
-            out.error = QStringLiteral("couldn't move the copy into the media folder");
+            out.error = error == EXDEV
+                            ? QStringLiteral("part of the media folder is on another disk, so the copy can't be moved in")
+                            : QStringLiteral("couldn't move the copy into the media folder");
             return out;
         }
     }
@@ -183,10 +213,14 @@ Publish publishPartial(const QString &partialPath, const QString &mediaFolder, c
 
 void removeStalePartialCopies(const QString &mediaFolder, std::chrono::seconds olderThan)
 {
-    const QDir partial(QDir(mediaFolder).filePath(kPartialFolder));
+    // Only the library's own folder: never one a link points at (#97 review).
+    const QString folder = partialFolder(mediaFolder, false);
+    if (folder.isEmpty())
+        return;
+    const QDir partial(folder);
     const QDateTime cutoff = QDateTime::currentDateTimeUtc().addSecs(olderThan.count() * -1);
     for (const QFileInfo &f : partial.entryInfoList(QDir::Files | QDir::Hidden | QDir::System)) {
-        if (f.lastModified(QTimeZone::UTC) < cutoff)
+        if (!f.isSymLink() && f.lastModified(QTimeZone::UTC) < cutoff)
             QFile::remove(f.absoluteFilePath());
     }
 }

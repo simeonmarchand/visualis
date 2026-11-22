@@ -183,6 +183,26 @@ private slots:
         QVERIFY(QFile::exists(fresh));
     }
 
+    // #97 review, second pass (H1): a .partial that's a link elsewhere is neither swept nor
+    // copied into.
+    void aSymlinkedPartialFolderIsNeverUsed()
+    {
+        QTemporaryDir in, media, outside;
+        const QString victim = writeFile(outside.filePath("old.mov"), "not the library's");
+        QFile old(victim);
+        QVERIFY(old.open(QIODevice::ReadWrite));
+        QVERIFY(old.setFileTime(QDateTime::currentDateTimeUtc().addSecs(-48 * 3600), QFileDevice::FileModificationTime));
+        old.close();
+        QVERIFY(QFile::link(outside.path(), media.filePath(".partial")));
+
+        removeStalePartialCopies(media.path(), 1h);
+        QVERIFY(QFile::exists(victim));
+        QVERIFY(partialFolder(media.path(), true).isEmpty());
+        const PartialCopy c = copyToPartial(writeFile(in.filePath("a.png"), "pixels"), media.path(), medialimits::kImageBytes);
+        QVERIFY(!c.ok());
+        QCOMPARE(filesUnder(outside.path()), QStringList{"old.mov"});
+    }
+
     // #97 review (H2): only the exact path a hash gives is ever joined to the media folder.
     void onlyAHashsOwnPathIsAValidFile()
     {

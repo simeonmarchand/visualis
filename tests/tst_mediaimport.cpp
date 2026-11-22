@@ -377,6 +377,25 @@ private slots:
         qInfo() << "longest GUI gap while copying" << longestGap << "ms";
     }
 
+    // #97 review, second pass (L6): a thumbnail that can't be published is reported, and the
+    // asset is still imported.
+    void aThumbnailThatCantBeSavedIsAWarning()
+    {
+        QTemporaryDir in, outside;
+        QImage image(8, 8, QImage::Format_RGB32);
+        image.fill(Qt::magenta);
+        QVERIFY(image.save(in.filePath("Cross.png")));
+        const QString media = m_songs->library()->mediaPath();
+        QVERIFY(QDir().mkpath(media));
+        QVERIFY(QFile::link(outside.path(), QDir(media).filePath("thumbs")));   // not the library's
+
+        QVERIFY(importAndWait({QUrl::fromLocalFile(in.filePath("Cross.png"))}));
+        QVERIFY2(m_media->report().startsWith("Imported 1 files."), qPrintable(m_media->report()));
+        QVERIFY2(m_media->report().contains("Cross.png: no thumbnail"), qPrintable(m_media->report()));
+        QVERIFY(filesUnder(outside.path(), "").isEmpty());
+        QVERIFY(asset("Cross.png").value("thumbnail").toUrl().isEmpty());
+    }
+
     void searchAndDelete()
     {
         QTemporaryDir in;

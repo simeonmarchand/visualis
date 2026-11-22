@@ -306,7 +306,9 @@ bool MediaLibrary::saveOne(MediaImportFile &f)
             return true;
         }
         if (!f.thumbnailPartial.isEmpty()) {
-            publishPartial(f.thumbnailPartial, m_import->mediaFolder, thumbnailFile(asset.contentHash));
+            if (const Publish thumb = publishPartial(f.thumbnailPartial, m_import->mediaFolder, thumbnailFile(asset.contentHash));
+                !thumb.ok())
+                f.warnings << QStringLiteral("no thumbnail: %1").arg(thumb.error);
             f.thumbnailPartial.clear();
         }
     }
