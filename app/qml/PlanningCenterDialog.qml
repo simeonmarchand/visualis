@@ -87,7 +87,6 @@ Dialog {
                 enabled: !PlanningCenter.busy
                 onClicked: PlanningCenter.signOut()
             }
-            BusyIndicator { running: PlanningCenter.busy; visible: running; Layout.preferredHeight: 24; Layout.preferredWidth: 24 }
         }
 
         Label {
