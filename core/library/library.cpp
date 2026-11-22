@@ -142,6 +142,18 @@ Library::OpenResult prepare(const QString &connectionName, const QString &dbPath
 
 } // namespace
 
+QString Library::migrationOrderError(const std::vector<Migration> &migrations)
+{
+    if (migrations.empty())
+        return QStringLiteral("there are none");
+    for (std::size_t i = 0; i < migrations.size(); ++i) {
+        const int expected = int(i) + 1;
+        if (migrations[i].version != expected)
+            return QStringLiteral("step %1 is version %2, expected %3").arg(i + 1).arg(migrations[i].version).arg(expected);
+    }
+    return {};
+}
+
 const std::vector<Migration> &Library::migrations()
 {
     // Append only. Never edit a step that has shipped: libraries in the field already ran it.
@@ -208,6 +220,13 @@ Library::OpenResult Library::open(const QString &folder)
 
 Library::OpenResult Library::open(const QString &folder, const std::vector<Migration> &migrations)
 {
+    // A bug in Visualis, not in the library: refuse before creating or touching anything.
+    if (const QString bad = migrationOrderError(migrations); !bad.isEmpty()) {
+        qCCritical(lcLibrary).noquote() << "schema migrations out of order:" << bad;
+        return failure(OpenError::MigrationFailed,
+                       QStringLiteral("This version of Visualis can't update libraries safely (its schema steps are "
+                                      "out of order: %1). The library was left unchanged.").arg(bad));
+    }
     const QFileInfo info(folder);
     if (info.exists() && !info.isDir())
         return failure(OpenError::NotADirectory, QStringLiteral("%1 is a file, not a library folder.").arg(folder));
