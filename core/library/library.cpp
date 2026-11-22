@@ -187,6 +187,8 @@ const std::vector<Migration> &Library::migrations()
              " overrides TEXT NOT NULL DEFAULT '{}', import_snapshot TEXT NOT NULL DEFAULT '{}')",
              "CREATE INDEX service_item_service ON service_item(service_id, position)",
              "CREATE INDEX service_item_pco ON service_item(pco_item_id)"}},
+        // The plan's link back to Planning Center, for "Open in Planning Center" (#54).
+        {4, {"ALTER TABLE service ADD COLUMN pco_plan_url TEXT NOT NULL DEFAULT ''"}},
     };
     return all;
 }

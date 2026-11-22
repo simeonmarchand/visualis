@@ -26,7 +26,7 @@ QByteArray serviceToJson(const Service &s)
     const QJsonObject o{
         {"format", "visualis-service"}, {"version", kVersion}, {"id", idText(s.id)}, {"title", s.title},
         {"date", s.date.isValid() ? s.date.toString(Qt::ISODate) : QString()}, {"pcoPlanId", s.pcoPlanId},
-        {"pcoServiceTypeId", s.pcoServiceTypeId}, {"lastImportedAt", time(s.lastImportedAt)},
+        {"pcoServiceTypeId", s.pcoServiceTypeId}, {"pcoPlanUrl", s.pcoPlanUrl}, {"lastImportedAt", time(s.lastImportedAt)},
         {"created", time(s.created)}, {"updated", time(s.updated)}, {"items", items},
     };
     return QJsonDocument(o).toJson(QJsonDocument::Indented);
@@ -53,6 +53,7 @@ ServiceJsonResult serviceFromJson(const QByteArray &json)
     s.date = QDate::fromString(o.value("date").toString(), Qt::ISODate);
     s.pcoPlanId = o.value("pcoPlanId").toString();
     s.pcoServiceTypeId = o.value("pcoServiceTypeId").toString();
+    s.pcoPlanUrl = o.value("pcoPlanUrl").toString();
     s.lastImportedAt = QDateTime::fromString(o.value("lastImportedAt").toString(), Qt::ISODateWithMs);
     s.created = QDateTime::fromString(o.value("created").toString(), Qt::ISODateWithMs);
     s.updated = QDateTime::fromString(o.value("updated").toString(), Qt::ISODateWithMs);
