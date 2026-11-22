@@ -8,7 +8,7 @@ QString lyricsText(const Song &song)
 {
     QStringList blocks;
     for (const Group &g : song.groups) {
-        QStringList lines{QStringLiteral("[%1]").arg(g.label.isEmpty() ? QStringLiteral("Untitled") : g.label)};
+        QStringList lines{QStringLiteral("[%1]").arg(g.label)};
         QStringList slides;
         for (const QString &s : g.slides) {
             if (!s.trimmed().isEmpty())
@@ -25,6 +25,7 @@ LyricsEdit applyLyricsText(const Song &song, const QString &text)
 {
     PasteOptions options;
     options.maxLinesPerSlide = 1000;   // the editor's slide breaks are the operator's own
+    options.editorText = true;
     const PastedLyrics parsed = parsePastedLyrics(text, options);
 
     const QList<Group> &old = song.groups;

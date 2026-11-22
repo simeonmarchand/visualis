@@ -15,6 +15,10 @@ struct PasteOptions {
     // Belongs to the lyrics template once templates are stored (Phase 3).
     int maxLinesPerSlide = 2;
     QString title;              // a first line equal to this (pastes often start with it) is dropped
+    // Reading back the song editor's own text (lyricsText()), which must round-trip: every
+    // "[...]" line is a header with its label as written ("[]" is unlabelled), groups with
+    // the same label are never merged, and there are no footer lines.
+    bool editorText = false;
 };
 
 struct PastedLyrics {

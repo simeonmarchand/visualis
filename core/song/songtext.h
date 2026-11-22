@@ -8,8 +8,9 @@
 namespace visualis {
 
 // A song's lyrics as one editable text (plan 5.4: text-first editing): each group starts
-// with a "[Label]" line, and a blank line separates slides. A group with no lyrics
-// (an Intro) is just its header.
+// with a "[Label]" line ("[]" when it has no label), and a blank line separates slides. A
+// group with no lyrics (an Intro) is just its header. Any "[...]" line reads back as a
+// header, so custom labels ("[Spoken Word]") survive the round trip.
 QString lyricsText(const Song &song);
 
 struct LyricsEdit {

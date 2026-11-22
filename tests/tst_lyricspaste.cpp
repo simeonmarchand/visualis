@@ -246,6 +246,15 @@ private slots:
         QCOMPARE(repeated.playOrder().size(), 3);
     }
 
+    // Only the editor's own text takes any "[...]" line as a header (#66); a paste from
+    // outside keeps bracketed lyric lines that aren't section labels.
+    void pastedBracketedLinesAreLyricsUnlessTheyAreLabels()
+    {
+        const PastedLyrics p = parsePastedLyrics("[Verse 1]\nAmazing grace\n[Spoken Word]\nHow sweet the sound");
+        QCOMPARE(labels(p), QStringList{"Verse 1"});
+        QCOMPARE(p.groups[0].slides.join('\n'), QStringLiteral("Amazing grace\n[Spoken Word]\nHow sweet the sound"));
+    }
+
     void pastedSongsSave()
     {
         QTemporaryDir tmp;

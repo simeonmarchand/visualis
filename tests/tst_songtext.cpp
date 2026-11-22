@@ -23,6 +23,28 @@ Song sample()
     return s;
 }
 
+// Each group once in a Default arrangement, plus `repeats` of the first.
+Song withGroups(QList<Group> groups)
+{
+    Song s;
+    s.title = "Round trip";
+    s.groups = groups;
+    QList<QUuid> sequence;
+    for (const Group &g : groups)
+        sequence << g.id;
+    sequence << groups.first().id;
+    s.arrangements = {Arrangement{QUuid::createUuid(), "Default", sequence, {}}};
+    return s;
+}
+
+void verifyLossless(const Song &s)
+{
+    const LyricsEdit e = applyLyricsText(s, lyricsText(s));
+    QCOMPARE(e.song.groups, s.groups);
+    QCOMPARE(e.song.arrangements, s.arrangements);
+    QVERIFY2(e.warnings.isEmpty(), qPrintable(e.warnings.join('\n')));
+}
+
 QStringList labels(const Song &s)
 {
     QStringList out;
@@ -120,6 +142,47 @@ private slots:
         const QList<QUuid> expected{s.groups[0].id, s.groups[1].id, s.groups[1].id};
         QCOMPARE(e.song.arrangements[0].sequence, expected);
         QVERIFY(e.warnings.join(' ').contains("Chorus"));
+    }
+
+    // #66: labels parseLabel() doesn't know used to read back as lyric lines.
+    void customLabelsSurviveTheRoundTrip()
+    {
+        const Song s = withGroups({
+            Group{QUuid::createUuid(), "Verse 1", "#0078cc", {"Amazing grace how sweet the sound"}},
+            Group{QUuid::createUuid(), "Spoken Word", "", {"Read Psalm 23 here"}},
+            Group{QUuid::createUuid(), "Tag A", "#cc7a00", {"Was blind but now I see"}},
+            Group{QUuid::createUuid(), "Chorus x2", "#cc004f", {"My chains are gone"}},
+        });
+        verifyLossless(s);
+        // Still the same groups after an edit elsewhere.
+        QString text = lyricsText(s);
+        text.replace("the sound", "the sound!");
+        const LyricsEdit e = applyLyricsText(s, text);
+        QCOMPARE(labels(e.song), (QStringList{"Verse 1", "Spoken Word", "Tag A", "Chorus x2"}));
+        QCOMPARE(e.song.arrangements, s.arrangements);
+    }
+
+    void unlabelledGroupsSurviveTheRoundTrip()
+    {
+        const Song s = withGroups({
+            Group{QUuid::createUuid(), "", "", {"Before any label"}},
+            Group{QUuid::createUuid(), "Verse 1", "#0078cc", {"Amazing grace"}},
+            Group{QUuid::createUuid(), "", "", {"Between labels"}},
+        });
+        QVERIFY(lyricsText(s).startsWith("[]\n"));
+        verifyLossless(s);
+    }
+
+    void duplicateGroupsAreNotMerged()
+    {
+        const Song s = withGroups({
+            Group{QUuid::createUuid(), "Chorus", "#cc004f", {"My chains are gone"}},
+            Group{QUuid::createUuid(), "Verse 1", "#0078cc", {"Amazing grace"}},
+            Group{QUuid::createUuid(), "Chorus", "#cc004f", {"My chains are gone"}},
+            Group{QUuid::createUuid(), "Intro", "#b3a624", {""}},
+            Group{QUuid::createUuid(), "Intro", "#b3a624", {""}},
+        });
+        verifyLossless(s);
     }
 
     void aGroupWithoutLyricsStaysABlankSlide()
