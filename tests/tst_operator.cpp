@@ -584,7 +584,7 @@ private slots:
         const QString first = m_dir.filePath(QString::number(m_libraries));
         const QString folder = writeSongFiles(1000);
         QVERIFY(m_songs->importSongs(QUrl::fromLocalFile(folder)));
-        QTRY_VERIFY(m_songs->importProgress().contains(" of 1000"));   // under way
+        QTRY_VERIFY(!m_songs->songs().isEmpty());   // under way: a batch has been saved
         QElapsedTimer took;
         took.start();
         QVERIFY(m_songs->openLibrary(m_dir.filePath(QString::number(++m_libraries))));
