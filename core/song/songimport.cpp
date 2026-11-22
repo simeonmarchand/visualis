@@ -25,43 +25,48 @@ void ImportWriter::startBatch()
 
 void ImportWriter::add(ImportFile file)
 {
-    if (!file.error.isEmpty() || (!file.song && file.skipped.isEmpty()))
-        return record({file.name, Outcome::Failed, file.error, {}});
-    if (!file.skipped.isEmpty())
-        return record({file.name, Outcome::Skipped, file.skipped, {}});
-
-    Song &song = *file.song;
-    const QString title = titleKey(song.title);
+    // What the parser noticed is kept whatever happens to the file next (#80).
     QStringList warnings;
     for (const QString &w : std::as_const(file.warnings))
         warnings << QStringLiteral("%1: %2").arg(file.name, w);
+    if (!file.error.isEmpty() || (!file.song && file.skipped.isEmpty()))
+        return record({file.name, Outcome::Failed, file.error, warnings});
+    if (!file.skipped.isEmpty())
+        return record({file.name, Outcome::Skipped, file.skipped, warnings});
+
+    Song &song = *file.song;
+    const QString title = titleKey(song.title);
+    QString titleClash;
     if (m_rule == Duplicates::SkipSameTitle && m_titles.contains(title)) {
         return record({file.name, Outcome::Skipped, QStringLiteral("a song with this title is already in the library"),
-                       {}, m_batchTitles.value(title, -1)});
+                       warnings, {}, m_batchTitles.value(title, -1)});
     }
     if (m_rule == Duplicates::SkipSameIdWarnSameTitle) {
         if (!song.id.isNull() && (m_batchIds.contains(song.id) || m_store.load(song.id))) {
-            return record({file.name, Outcome::Skipped, QStringLiteral("this song is already in the library"), {},
-                           m_batchIds.value(song.id, -1)});
+            return record({file.name, Outcome::Skipped, QStringLiteral("this song is already in the library"),
+                           warnings, {}, m_batchIds.value(song.id, -1)});
         }
         if (m_titles.contains(title))
-            warnings << QStringLiteral("%1: a different song titled \"%2\" is already in the library; both are kept")
-                            .arg(file.name, song.title);
+            titleClash = QStringLiteral("%1: a different song titled \"%2\" is already in the library; both are kept")
+                             .arg(file.name, song.title);
     }
     if (const SongStore::Result saved = m_store.save(song); !saved.ok)
-        return record({file.name, Outcome::Failed, saved.error, {}});
+        return record({file.name, Outcome::Failed, saved.error, warnings});
     m_titles.insert(title);
     m_batchTitles.insert(title, m_entries.size());
     m_batchIds.insert(song.id, m_entries.size());
-    record({file.name, Outcome::Imported, song.title, warnings});
+    record({file.name, Outcome::Imported, song.title, warnings, titleClash});
 }
 
 void ImportWriter::record(Entry entry)
 {
+    m_report.warnings << entry.warnings;
     switch (entry.outcome) {
     case Outcome::Imported:
         m_report.imported << entry.detail;
-        m_report.warnings << entry.warnings;
+        // Only once it's saved: a song that isn't kept leaves nothing "both kept" (#80).
+        if (!entry.titleClash.isEmpty())
+            m_report.warnings << entry.titleClash;
         break;
     case Outcome::Skipped:
         m_report.skipped << std::pair{entry.name, entry.detail};
@@ -82,7 +87,7 @@ void ImportWriter::batchFailed(const QString &error)
         if (rolledBack || skippedForOne) {
             e.outcome = Outcome::Failed;
             e.detail = error;
-            e.warnings.clear();
+            e.titleClash.clear();
             e.duplicateOf = -1;
         }
     }

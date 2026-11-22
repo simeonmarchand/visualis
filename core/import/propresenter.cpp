@@ -197,12 +197,12 @@ ImportFile readForImport(const QFileInfo &file)
         out.error = r.error;
         return out;
     }
+    out.warnings = r.warnings;
     if (!r.looksLikeSong) {
         out.skipped = QStringLiteral("not a song (no Verse, Chorus, or similar groups)");
         return out;
     }
     out.song = std::move(r.song);
-    out.warnings = r.warnings;
     return out;
 }
 

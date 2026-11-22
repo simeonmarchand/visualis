@@ -331,9 +331,33 @@ private slots:
         QCOMPARE(writer.report().skipped.size(), 2);
         QCOMPARE(writer.report().skipped[0].first, QStringLiteral("notes.json"));
         QCOMPARE(writer.report().skipped[1].first, QStringLiteral("c.json"));
-        QVERIFY(writer.report().warnings.isEmpty());
+        // What the parser noticed stands (#80); it was about the file, not the save.
+        QCOMPARE(writer.report().warnings, QStringList{"b1.json: a warning"});
         writer.add({"again.json", holy, {}, {}, {}});   // its title is free again
         QCOMPARE(writer.report().imported.size(), 2);
+    }
+
+    // #80 with #77: "both are kept" goes when the batch that kept the song rolls back; the
+    // parser's warnings for skipped and failed files stay.
+    void importWriterDropsBothKeptForARolledBackSong()
+    {
+        QTemporaryDir lib;
+        auto library = Library::open(lib.path()).library;
+        SongStore store(*library);
+        Song existing = fixture("Holy Holy Holy");
+        QVERIFY(store.save(existing).ok);
+        ImportWriter writer(store, ImportWriter::Duplicates::SkipSameIdWarnSameTitle);
+        {
+            SongStore::Batch batch(store);
+            writer.startBatch();
+            writer.add({"clash.json", fixture("Holy Holy Holy"), {}, {}, {}});
+            QCOMPARE(writer.report().warnings.size(), 1);
+            writer.add({"notes.json", {}, "not a song", {}, {"no groups"}});
+            writer.add({"bad.json", {}, {}, "unreadable", {"odd header"}});
+        }
+        writer.batchFailed("disk full");
+        QCOMPARE(writer.report().warnings, (QStringList{"notes.json: no groups", "bad.json: odd header"}));
+        QCOMPARE(store.list().size(), 1);
     }
 
     // #77 review: the operator can add, rename, or delete songs between batches; each batch

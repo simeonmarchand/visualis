@@ -22,7 +22,7 @@ struct ImportFile {
     std::optional<Song> song;   // set when the file is a song
     QString skipped;            // why it was passed over (not a song, too large), if it was
     QString error;              // why it couldn't be read, if it couldn't
-    QStringList warnings;       // reported with the file's name if the song is imported
+    QStringList warnings;       // what the parser noticed: reported whatever happens to the file
 };
 
 struct SongImportReport {
@@ -62,7 +62,8 @@ private:
         QString name;
         Outcome outcome;
         QString detail;          // the title if imported, else the reason
-        QStringList warnings;    // "file: warning", reported if imported
+        QStringList warnings;    // "file: warning", from the parser: always reported
+        QString titleClash;      // "both are kept": reported only while imported
         qsizetype duplicateOf = -1;   // a song saved earlier in the same batch
     };
     void record(Entry entry);
