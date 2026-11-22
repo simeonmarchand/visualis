@@ -27,7 +27,7 @@ Window {
     // The song editor is its own window: while it's in front, keys edit the song. `visible`
     // too, because `active` isn't always cleared when the window closes.
     readonly property bool editorInFront: songEditor.visible && songEditor.active
-    readonly property bool dialogOpen: songList.dialogOpen || servicePane.dialogOpen
+    readonly property bool dialogOpen: songList.dialogOpen || mediaPane.dialogOpen || servicePane.dialogOpen
     readonly property bool keysEnabled: !editingText && !dialogOpen && !editorInFront
 
     Shortcut {
@@ -166,12 +166,31 @@ Window {
             Layout.fillHeight: true
             spacing: 16
 
-            SongListPane {
-                id: songList
-                // Fixed widths: the grid gets the rest.
+            // Songs and media share a column (#97): the grid gets the rest of the width.
+            ColumnLayout {
                 Layout.preferredWidth: 260
                 Layout.maximumWidth: 260
                 Layout.fillHeight: true
+                spacing: 8
+
+                TabBar {
+                    id: libraryTabs
+                    Layout.fillWidth: true
+                    focusPolicy: Qt.NoFocus
+                    TabButton { text: "Songs"; focusPolicy: Qt.NoFocus }
+                    TabButton { objectName: "mediaTab"; text: "Media"; focusPolicy: Qt.NoFocus }
+                }
+                StackLayout {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    currentIndex: libraryTabs.currentIndex
+                    SongListPane {
+                        id: songList
+                    }
+                    MediaPane {
+                        id: mediaPane
+                    }
+                }
             }
             ServicePane {
                 id: servicePane

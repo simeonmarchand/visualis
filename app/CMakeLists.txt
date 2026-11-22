@@ -22,6 +22,8 @@ qt_add_qml_module(visualis_ui
         qml/NameDialog.qml
         qml/PasteSongDialog.qml
         qml/ImportReportDialog.qml
+        qml/MediaPane.qml
+        qml/MediaDeleteDialog.qml
         qml/SlideGrid.qml
         qml/SlideTile.qml
         qml/SongEditorWindow.qml
@@ -40,6 +42,8 @@ qt_add_qml_module(visualis_ui
         library/songlibrary.h library/songlibrary.cpp
         library/songeditor.h library/songeditor.cpp
         library/servicelist.h library/servicelist.cpp
+        library/medialibrary.h library/medialibrary.cpp
+        media/mediaprobe.h media/mediaprobe.cpp
 )
 # The generated QML type registrations include headers by file name alone.
 target_include_directories(visualis_ui PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/output
@@ -49,10 +53,14 @@ target_include_directories(visualis_ui PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMA
 target_link_libraries(visualis_ui PRIVATE Qt6::Quick Qt6::Multimedia Qt6::Network Qt6::GuiPrivate visualis_core)
 if(APPLE)
     enable_language(OBJCXX)
-    target_sources(visualis_ui PRIVATE output/platformdisplay_mac.mm pco/credentialstore_mac.cpp)
-    target_link_libraries(visualis_ui PRIVATE "-framework AppKit" "-framework IOKit" "-framework Security")
+    target_sources(visualis_ui PRIVATE output/platformdisplay_mac.mm pco/credentialstore_mac.cpp media/mediaprobe_mac.mm)
+    target_link_libraries(visualis_ui PRIVATE "-framework AppKit" "-framework IOKit" "-framework Security"
+        "-framework AVFoundation" "-framework CoreMedia" "-framework VideoToolbox")
+    # The probe hands AVFoundation objects between blocks; ARC keeps them alive.
+    set_source_files_properties(media/mediaprobe_mac.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
 else()
-    target_sources(visualis_ui PRIVATE output/platformdisplay_other.cpp pco/credentialstore_other.cpp)
+    target_sources(visualis_ui PRIVATE output/platformdisplay_other.cpp pco/credentialstore_other.cpp
+        media/mediaprobe_other.cpp)
 endif()
 
 qt_add_executable(Visualis MACOSX_BUNDLE WIN32 main.cpp)

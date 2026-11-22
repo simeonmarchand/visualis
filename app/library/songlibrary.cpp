@@ -335,8 +335,8 @@ QString SongLibrary::importReport(const ImportSummary &s)
         lines << QStringLiteral("The import was stopped before its files were counted.");
     else if (s.stopped)
         lines << QStringLiteral("The import was stopped after %1 of %2 files.").arg(s.filesDone).arg(s.filesTotal);
-    lines << (s.source.isEmpty() ? QStringLiteral("Imported %1 songs.").arg(s.imported.size())
-                                 : QStringLiteral("Imported %1 songs %2.").arg(s.imported.size()).arg(s.source));
+    lines << (s.source.isEmpty() ? QStringLiteral("Imported %1 %2.").arg(s.imported.size()).arg(s.noun)
+                                 : QStringLiteral("Imported %1 %2 %3.").arg(s.imported.size()).arg(s.noun, s.source));
     // Skips grouped by reason, in the order first seen, each file named so it can be found.
     QStringList reasons;
     QHash<QString, QStringList> files;
