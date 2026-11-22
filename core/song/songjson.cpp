@@ -17,6 +17,7 @@ namespace {
 constexpr int kVersion = 1;
 const char *kFormat = "visualis-song";
 const char *kSuffix = ".visualis-song.json";
+constexpr int kMaxStem = 120;   // keeps the whole name well under every file system's limit
 
 QString idText(const QUuid &id) { return id.toString(QUuid::WithoutBraces); }
 QJsonValue idOrNull(const QUuid &id) { return id.isNull() ? QJsonValue() : QJsonValue(idText(id)); }
@@ -171,7 +172,7 @@ QString songFileName(const QString &title)
         name.remove(0, 1);
     if (name.isEmpty())
         name = QStringLiteral("Untitled");
-    return name.left(120) + kSuffix;
+    return name.left(kMaxStem) + kSuffix;
 }
 
 SongExportReport exportSongs(SongStore &store, const QString &folder)
@@ -186,8 +187,12 @@ SongExportReport exportSongs(SongStore &store, const QString &folder)
             continue;
         }
         QString name = songFileName(song->title);
-        for (int n = 2; used.contains(name.toLower()); ++n)
-            name = songFileName(QStringLiteral("%1 (%2)").arg(song->title).arg(n));
+        // Shorten the stem to make room for " (n)", so the length limit can't cut it off.
+        const QString stem = name.chopped(qsizetype(qstrlen(kSuffix)));
+        for (int n = 2; used.contains(name.toLower()); ++n) {
+            const QString tag = QStringLiteral(" (%1)").arg(n);
+            name = stem.left(kMaxStem - tag.size()) + tag + kSuffix;
+        }
         used.insert(name.toLower());
 
         QSaveFile f(QDir(folder).filePath(name));   // written whole or not at all

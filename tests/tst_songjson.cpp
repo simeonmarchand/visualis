@@ -180,6 +180,31 @@ private slots:
         QCOMPARE(again.skipped.size(), 3);
     }
 
+    // #65: the collision suffix used to be cut off by the length limit, so the loop never
+    // found a free name and export hung.
+    void longTitlesThatCollideExportAsSeparateFiles()
+    {
+        QTemporaryDir lib, out;
+        auto library = Library::open(lib.path()).library;
+        SongStore store(*library);
+        const QString longTitle = QString(130, 'x');
+        for (int i = 0; i < 3; ++i) {
+            Song s = fixture("Amazing Grace");
+            s.title = longTitle;
+            QVERIFY(store.save(s).ok);
+        }
+        const SongExportReport exported = exportSongs(store, out.path());
+        QVERIFY(exported.failed.isEmpty());
+        QCOMPARE(exported.written.size(), 3);
+        QCOMPARE(QSet<QString>(exported.written.begin(), exported.written.end()).size(), 3);
+        QCOMPARE(QDir(out.path()).entryList({"*.visualis-song.json"}).size(), 3);
+        for (const QString &name : exported.written) {
+            QVERIFY2(name.size() <= songFileName(longTitle).size(), qPrintable(name));   // still within the limit
+            QVERIFY(name.endsWith(".visualis-song.json"));
+        }
+        QVERIFY(exported.written.contains(QString(120 - 4, 'x') + " (2).visualis-song.json"));
+    }
+
     void importReportsBadFilesAndTitleClashes()
     {
         QTemporaryDir lib, in;
