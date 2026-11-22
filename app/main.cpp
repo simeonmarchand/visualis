@@ -4,6 +4,8 @@
 #include "live/livestate.h"
 #include "live/recovery.h"
 #include "output/outputcontroller.h"
+#include "pco/planimporter.h"
+#include "pco/planningcenter.h"
 #include "video/videoengine.h"
 
 #include <QCommandLineParser>
@@ -73,6 +75,14 @@ int main(int argc, char *argv[])
         if (songs->importSongs(folder))
             wait.exec();
         services->importServices(folder);
+    }
+
+    if (auto *importer = engine.singletonInstance<PlanImporter *>("Visualis.Ui", "PlanImporter")) {
+        importer->setPlanningCenter(engine.singletonInstance<PlanningCenter *>("Visualis.Ui", "PlanningCenter"));
+        importer->setSongLibrary(songs);
+        if (services)
+            QObject::connect(importer, &PlanImporter::imported, services,
+                             [services](const QString &id) { services->openAdded(id); });
     }
 
     // Back to what was live if the last run crashed (#25), then journal every change.

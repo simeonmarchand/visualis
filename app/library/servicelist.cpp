@@ -108,6 +108,12 @@ bool ServiceList::openService(const QString &id)
     return true;
 }
 
+bool ServiceList::openAdded(const QString &id)
+{
+    emit servicesChanged();
+    return openService(id);
+}
+
 bool ServiceList::renameService(const QString &title)
 {
     if (!m_open || title.trimmed().isEmpty())

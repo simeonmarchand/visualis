@@ -36,6 +36,7 @@ struct Service {
     QDate date;
     QString pcoPlanId;
     QString pcoServiceTypeId;
+    QString pcoPlanUrl;         // the plan in Planning Center's web app (P3 finding 7)
     QDateTime lastImportedAt;   // UTC; invalid if never imported
     QList<ServiceItem> items;   // in order
     QDateTime created;          // set by ServiceStore, UTC

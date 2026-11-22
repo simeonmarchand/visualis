@@ -77,6 +77,9 @@ public:
     // the library are skipped. Opens the last one imported. Songs should be imported first,
     // or their items load as placeholders.
     Q_INVOKABLE void importServices(const QUrl &folder);
+    // A service another part of the app saved to the library (a Planning Center import,
+    // #54): lists it and opens it, as creating one does.
+    bool openAdded(const QString &id);
 
     QVariantList services() const;
     QString openId() const;

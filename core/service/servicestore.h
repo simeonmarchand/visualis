@@ -37,6 +37,8 @@ public:
     bool remove(const QUuid &id);
     // Every service, newest date first, then by title.
     QList<ServiceSummary> list() const;
+    // The service imported from this Planning Center plan, if any (the first, if several).
+    std::optional<ServiceSummary> findByPcoPlan(const QString &pcoPlanId) const;
 
 private:
     Library &m_library;

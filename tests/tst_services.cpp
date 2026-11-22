@@ -206,12 +206,52 @@ private slots:
         }
         auto now = Library::open(folder);
         QVERIFY2(now.library, qPrintable(now.message));
-        QCOMPARE(now.library->schemaVersion(), 3);
+        QCOMPARE(now.library->schemaVersion(), Library::latestVersion());
         QCOMPARE(SongStore(*now.library).list().size(), 1);
         Service s;
         s.title = "After the upgrade";
         QVERIFY(ServiceStore(*now.library).save(s).ok);
-        QVERIFY(QFile::exists(folder + "/library.sqlite.before-v3"));
+        QVERIFY(QFile::exists(folder + QStringLiteral("/library.sqlite.before-v%1").arg(Library::latestVersion())));
+    }
+
+    void findsTheServiceImportedFromAPlan()
+    {
+        Service a;
+        a.title = "Imported";
+        a.pcoPlanId = "70001";
+        Service b;
+        b.title = "By hand";
+        QVERIFY(m_services->save(a).ok);
+        QVERIFY(m_services->save(b).ok);
+        QCOMPARE(m_services->findByPcoPlan("70001")->id, a.id);
+        QVERIFY(!m_services->findByPcoPlan("70002"));
+        QVERIFY(!m_services->findByPcoPlan(""));   // hand-built services have no plan
+    }
+
+    // #54: a v3 library's services gain the plan link, empty, and keep everything else.
+    void aVersion3LibraryGainsThePlanLink()
+    {
+        const QString folder = m_dir.filePath("v3");
+        QUuid id;
+        {
+            auto v3 = Library::open(folder, std::vector<Migration>(Library::migrations().begin(), Library::migrations().begin() + 3));
+            QVERIFY2(v3.library, qPrintable(v3.message));
+            QCOMPARE(v3.library->schemaVersion(), 3);
+            QSqlQuery q(v3.library->database());
+            id = QUuid::createUuid();
+            QVERIFY(q.exec(QStringLiteral("INSERT INTO service (id, title, pco_plan_id, created_at, updated_at) "
+                                          "VALUES ('%1', 'Before', '42', '', '')").arg(id.toString(QUuid::WithoutBraces))));
+        }
+        auto now = Library::open(folder);
+        QVERIFY2(now.library, qPrintable(now.message));
+        ServiceStore store(*now.library);
+        std::optional<Service> s = store.load(id);
+        QVERIFY(s);
+        QCOMPARE(s->pcoPlanId, QStringLiteral("42"));
+        QVERIFY(s->pcoPlanUrl.isEmpty());
+        s->pcoPlanUrl = "https://services.planningcenteronline.com/plans/42";
+        QVERIFY(store.save(*s).ok);
+        QCOMPARE(store.load(id)->pcoPlanUrl, s->pcoPlanUrl);
     }
 
     void jsonRoundTripsAndToleratesUnknownKinds()
@@ -230,6 +270,8 @@ private slots:
         QVERIFY2(r.service, qPrintable(r.error));
         QCOMPARE(r.service->items, s.items);
         QCOMPARE(r.service->date, s.date);
+        s.pcoPlanUrl = "https://services.planningcenteronline.com/plans/1";
+        QCOMPARE(serviceFromJson(serviceToJson(s)).service->pcoPlanUrl, s.pcoPlanUrl);
 
         const ServiceJsonResult future = serviceFromJson(
             R"({"format":"visualis-service","version":1,"title":"T","items":[{"kind":"hologram","title":"Next year"}]})");

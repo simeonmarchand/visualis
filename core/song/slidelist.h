@@ -29,4 +29,15 @@ struct SongSlide {
 //  - An arrangement with no steps gives no slides; the caller should tell the operator.
 QList<SongSlide> songSlides(const Song &song, const QUuid &arrangement = {});
 
+// The slides for a song played in an order given by label, such as a service's Planning
+// Center sequence (ServiceItem::customSequence). Labels are matched to groups with
+// matchSequence (labels.h). A label for a section that has no lyrics (Intro, Turnaround,
+// Interlude, Ending...) and no group of its own gives one blank slide, labelled as given,
+// with a null group id (P3 finding 9). Other unmatched labels are skipped; the import
+// lists them for the operator (#55).
+QList<SongSlide> songSlides(const Song &song, const QStringList &sequence);
+
+// Whether a label names a section that has no lyrics: Intro, Interlude, Ending, Blank...
+bool isLyricless(const QString &label);
+
 } // namespace visualis
