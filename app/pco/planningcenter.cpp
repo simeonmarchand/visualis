@@ -15,25 +15,49 @@ constexpr char kOrganizationKey[] = "planningCenter/organization";
 }
 
 PlanningCenter::PlanningCenter(QObject *parent)
-    : QObject(parent)
+    : PlanningCenter(std::make_shared<CredentialStore>(QString::fromLatin1(CredentialStore::kDefaultService)), parent)
 {
-    setCredentialService(QString::fromLatin1(CredentialStore::kDefaultService));
 }
 
-void PlanningCenter::setCredentialService(const QString &service)
+PlanningCenter::PlanningCenter(std::shared_ptr<const CredentialStore> store, QObject *parent)
+    : QObject(parent)
+    , m_store(std::move(store))
 {
-    m_store = CredentialStore(service);
-    QString error;
-    m_signedIn = m_store.load(&error).has_value();
-    m_organization = m_signedIn ? QSettings().value(kOrganizationKey).toString() : QString();
-    m_status = error;
-    emit changed();
+    m_keychain.setMaxThreadCount(1);
+    struct Loaded {
+        std::optional<PcoCredentials> credentials;
+        QString error;
+    };
+    onKeychain([](const CredentialStore &s) {
+        Loaded l;
+        l.credentials = s.load(&l.error);
+        return l;
+    }, [this](const Loaded &l) {
+        m_credentials = l.credentials;
+        m_loadError = l.error;
+        m_signedIn = l.credentials.has_value();
+        m_organization = m_signedIn ? QSettings().value(kOrganizationKey).toString() : QString();
+        // Only a failure: the operator may already have started something with its own status.
+        if (l.error.isEmpty())
+            emit changed();
+        else
+            setStatus(l.error);
+    });
+}
+
+template<typename Work, typename Done>
+void PlanningCenter::onKeychain(Work work, Done done)
+{
+    m_keychain.start([this, store = m_store, work, done] {
+        auto result = work(*store);
+        // Queued to this object: dropped if it's gone by then.
+        QMetaObject::invokeMethod(this, [done, result] { done(result); }, Qt::QueuedConnection);
+    });
 }
 
 std::unique_ptr<PcoAuthorizer> PlanningCenter::authorizer() const
 {
-    const std::optional<PcoCredentials> c = m_store.load();
-    return c ? std::make_unique<PersonalAccessToken>(*c) : nullptr;
+    return m_credentials ? std::make_unique<PersonalAccessToken>(*m_credentials) : nullptr;
 }
 
 void PlanningCenter::signIn(const QString &appId, const QString &secret)
@@ -54,27 +78,28 @@ void PlanningCenter::signIn(const QString &appId, const QString &secret)
 
 void PlanningCenter::testConnection()
 {
-    QString error;
-    const std::optional<PcoCredentials> c = m_store.load(&error);
-    if (!c) {
-        setStatus(error.isEmpty() ? QStringLiteral("Not signed in.") : error);
+    if (!m_credentials) {
+        setStatus(m_loadError.isEmpty() ? QStringLiteral("Not signed in.") : m_loadError);
         return;
     }
-    check(*c, false);
+    check(*m_credentials, false);
 }
 
 void PlanningCenter::signOut()
 {
-    const CredentialStore::Result r = m_store.remove();
-    if (!r.ok) {
-        setStatus(r.error);
-        return;
-    }
-    QSettings().remove(kOrganizationKey);
-    m_signedIn = false;
-    m_organization.clear();
-    qCInfo(lcPco) << "signed out";
-    setStatus(QStringLiteral("Signed out. The token was removed from the Keychain."));
+    onKeychain([](const CredentialStore &s) { return s.remove(); }, [this](const CredentialStore::Result &r) {
+        if (!r.ok) {
+            setStatus(r.error);
+            return;
+        }
+        QSettings().remove(kOrganizationKey);
+        m_credentials.reset();
+        m_loadError.clear();
+        m_signedIn = false;
+        m_organization.clear();
+        qCInfo(lcPco) << "signed out";
+        setStatus(QStringLiteral("Signed out. The token was removed from the Keychain."));
+    });
 }
 
 void PlanningCenter::check(const PcoCredentials &credentials, bool saveIfAccepted)
@@ -93,26 +118,39 @@ void PlanningCenter::check(const PcoCredentials &credentials, bool saveIfAccepte
         reply->deleteLater();
         const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         const OrganizationResult org = organizationFromResponse(status, reply->readAll());
-        m_busy = false;
         if (!org.error.isEmpty()) {
             qCInfo(lcPco) << "check failed, HTTP" << status;   // never the token
+            m_busy = false;
             setStatus(org.error);
             emit signInFinished(false);
             return;
         }
-        if (saveIfAccepted) {
-            if (const CredentialStore::Result saved = m_store.save(credentials); !saved.ok) {
+        const auto connected = [this, credentials, name = org.name] {
+            m_busy = false;
+            m_credentials = credentials;
+            m_loadError.clear();
+            m_signedIn = true;
+            m_organization = name;
+            QSettings().setValue(kOrganizationKey, name);
+            qCInfo(lcPco).noquote() << "connected to" << name;
+            setStatus(QStringLiteral("Connected to %1.").arg(name));
+            emit signInFinished(true);
+        };
+        if (!saveIfAccepted) {
+            connected();
+            return;
+        }
+        onKeychain([credentials](const CredentialStore &s) { return s.save(credentials); },
+                   [this, connected](const CredentialStore::Result &saved) {
+            if (!saved.ok) {
+                // Whatever was signed in before still is: the store kept it.
+                m_busy = false;
                 setStatus(saved.error);
                 emit signInFinished(false);
                 return;
             }
-        }
-        m_signedIn = true;
-        m_organization = org.name;
-        QSettings().setValue(kOrganizationKey, org.name);
-        qCInfo(lcPco).noquote() << "connected to" << org.name;
-        setStatus(QStringLiteral("Connected to %1.").arg(org.name));
-        emit signInFinished(true);
+            connected();
+        });
     });
 }
 

@@ -45,19 +45,29 @@ bool CredentialStore::isSupported()
 
 CredentialStore::Result CredentialStore::save(const PcoCredentials &credentials) const
 {
-    remove();
     const QByteArray data = QJsonDocument(QJsonObject{{"appId", credentials.appId.trimmed()},
                                                       {"secret", credentials.secret.trimmed()}}).toJson(QJsonDocument::Compact);
-    CFMutableDictionaryRef q = query(m_service);
+    CFMutableDictionaryRef attributes = CFDictionaryCreateMutable(nullptr, 0, &kCFTypeDictionaryKeyCallBacks,
+                                                                  &kCFTypeDictionaryValueCallBacks);
     CFDataRef value = CFDataCreate(nullptr, reinterpret_cast<const UInt8 *>(data.constData()), data.size());
     CFStringRef label = QStringLiteral("Visualis: Planning Center").toCFString();
-    CFDictionarySetValue(q, kSecValueData, value);
-    CFDictionarySetValue(q, kSecAttrLabel, label);
+    CFDictionarySetValue(attributes, kSecValueData, value);
+    CFDictionarySetValue(attributes, kSecAttrLabel, label);
     // Readable only on this Mac and only while it's unlocked; never synced to iCloud.
-    CFDictionarySetValue(q, kSecAttrAccessible, kSecAttrAccessibleWhenUnlockedThisDeviceOnly);
-    const OSStatus status = SecItemAdd(q, nullptr);
+    CFDictionarySetValue(attributes, kSecAttrAccessible, kSecAttrAccessibleWhenUnlockedThisDeviceOnly);
+
+    // Update in place rather than delete and add, so a failure never loses the working token.
+    CFMutableDictionaryRef q = query(m_service);
+    OSStatus status = SecItemUpdate(q, attributes);
+    if (status == errSecItemNotFound) {
+        CFDictionaryApplyFunction(attributes, [](const void *key, const void *v, void *target) {
+            CFDictionarySetValue(static_cast<CFMutableDictionaryRef>(target), key, v);
+        }, q);
+        status = SecItemAdd(q, nullptr);
+    }
     CFRelease(label);
     CFRelease(value);
+    CFRelease(attributes);
     CFRelease(q);
     if (status != errSecSuccess)
         return {false, QStringLiteral("Couldn't save to the Keychain: %1").arg(message(status))};
