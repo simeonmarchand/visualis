@@ -114,9 +114,11 @@ std::optional<RegionStyle> effectiveStyle(const Template &tmpl, const QString &r
                 *warnings << QStringLiteral("the override of region \"%1\" isn't an object; ignored").arg(regionId);
             continue;
         }
-        style = applyRegionStyle(style, mine.toObject(), QStringLiteral("override of \"%1\"").arg(regionId), warnings);
+        style = applyRegionProperties(style, mine.toObject(), QStringLiteral("override of \"%1\"").arg(regionId), warnings);
     }
-    return style;
+    // Once, on the final style: an item's small maxSize followed by a slide's large one must not
+    // leave minSize clamped by the item's.
+    return enforceRegionConstraints(style, region->style, QStringLiteral("override of \"%1\"").arg(regionId), warnings);
 }
 
 std::optional<RegionStyle> effectiveStyle(const Template &tmpl, const QString &regionId,

@@ -34,13 +34,6 @@ QStringList slidesFromJson(const QVariant &v)
     return out;
 }
 
-// Exactly one override per slide, {} for none, whatever the caller left (#92).
-QList<QJsonObject> fitted(QList<QJsonObject> overrides, qsizetype slides)
-{
-    overrides.resize(slides);
-    return overrides;
-}
-
 QString overridesJson(const QList<QJsonObject> &overrides)
 {
     QJsonArray a;
@@ -139,7 +132,7 @@ SongStore::Result SongStore::save(Song &song)
     for (Group &g : s.groups) {
         if (g.id.isNull())
             g.id = QUuid::createUuid();
-        g.slideOverrides = fitted(g.slideOverrides, g.slides.size());
+        g.fitSlideOverrides();   // exactly one per slide, whatever the caller left (#92)
     }
     for (Arrangement &a : s.arrangements) {
         if (a.id.isNull())
@@ -311,7 +304,8 @@ std::optional<Song> SongStore::load(const QUuid &id) const
     g.exec();
     while (g.next()) {
         Group group{uuid(g.value(0)), g.value(1).toString(), g.value(2).toString(), slidesFromJson(g.value(3))};
-        group.slideOverrides = fitted(overridesFromJson(g.value(4)), group.slides.size());
+        group.slideOverrides = overridesFromJson(g.value(4));
+        group.fitSlideOverrides();
         s.groups << group;
     }
 

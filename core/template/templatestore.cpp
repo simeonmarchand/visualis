@@ -7,6 +7,8 @@
 #include <QSqlQuery>
 #include <QVariant>
 
+#include <limits>
+
 namespace visualis {
 
 namespace {
@@ -19,13 +21,23 @@ QString validate(const Template &t)
         return QStringLiteral("A template needs a name.");
     if (t.regions.size() > templatelimits::kRegions)
         return QStringLiteral("\"%1\" has %2 regions; the limit is %3.").arg(t.name).arg(t.regions.size()).arg(templatelimits::kRegions);
+    if (t.name.trimmed().size() > templatelimits::kTextLength)
+        return QStringLiteral("The template's name is longer than %1 characters.").arg(templatelimits::kTextLength);
+    if (t.revision < 0 || t.revision == std::numeric_limits<int>::max())
+        return QStringLiteral("\"%1\" has an invalid revision; duplicate it instead.").arg(t.name);
+    // The same rules templateFromJson reads ids with, so a saved region never loads renamed or skipped.
     QSet<QString> ids;
     for (const TextRegion &r : t.regions) {
-        if (r.id.trimmed().isEmpty())
+        const QString id = r.id.trimmed();
+        if (id.isEmpty())
             return QStringLiteral("\"%1\" has a region without an id.").arg(t.name);
-        if (ids.contains(r.id))
-            return QStringLiteral("\"%1\" has two regions with the id \"%2\".").arg(t.name, r.id);
-        ids.insert(r.id);
+        if (id != r.id)
+            return QStringLiteral("\"%1\" has a region id with spaces around it (\"%2\").").arg(t.name, r.id);
+        if (id.size() > templatelimits::kTextLength)
+            return QStringLiteral("\"%1\" has a region id longer than %2 characters.").arg(t.name).arg(templatelimits::kTextLength);
+        if (ids.contains(id))
+            return QStringLiteral("\"%1\" has two regions with the id \"%2\".").arg(t.name, id);
+        ids.insert(id);
     }
     return {};
 }
@@ -55,6 +67,9 @@ TemplateStore::Result TemplateStore::save(Template &tmpl)
     const QByteArray body = templateToJson(t);
     if (body.size() > templatelimits::kBytes)
         return {false, QStringLiteral("\"%1\" is too large to save.").arg(t.name)};
+    // What's stored must read back as it is: a value the reader would replace isn't saved.
+    if (const TemplateJsonResult back = templateFromJson(body); !back.tmpl || !back.warnings.isEmpty())
+        return {false, QStringLiteral("Couldn't save \"%1\": %2").arg(t.name, back.tmpl ? back.warnings.first() : back.error)};
 
     QSqlQuery q(m_library.database());
     q.prepare("INSERT INTO template (id, name, kind, body, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?) "

@@ -196,8 +196,8 @@ QJsonObject regionStyleToJson(const RegionStyle &s)
     };
 }
 
-RegionStyle applyRegionStyle(const RegionStyle &base, const QJsonObject &json, const QString &where,
-                             QStringList *warnings)
+RegionStyle applyRegionProperties(const RegionStyle &base, const QJsonObject &json, const QString &where,
+                                  QStringList *warnings)
 {
     RegionStyle s = base;
     Reader r(json, where, warnings);
@@ -209,19 +209,11 @@ RegionStyle applyRegionStyle(const RegionStyle &base, const QJsonObject &json, c
         fr.number("y", 0, 1, y);
         fr.number("w", 0, 1, w, true);
         fr.number("h", 0, 1, h, true);
-        constexpr double kSlack = 1e-9;   // fractions that add to 1 may round just past it
-        if (x + w > 1 + kSlack || y + h > 1 + kSlack)
-            fr.report(QStringLiteral("%1 runs off the output; using the frame it had").arg(r.where("frame")));
-        else
-            s.frame = QRectF(x, y, w, h);
+        s.frame = QRectF(x, y, w, h);
     }
     r.text("fontFamily", s.fontFamily);
     r.number("maxSize", 0, 1, s.maxSize, true);
     r.number("minSize", 0, 1, s.minSize, true);
-    if (s.minSize > s.maxSize) {
-        r.report(QStringLiteral("%1 is larger than %2; using %2 for both").arg(r.where("minSize"), r.where("maxSize")));
-        s.minSize = s.maxSize;
-    }
     r.integer("weight", 1, 1000, s.weight);
     r.color("color", s.color);
     r.choice("align", kHAligns, s.hAlign);
@@ -242,6 +234,31 @@ RegionStyle applyRegionStyle(const RegionStyle &base, const QJsonObject &json, c
         orr.number("width", 0, 0.1, s.outline.width);
     }
     return s;
+}
+
+RegionStyle enforceRegionConstraints(RegionStyle s, const RegionStyle &fallback, const QString &where,
+                                     QStringList *warnings)
+{
+    auto report = [&](const QString &w) {
+        if (warnings)
+            *warnings << w;
+    };
+    constexpr double kSlack = 1e-9;   // fractions that add to 1 may round just past it
+    if (s.frame.right() > 1 + kSlack || s.frame.bottom() > 1 + kSlack) {
+        report(QStringLiteral("%1.frame runs off the output; using the frame it had").arg(where));
+        s.frame = fallback.frame;
+    }
+    if (s.minSize > s.maxSize) {
+        report(QStringLiteral("%1.minSize is larger than %1.maxSize; using %1.maxSize for both").arg(where));
+        s.minSize = s.maxSize;
+    }
+    return s;
+}
+
+RegionStyle applyRegionStyle(const RegionStyle &base, const QJsonObject &json, const QString &where,
+                             QStringList *warnings)
+{
+    return enforceRegionConstraints(applyRegionProperties(base, json, where, warnings), base, where, warnings);
 }
 
 QByteArray templateToJson(const Template &t)

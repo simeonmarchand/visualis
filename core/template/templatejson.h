@@ -52,8 +52,15 @@ TemplateJsonResult templateFromJson(const QByteArray &json);
 // One region's style as JSON, the keys above.
 QJsonObject regionStyleToJson(const RegionStyle &style);
 // `base` with every valid property in `json` applied; invalid ones are reported in
-// `warnings` (prefixed with `where`) and leave base's value. Shared by reading a template
-// (base: the defaults) and by overrides (base: the template's style).
+// `warnings` (prefixed with `where`) and leave base's value. Checks no rule between
+// properties, so several layers can be applied before enforceRegionConstraints runs once.
+RegionStyle applyRegionProperties(const RegionStyle &base, const QJsonObject &json, const QString &where,
+                                  QStringList *warnings);
+// The rules between properties: the frame stays on the output (else `fallback`'s frame) and
+// minSize is at most maxSize (else both are maxSize). Breaking one is reported.
+RegionStyle enforceRegionConstraints(RegionStyle style, const RegionStyle &fallback, const QString &where,
+                                     QStringList *warnings);
+// Both, for one layer over `base`, as reading a template does.
 RegionStyle applyRegionStyle(const RegionStyle &base, const QJsonObject &json, const QString &where,
                              QStringList *warnings);
 

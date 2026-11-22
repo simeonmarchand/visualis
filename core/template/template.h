@@ -133,8 +133,9 @@ QUuid overrideTemplateId(const QJsonObject &overrides);
 
 // The region's style with the overrides applied: an overridden property sticks, everything
 // else follows the template. A value that isn't valid for its property is ignored (the
-// template's value shows) and reported in `warnings`. nullopt if the template has no such
-// region.
+// template's value shows) and reported in `warnings`. Rules between properties (minSize at
+// most maxSize, the frame on the output) are checked once, after every layer. nullopt if the
+// template has no such region.
 std::optional<RegionStyle> effectiveStyle(const Template &tmpl, const QString &regionId,
                                           const QList<QJsonObject> &layers, QStringList *warnings = nullptr);
 std::optional<RegionStyle> effectiveStyle(const Template &tmpl, const QString &regionId,

@@ -34,7 +34,8 @@ QByteArray songToJson(const Song &song);
 
 struct SongJsonResult {
     std::optional<Song> song;
-    QString error;   // set when the JSON can't be read as a song
+    QString error;          // set when the JSON can't be read as a song
+    QStringList warnings;   // what was read with problems and dropped, for the import report
 };
 SongJsonResult songFromJson(const QByteArray &json);
 

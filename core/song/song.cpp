@@ -4,6 +4,17 @@
 
 namespace visualis {
 
+bool Group::operator==(const Group &other) const
+{
+    if (id != other.id || label != other.label || color != other.color || slides != other.slides)
+        return false;
+    for (qsizetype i = 0; i < slides.size(); ++i) {
+        if (slideOverride(i) != other.slideOverride(i))
+            return false;
+    }
+    return true;
+}
+
 const Group *Song::group(const QUuid &id) const
 {
     auto it = std::find_if(groups.cbegin(), groups.cend(), [&](const Group &g) { return g.id == id; });

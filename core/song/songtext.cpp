@@ -73,8 +73,16 @@ LyricsEdit applyLyricsText(const Song &song, const QString &text)
     for (int p = 0; p < parsed.groups.size(); ++p) {
         Group g = parsed.groups[p];
         if (matchOf[p] >= 0) {
-            g.id = old[matchOf[p]].id;
-            g.color = old[matchOf[p]].color;
+            const Group &was = old[matchOf[p]];
+            g.id = was.id;
+            g.color = was.color;
+            // Slide overrides follow unchanged slides only; remapping edited text is #95's.
+            const bool hadOverrides = std::any_of(was.slideOverrides.cbegin(), was.slideOverrides.cend(),
+                                                  [](const QJsonObject &o) { return !o.isEmpty(); });
+            if (g.slides == was.slides)
+                g.slideOverrides = was.slideOverrides;
+            else if (hadOverrides)
+                out.warnings << QStringLiteral("\"%1\"'s lyrics changed, so its per-slide style changes were dropped.").arg(g.label);
         } else if (!song.arrangements.isEmpty()) {
             out.warnings << QStringLiteral("\"%1\" is new and isn't in any arrangement yet.").arg(g.label);
         }

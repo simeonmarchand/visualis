@@ -1,6 +1,7 @@
 #include "library/library.h"
 #include "song/songjson.h"
 #include "song/songstore.h"
+#include "song/songtext.h"
 #include "template/template.h"
 #include "template/templatejson.h"
 #include "template/templatestore.h"
@@ -474,6 +475,165 @@ private slots:
         QCOMPARE(overrideTemplateId({{"template", id.toString(QUuid::WithoutBraces)}}), id);
         QVERIFY(overrideTemplateId({}).isNull());
         QVERIFY(overrideTemplateId({{"template", 4}}).isNull());
+    }
+
+    // Codex on #102 (1): what's saved must load back with the same regions.
+    void saveRefusesWhatTheReaderWouldChange_data()
+    {
+        QTest::addColumn<QStringList>("ids");
+        QTest::addColumn<QString>("color");
+        QTest::newRow("spaces around an id") << QStringList{" main "} << "#ffffff";
+        QTest::newRow("the same id once trimmed") << QStringList{"main", "main\t"} << "#ffffff";
+        QTest::newRow("an id over the limit") << QStringList{QString(templatelimits::kTextLength + 1, 'x')} << "#ffffff";
+        QTest::newRow("a value the reader replaces") << QStringList{"main"} << "white";
+    }
+    void saveRefusesWhatTheReaderWouldChange()
+    {
+        QFETCH(QStringList, ids);
+        QFETCH(QString, color);
+        Template t;
+        t.name = "Odd";
+        for (const QString &id : ids) {
+            RegionStyle style;
+            style.color = color;
+            t.regions << TextRegion{id, {}, style, {}};
+        }
+        const Template before = t;
+        TemplateStore store(*m_library);
+        const TemplateStore::Result r = store.save(t);
+        QVERIFY(!r.ok);
+        QVERIFY(!r.error.isEmpty());
+        QCOMPARE(t, before);
+        QCOMPARE(store.list().size(), 1);   // only the built-in
+    }
+
+    // Codex on #102 (4).
+    void aRevisionAtTheLimitIsRefusedNotOverflowed()
+    {
+        Template t = sample();
+        t.revision = std::numeric_limits<int>::max();
+        QVERIFY(!TemplateStore(*m_library).save(t).ok);
+        QCOMPARE(t.revision, std::numeric_limits<int>::max());
+        t.revision = -1;
+        QVERIFY(!TemplateStore(*m_library).save(t).ok);
+    }
+
+    // Codex on #102 (2): rules between properties hold for the final style, not each layer.
+    void layersAreCheckedTogether()
+    {
+        const Template t = builtInLyricsTemplate();
+        const RegionStyle &base = t.regions[0].style;
+        auto layer = [](const QJsonObject &main) { return QJsonObject{{"regions", QJsonObject{{"main", main}}}}; };
+        QStringList warnings;
+
+        // Alone, the item's maxSize is below the template's minSize; the slide's isn't.
+        RegionStyle s = *effectiveStyle(t, "main", {layer({{"maxSize", 0.02}}), layer({{"maxSize", 0.08}})}, &warnings);
+        QCOMPARE(s.maxSize, 0.08);
+        QCOMPARE(s.minSize, base.minSize);
+        QVERIFY2(warnings.isEmpty(), qPrintable(warnings.join('\n')));
+
+        // A frame moved down by the item and shortened by the slide fits once both apply.
+        s = *effectiveStyle(t, "main", {layer({{"frame", QJsonObject{{"y", 0.6}}}}), layer({{"frame", QJsonObject{{"h", 0.3}}}})}, &warnings);
+        QCOMPARE(s.frame, QRectF(base.frame.x(), 0.6, base.frame.width(), 0.3));
+        QVERIFY(warnings.isEmpty());
+
+        // The final style still obeys them.
+        s = *effectiveStyle(t, "main", layer({{"maxSize", 0.02}}), &warnings);
+        QCOMPARE(s.minSize, 0.02);
+        QCOMPARE(warnings.size(), 1);
+    }
+
+    // Codex (3) and claude-3 (b) on #102: one form of "no overrides", at every boundary.
+    void slideOverridesFitAtTheJsonBoundaries()
+    {
+        const QJsonObject gold{{"regions", QJsonObject{{"main", QJsonObject{{"color", "#ffcc00"}}}}}};
+        Song s;
+        s.title = "Fitting";
+        s.groups = {Group{QUuid::createUuid(), "Short", {}, {"a", "b", "c"}}, Group{QUuid::createUuid(), "Long", {}, {"d"}},
+                    Group{QUuid::createUuid(), "Empty", {}, {"e"}}};
+        s.groups[0].slideOverrides = {gold};
+        s.groups[1].slideOverrides = {gold, gold, gold};
+        s.groups[2].slideOverrides = {{}, {}};   // all empty: written as none
+
+        const QJsonObject written = object(songToJson(s));
+        QCOMPARE(written["groups"][0]["slideOverrides"].toArray().size(), 3);
+        QCOMPARE(written["groups"][1]["slideOverrides"].toArray().size(), 1);
+        QVERIFY(!written["groups"][2].toObject().contains("slideOverrides"));
+
+        const SongJsonResult r = songFromJson(songToJson(s));
+        QVERIFY2(r.song, qPrintable(r.error));
+        for (const Group &g : r.song->groups)
+            QCOMPARE(g.slideOverrides.size(), g.slides.size());
+        QCOMPARE(r.song->groups[0].slideOverrides, QList<QJsonObject>({gold, {}, {}}));
+        QCOMPARE(r.song->groups[1].slideOverrides, QList<QJsonObject>({gold}));
+
+        // A song from the library equals the same song from its export, and from before saving.
+        SongStore store(*m_library);
+        Song plain = s;
+        for (Group &g : plain.groups)
+            g.slideOverrides.clear();
+        Song saved = plain;
+        QVERIFY(store.save(saved).ok);
+        const Song loaded = *store.load(saved.id);
+        QCOMPARE(*songFromJson(songToJson(loaded)).song, loaded);
+        plain.id = saved.id;
+        plain.created = saved.created;
+        plain.updated = saved.updated;
+        QCOMPARE(loaded, plain);
+    }
+
+    // Codex on #102 (5): unusable overrides are reported, at import too.
+    void malformedSlideOverridesAreReported()
+    {
+        QJsonObject song{{"format", "visualis-song"}, {"version", 1}, {"title", "Malformed"},
+                         {"groups", QJsonArray{
+                             QJsonObject{{"label", "Verse"}, {"slides", QJsonArray{"a"}}, {"slideOverrides", 42}},
+                             QJsonObject{{"label", "Chorus"}, {"slides", QJsonArray{"b", "c"}}, {"slideOverrides", QJsonArray{42, QJsonObject{}}}},
+                             QJsonObject{{"label", "Tag"}, {"slides", QJsonArray{"d"}}, {"slideOverrides", QJsonArray{QJsonObject{}, QJsonObject{}}}},
+                         }}};
+        const SongJsonResult r = songFromJson(json(song));
+        QVERIFY2(r.song, qPrintable(r.error));
+        QCOMPARE(r.warnings.size(), 3);
+        QVERIFY(r.warnings[0].contains("Verse"));
+        QVERIFY(r.warnings[1].contains("slide 1"));
+        QVERIFY(r.warnings[2].contains("2 slide overrides for 1 slides"));
+        for (const Group &g : r.song->groups)
+            QCOMPARE(g.slideOverrides.size(), g.slides.size());
+
+        QTemporaryDir folder;
+        QFile f(folder.filePath("Malformed.visualis-song.json"));
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        f.write(json(song));
+        f.close();
+        SongStore store(*m_library);
+        const SongImportReport report = importSongs(folder.path(), store);
+        QCOMPARE(report.imported, QStringList{"Malformed"});
+        QCOMPARE(report.warnings.size(), 3);
+        QVERIFY(report.warnings[0].startsWith("Malformed.visualis-song.json: "));
+    }
+
+    // claude-3 on #102 (a): an editor save keeps the overrides of slides it didn't change.
+    void editingLyricsKeepsOverridesOfUnchangedGroups()
+    {
+        const QJsonObject gold{{"regions", QJsonObject{{"main", QJsonObject{{"color", "#ffcc00"}}}}}};
+        Song s;
+        s.title = "Edited";
+        s.groups = {Group{QUuid::createUuid(), "Verse 1", {}, {"one", "two"}}, Group{QUuid::createUuid(), "Chorus", {}, {"sing"}}};
+        s.groups[0].slideOverrides = {{}, gold};
+        s.groups[1].slideOverrides = {gold};
+
+        // Unchanged text keeps everything.
+        LyricsEdit same = applyLyricsText(s, lyricsText(s));
+        QCOMPARE(same.song.groups[0].slideOverrides, s.groups[0].slideOverrides);
+        QCOMPARE(same.song.groups[1].slideOverrides, s.groups[1].slideOverrides);
+        QVERIFY(same.warnings.isEmpty());
+
+        // Editing the chorus keeps the verse's and says the chorus's were dropped.
+        const LyricsEdit edited = applyLyricsText(s, "[Verse 1]\none\n\ntwo\n\n[Chorus]\nsing it");
+        QCOMPARE(edited.song.groups[0].slideOverrides, s.groups[0].slideOverrides);
+        QVERIFY(edited.song.groups[1].slideOverride(0).isEmpty());
+        QCOMPARE(edited.warnings.size(), 1);
+        QVERIFY(edited.warnings[0].contains("Chorus"));
     }
 
 private:
