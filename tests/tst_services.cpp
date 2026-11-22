@@ -74,6 +74,7 @@ private slots:
         song.pcoItemId = "999";
         song.overrides = QJsonObject{{"background", "blue-motion"}};
         song.importSnapshot = QJsonObject{{"title", "Amazing Grace"}, {"sequence", "V1 V1"}};
+        song.pcoRemoved = true;
         ServiceItem text = item(Kind::Text, "Welcome");
         text.body = "Welcome to church!\nWe're glad you're here.";
         ServiceItem scripture = item(Kind::Scripture, "Scripture Reading: Acts 2:38");
@@ -296,6 +297,60 @@ private slots:
         QCOMPARE(store.load(id)->pcoPlanUrl, s->pcoPlanUrl);
     }
 
+    void aVersion5LibraryGainsTheRemovedFlag()
+    {
+        const QString folder = m_dir.filePath("v5");
+        QUuid id;
+        {
+            auto v5 = Library::open(folder, std::vector<Migration>(Library::migrations().begin(), Library::migrations().begin() + 5));
+            QVERIFY2(v5.library, qPrintable(v5.message));
+            QSqlQuery q(v5.library->database());
+            id = QUuid::createUuid();
+            QVERIFY(q.exec(QStringLiteral("INSERT INTO service (id, title, created_at, updated_at) VALUES ('%1', 'Before', '', '')")
+                               .arg(id.toString(QUuid::WithoutBraces))));
+            QVERIFY(q.exec(QStringLiteral("INSERT INTO service_item (id, service_id, position, kind, title) "
+                                          "VALUES ('%1', '%2', 0, 'header', 'Worship')")
+                               .arg(QUuid::createUuid().toString(QUuid::WithoutBraces), id.toString(QUuid::WithoutBraces))));
+        }
+        auto now = Library::open(folder);
+        QVERIFY2(now.library, qPrintable(now.message));
+        ServiceStore store(*now.library);
+        std::optional<Service> s = store.load(id);
+        QVERIFY(s);
+        QCOMPARE(s->items.size(), 1);
+        QVERIFY(!s->items[0].pcoRemoved);
+        s->items[0].pcoRemoved = true;
+        QVERIFY(store.save(*s).ok);
+        QVERIFY(store.load(id)->items[0].pcoRemoved);
+    }
+
+    // #56: deleting an imported item is an edit a re-import must keep.
+    void deletingAnImportedItemIsRemembered()
+    {
+        Service s;
+        s.title = "Imported";
+        ServiceItem welcome = item(Kind::Placeholder, "Welcome");
+        welcome.pcoItemId = "11";
+        welcome.importSnapshot = QJsonObject{{"title", "Welcome"}, {"position", 1}};
+        ServiceItem gone = item(Kind::Placeholder, "Offering");
+        gone.pcoItemId = "12";
+        gone.pcoRemoved = true;   // Planning Center took it out already
+        s.items = {welcome, gone, item(Kind::Text, "Local note")};
+        QVERIFY(m_services->save(s).ok);
+
+        s.items.clear();
+        QVERIFY(m_services->save(s).ok);
+        const QList<RemovedPcoItem> expected{{"11", welcome.importSnapshot}};
+        QCOMPARE(s.removedPcoItems, expected);
+        QCOMPARE(m_services->load(s.id)->removedPcoItems, expected);
+
+        QVERIFY(m_services->save(s).ok);   // saving again doesn't add it twice
+        QCOMPARE(m_services->load(s.id)->removedPcoItems, expected);
+        s.removedPcoItems.clear();         // added back by a re-import
+        QVERIFY(m_services->save(s).ok);
+        QVERIFY(m_services->load(s.id)->removedPcoItems.isEmpty());
+    }
+
     void jsonRoundTripsAndToleratesUnknownKinds()
     {
         Service s;
@@ -307,10 +362,13 @@ private slots:
         song.ref = m_songId;
         song.customSequence = {"Verse 1"};
         song.overrides = QJsonObject{{"template", "lyrics"}};
+        song.pcoRemoved = true;
         s.items = {song};
+        s.removedPcoItems = {{"77", QJsonObject{{"title", "Offering"}}}};
         const ServiceJsonResult r = serviceFromJson(serviceToJson(s));
         QVERIFY2(r.service, qPrintable(r.error));
         QCOMPARE(r.service->items, s.items);
+        QCOMPARE(r.service->removedPcoItems, s.removedPcoItems);
         QCOMPARE(r.service->date, s.date);
         s.pcoPlanUrl = "https://services.planningcenteronline.com/plans/1";
         QCOMPARE(serviceFromJson(serviceToJson(s)).service->pcoPlanUrl, s.pcoPlanUrl);

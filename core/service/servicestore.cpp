@@ -134,13 +134,26 @@ ServiceStore::Result ServiceStore::save(Service &service, bool newPlan)
 
     {
         QSqlQuery q(db);
-        q.prepare("SELECT id FROM service_item WHERE service_id = ?");
+        q.prepare("SELECT id, pco_item_id, import_snapshot, pco_removed FROM service_item WHERE service_id = ?");
         q.addBindValue(serviceId);
         q.exec();
+        QSet<QString> stillThere;
+        for (const ServiceItem &it : std::as_const(s.items))
+            stillThere << it.pcoItemId;
+        for (const RemovedPcoItem &r : std::as_const(s.removedPcoItems))
+            stillThere << r.pcoItemId;
         QList<QUuid> gone;
         while (q.next()) {
-            if (!itemIds.contains(uuid(q.value(0))))
-                gone << uuid(q.value(0));
+            if (itemIds.contains(uuid(q.value(0))))
+                continue;
+            gone << uuid(q.value(0));
+            // Deleting an imported item is an edit a re-import must keep (#56). One Planning
+            // Center already took out needs no record.
+            const QString pcoId = q.value(1).toString();
+            if (!pcoId.isEmpty() && q.value(3).toInt() == 0 && !stillThere.contains(pcoId)) {
+                s.removedPcoItems << RemovedPcoItem{pcoId, objectFrom(q.value(2))};
+                stillThere << pcoId;
+            }
         }
         for (const QUuid &id : gone) {
             if (!(err = run(db, "DELETE FROM service_item WHERE id = ?", {key(id)})).isEmpty())
@@ -152,15 +165,25 @@ ServiceStore::Result ServiceStore::save(Service &service, bool newPlan)
         const ServiceItem &it = s.items[i];
         err = run(db,
             "INSERT INTO service_item (id, service_id, position, kind, title, ref_id, arrangement_id, custom_sequence, "
-            "body, service_position, pco_item_id, overrides, import_snapshot) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "body, service_position, pco_item_id, overrides, import_snapshot, pco_removed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(id) DO UPDATE SET position = excluded.position, kind = excluded.kind, title = excluded.title, "
             "ref_id = excluded.ref_id, arrangement_id = excluded.arrangement_id, custom_sequence = excluded.custom_sequence, "
             "body = excluded.body, service_position = excluded.service_position, pco_item_id = excluded.pco_item_id, "
-            "overrides = excluded.overrides, import_snapshot = excluded.import_snapshot",
+            "overrides = excluded.overrides, import_snapshot = excluded.import_snapshot, pco_removed = excluded.pco_removed",
             {key(it.id), serviceId, i, kindName(it.kind), text(it.title), key(it.ref), key(it.arrangement),
              json(it.customSequence), text(it.body), text(it.servicePosition), text(it.pcoItemId), json(it.overrides),
-             json(it.importSnapshot)});
+             json(it.importSnapshot), it.pcoRemoved ? 1 : 0});
         if (!err.isEmpty())
+            return fail(err);
+    }
+
+    std::sort(s.removedPcoItems.begin(), s.removedPcoItems.end(),
+              [](const RemovedPcoItem &a, const RemovedPcoItem &b) { return a.pcoItemId < b.pcoItemId; });
+    if (!(err = run(db, "DELETE FROM service_removed_pco_item WHERE service_id = ?", {serviceId})).isEmpty())
+        return fail(err);
+    for (const RemovedPcoItem &r : std::as_const(s.removedPcoItems)) {
+        if (!(err = run(db, "INSERT OR REPLACE INTO service_removed_pco_item (service_id, pco_item_id, import_snapshot) "
+                            "VALUES (?, ?, ?)", {serviceId, r.pcoItemId, json(r.importSnapshot)})).isEmpty())
             return fail(err);
     }
 
@@ -193,7 +216,7 @@ std::optional<Service> ServiceStore::load(const QUuid &id) const
 
     QSqlQuery items(db);
     items.prepare("SELECT id, kind, title, ref_id, arrangement_id, custom_sequence, body, service_position, "
-                  "pco_item_id, overrides, import_snapshot FROM service_item WHERE service_id = ? ORDER BY position");
+                  "pco_item_id, overrides, import_snapshot, pco_removed FROM service_item WHERE service_id = ? ORDER BY position");
     items.addBindValue(key(id));
     items.exec();
     while (items.next()) {
@@ -209,6 +232,7 @@ std::optional<Service> ServiceStore::load(const QUuid &id) const
         it.pcoItemId = items.value(8).toString();
         it.overrides = objectFrom(items.value(9));
         it.importSnapshot = objectFrom(items.value(10));
+        it.pcoRemoved = items.value(11).toInt() != 0;
         if (it.kind == ServiceItem::Kind::Song && !songExists(db, it.ref)) {
             // The song was deleted from the library: keep the place, ask for a song again.
             it.kind = ServiceItem::Kind::Placeholder;
@@ -217,6 +241,12 @@ std::optional<Service> ServiceStore::load(const QUuid &id) const
         }
         s.items << it;
     }
+    QSqlQuery removed(db);
+    removed.prepare("SELECT pco_item_id, import_snapshot FROM service_removed_pco_item WHERE service_id = ? ORDER BY pco_item_id");
+    removed.addBindValue(key(id));
+    removed.exec();
+    while (removed.next())
+        s.removedPcoItems << RemovedPcoItem{removed.value(0).toString(), objectFrom(removed.value(1))};
     return s;
 }
 

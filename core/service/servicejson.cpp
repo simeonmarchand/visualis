@@ -20,14 +20,18 @@ QByteArray serviceToJson(const Service &s)
             {"id", idText(it.id)}, {"kind", kindName(it.kind)}, {"title", it.title}, {"ref", idText(it.ref)},
             {"arrangement", idText(it.arrangement)}, {"customSequence", QJsonArray::fromStringList(it.customSequence)},
             {"body", it.body}, {"servicePosition", it.servicePosition}, {"pcoItemId", it.pcoItemId},
-            {"overrides", it.overrides}, {"importSnapshot", it.importSnapshot},
+            {"overrides", it.overrides}, {"importSnapshot", it.importSnapshot}, {"pcoRemoved", it.pcoRemoved},
         });
     }
+    QJsonArray removed;
+    for (const RemovedPcoItem &r : s.removedPcoItems)
+        removed.append(QJsonObject{{"pcoItemId", r.pcoItemId}, {"importSnapshot", r.importSnapshot}});
     const QJsonObject o{
         {"format", "visualis-service"}, {"version", kVersion}, {"id", idText(s.id)}, {"title", s.title},
         {"date", s.date.isValid() ? s.date.toString(Qt::ISODate) : QString()}, {"pcoPlanId", s.pcoPlanId},
         {"pcoServiceTypeId", s.pcoServiceTypeId}, {"pcoPlanUrl", s.pcoPlanUrl}, {"lastImportedAt", time(s.lastImportedAt)},
         {"created", time(s.created)}, {"updated", time(s.updated)}, {"items", items},
+        {"removedPcoItems", removed},
     };
     return QJsonDocument(o).toJson(QJsonDocument::Indented);
 }
@@ -75,7 +79,12 @@ ServiceJsonResult serviceFromJson(const QByteArray &json)
         it.pcoItemId = i.value("pcoItemId").toString();
         it.overrides = i.value("overrides").toObject();
         it.importSnapshot = i.value("importSnapshot").toObject();
+        it.pcoRemoved = i.value("pcoRemoved").toBool();
         s.items << it;
+    }
+    for (const QJsonValue &v : o.value("removedPcoItems").toArray()) {
+        const QJsonObject x = v.toObject();
+        s.removedPcoItems << RemovedPcoItem{x.value("pcoItemId").toString(), x.value("importSnapshot").toObject()};
     }
     r.service = s;
     return r;

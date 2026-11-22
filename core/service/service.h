@@ -26,8 +26,18 @@ struct ServiceItem {
     QString pcoItemId;          // Planning Center link, if imported
     QJsonObject overrides;      // template, background, slide edits (plan 5.2; shaped in Phase 3)
     QJsonObject importSnapshot; // Planning Center's fields at the last import, for re-import
+    bool pcoRemoved = false;    // gone from the plan at the last re-import: flagged, not deleted (#56)
 
     bool operator==(const ServiceItem &) const = default;
+};
+
+// An imported item the operator deleted (#56): a re-import doesn't bring it back unless
+// they ask. `importSnapshot` is what Planning Center said when it was last merged.
+struct RemovedPcoItem {
+    QString pcoItemId;
+    QJsonObject importSnapshot;
+
+    bool operator==(const RemovedPcoItem &) const = default;
 };
 
 struct Service {
@@ -39,6 +49,7 @@ struct Service {
     QString pcoPlanUrl;         // the plan in Planning Center's web app (P3 finding 7)
     QDateTime lastImportedAt;   // UTC; invalid if never imported
     QList<ServiceItem> items;   // in order
+    QList<RemovedPcoItem> removedPcoItems;   // kept by ServiceStore when an imported item is deleted
     QDateTime created;          // set by ServiceStore, UTC
     QDateTime updated;
 
