@@ -1,6 +1,7 @@
 #pragma once
 
 #include "song.h"
+#include "songmatch.h"
 
 #include <QList>
 #include <functional>
@@ -40,6 +41,8 @@ public:
     bool remove(const QUuid &id);
     // Every song, sorted by title, ignoring case.
     QList<SongSummary> list() const;
+    // Every song with what matching a Planning Center song needs (#55).
+    QList<SongCandidate> matchCandidates() const;
 
 private:
     Library &m_library;

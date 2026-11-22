@@ -260,4 +260,15 @@ QList<SongSummary> SongStore::list() const
     return out;
 }
 
+QList<SongCandidate> SongStore::matchCandidates() const
+{
+    QList<SongCandidate> out;
+    QSqlQuery q(m_library.database());
+    q.exec("SELECT id, title, ccli_number, authors, pco_song_id FROM song ORDER BY title COLLATE NOCASE, id");
+    while (q.next())
+        out << SongCandidate{uuid(q.value(0)), q.value(1).toString(), q.value(2).toString(), q.value(3).toString(),
+                             q.value(4).toString()};
+    return out;
+}
+
 } // namespace visualis
