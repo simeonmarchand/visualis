@@ -1,5 +1,6 @@
 #include "library/library.h"
 #include "song/song.h"
+#include "song/songlimits.h"
 #include "song/songstore.h"
 
 #include <QSqlQuery>
@@ -134,6 +135,113 @@ private slots:
         for (const SongSummary &s : store.list())
             titles << s.title;
         QCOMPARE(titles, (QStringList{"After", "Before"}));   // none of Bad, not even its song row
+    }
+
+    // #83: no caller can make the GUI thread save an unbounded song, so save() refuses one
+    // over the limits before it gives out ids or writes anything.
+    void aSongOverTheLimitsIsRefused()
+    {
+        SongStore store(*m_lib);
+        Song huge = sampleSong();
+        huge.groups.clear();
+        for (int i = 0; i <= songlimits::kGroups; ++i)
+            huge.groups << group(QStringLiteral("Verse %1").arg(i + 1), {"line"});
+        for (Arrangement &a : huge.arrangements)
+            a.sequence = {huge.groups[0].id};
+        const Song unchanged = huge;
+        const SongStore::Result r = store.save(huge);
+        QVERIFY(!r.ok);
+        QCOMPARE(r.error, QStringLiteral("too many groups: 501; the limit is 500"));
+        QCOMPARE(huge, unchanged);   // no ids or timestamps given
+        QVERIFY(store.list().isEmpty());
+        QCOMPARE(count(*m_lib, "SELECT count(*) FROM song_group"), 0);
+    }
+
+    // A song exactly at every limit at once still saves: the limits refuse only what's past them.
+    void aSongAtEveryLimitSaves()
+    {
+        using namespace songlimits;
+        SongStore store(*m_lib);
+        Song s;
+        s.title = QStringLiteral("At the Limits");
+        int slides = 0;
+        for (int i = 0; i < kGroups; ++i) {
+            // The first group is full; the rest share what's left of kSlides.
+            const int n = i == 0 ? kSlidesPerGroup : (kSlides - kSlidesPerGroup) / (kGroups - 1)
+                                                         + (i <= (kSlides - kSlidesPerGroup) % (kGroups - 1) ? 1 : 0);
+            s.groups << group(QStringLiteral("Verse %1").arg(i + 1), QStringList(n, QStringLiteral("line")));
+            slides += n;
+        }
+        QCOMPARE(slides, kSlides);
+        s.groups[1].slides[0] = QString(kCharactersPerSlide, QChar('a'));
+        for (int i = 0; i < kArrangements; ++i)
+            s.arrangements << Arrangement{QUuid::createUuid(), QStringLiteral("Arrangement %1").arg(i + 1),
+                                          {s.groups[i].id}, {}};
+        s.arrangements[0].sequence = QList<QUuid>(kSteps, s.groups[0].id);
+        QVERIFY(songLimitError(s).isEmpty());
+        SAVE_OK(store, s);
+        QCOMPARE(*store.load(s.id), s);
+    }
+
+    // #103: re-linking a song to Planning Center touches only the link and the credits.
+    void updatePcoLinkChangesOnlyTheLinkAndCredits()
+    {
+        SongStore store(*m_lib);
+        Song s = sampleSong();
+        SAVE_OK(store, s);
+        Song relinked = s;
+        relinked.pcoSongId = "999";
+        relinked.credits = {"111", "New Author", "New Copyright"};
+        relinked.title = "Not Saved";   // everything else is left as stored
+        relinked.groups[1].slides = {"not saved"};
+        relinked.arrangements.clear();
+        QVERIFY(store.updatePcoLink(relinked).ok);
+
+        Song expected = s;
+        expected.pcoSongId = "999";
+        expected.credits = relinked.credits;
+        QCOMPARE(*store.load(s.id), expected);   // updated_at too
+    }
+
+    void updatePcoLinkRollsBackWithTheCallersTransaction()
+    {
+        SongStore store(*m_lib);
+        Song s = sampleSong();
+        SAVE_OK(store, s);
+        Song relinked = s;
+        relinked.pcoSongId = "999";
+        {
+            SongStore::Batch caller(store);
+            QVERIFY(store.updatePcoLink(relinked).ok);
+            QCOMPARE(store.load(s.id)->pcoSongId, QStringLiteral("999"));   // visible inside it
+        }   // rolled back
+        QCOMPARE(store.load(s.id)->pcoSongId, s.pcoSongId);
+
+        SongStore::Batch caller(store);
+        QVERIFY(store.updatePcoLink(relinked).ok);
+        QVERIFY(caller.commit().ok);
+        QCOMPARE(store.load(s.id)->pcoSongId, QStringLiteral("999"));
+    }
+
+    void updatePcoLinkRefusesAnUnknownSong()
+    {
+        SongStore store(*m_lib);
+        Song kept = sampleSong();
+        SAVE_OK(store, kept);
+        Song missing = sampleSong();
+        missing.id = QUuid::createUuid();
+        missing.title = "Gone";
+        SongStore::Batch caller(store);
+        const SongStore::Result r = store.updatePcoLink(missing);
+        QVERIFY(!r.ok);
+        QCOMPARE(r.error, QStringLiteral("\"Gone\" isn't in the library."));
+        QVERIFY(!store.updatePcoLink(Song{}).ok);   // no id at all
+        // The caller's transaction carries on.
+        Song other = sampleSong();
+        other.title = "After";
+        SAVE_OK(store, other);
+        QVERIFY(caller.commit().ok);
+        QCOMPARE(store.list().size(), 2);
     }
 
     void savingGivesIdsToNewParts()

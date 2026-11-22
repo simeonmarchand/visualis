@@ -1,5 +1,6 @@
 #include "songstore.h"
 #include "library/library.h"
+#include "songlimits.h"
 
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -103,6 +104,10 @@ SongStore::SongStore(Library &library)
 
 SongStore::Result SongStore::save(Song &song)
 {
+    // Before anything else, so no caller (paste, the editor, an import) can make this thread
+    // write an unbounded song (#83).
+    if (QString tooBig = songLimitError(song); !tooBig.isEmpty())
+        return {false, tooBig};
     // Work on a copy so a failed save leaves the caller's song exactly as it was.
     Song s = song;
     if (s.id.isNull())
@@ -200,6 +205,29 @@ SongStore::Result SongStore::save(Song &song)
     if (const QString released = run(db, "RELEASE song_save", {}); !released.isEmpty())
         return fail(released);
     song = s;
+    return {};
+}
+
+SongStore::Result SongStore::updatePcoLink(const Song &song)
+{
+    QSqlDatabase db = m_library.database();
+    // A savepoint, as in save(): nests inside the caller's transaction.
+    if (QString err = run(db, "SAVEPOINT pco_link", {}); !err.isEmpty())
+        return {false, err};
+    int rows = 0;
+    QString err = run(db, "UPDATE song SET pco_song_id = ?, ccli_number = ?, authors = ?, copyright = ? WHERE id = ?",
+                      {text(song.pcoSongId), text(song.credits.ccliNumber), text(song.credits.authors),
+                       text(song.credits.copyright), key(song.id)},
+                      &rows);
+    if (err.isEmpty() && rows != 1)
+        err = QStringLiteral("\"%1\" isn't in the library.").arg(song.title);
+    if (err.isEmpty())
+        err = run(db, "RELEASE pco_link", {});
+    if (!err.isEmpty()) {
+        run(db, "ROLLBACK TO pco_link", {});
+        run(db, "RELEASE pco_link", {});
+        return {false, err};
+    }
     return {};
 }
 

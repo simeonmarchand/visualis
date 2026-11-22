@@ -1,4 +1,5 @@
 #include "library/songeditor.h"
+#include "song/songlimits.h"
 #include "library/songlibrary.h"
 #include "live/livestate.h"
 
@@ -21,6 +22,8 @@ namespace {
 const char *kLyrics =
     "Intro\n\nVerse 1\nAmazing grace how sweet the sound\nThat saved a wretch like me\n\n"
     "Chorus\nMy chains are gone\nI've been set free\n\nVerse 1\n\nChorus\n";   // V1 C V1 C
+
+QString idText(const QUuid &id) { return id.toString(QUuid::WithoutBraces); }
 
 QStringList strings(const QVariantList &list, const char *key)
 {
@@ -114,12 +117,35 @@ private slots:
         QVERIFY(!m_editor->lyrics().contains("[Intro]"));
     }
 
+    // #83: the editor's save is refused past a limit, and the operator sees why.
+    void aStepPastTheLimitIsRefusedWithTheReason()
+    {
+        Song song = *m_songs->loadSong(QUuid::fromString(m_editor->songId()));
+        QVERIFY(!song.arrangements.isEmpty());
+        song.arrangements[0].sequence = QList<QUuid>(songlimits::kSteps, song.groups[1].id);
+        const QUuid arrangement = song.arrangements[0].id;
+        const QString name = song.arrangements[0].name;
+        QString error;
+        QVERIFY2(m_songs->saveSong(song, &error), qPrintable(error));
+        m_editor->setSongId(idText(song.id));
+        m_editor->selectArrangement(idText(arrangement));
+        QCOMPARE(m_editor->sequence().size(), songlimits::kSteps);
+
+        m_editor->addStep(strings(m_editor->groups(), "id")[2]);
+        QVERIFY2(m_editor->error().contains(QStringLiteral("too many steps in arrangement \"%1\": 1,001; the limit is 1,000")
+                                                .arg(name)),
+                 qPrintable(m_editor->error()));
+        QCOMPARE(m_songs->loadSong(song.id)->arrangement(arrangement)->sequence.size(), songlimits::kSteps);
+        m_editor->removeStep(songlimits::kSteps);   // back within the limit: saves again
+        QVERIFY2(m_editor->error().isEmpty(), qPrintable(m_editor->error()));
+    }
+
     void stepsMoveAddAndRemove()
     {
         m_editor->moveStep(4, -1);   // ... V1 C V1 C -> ... V1 C C V1
         QCOMPARE(strings(m_editor->sequence(), "label"), (QStringList{"Intro", "Verse 1", "Chorus", "Chorus", "Verse 1"}));
         m_editor->removeStep(0);
-        m_editor->addStep(strings(m_editor->groups(), "id")[2]);
+        m_editor->addStep(strings(m_editor->groups(), "id")[2]);   // just the chorus
         QCOMPARE(strings(m_editor->sequence(), "label"), (QStringList{"Verse 1", "Chorus", "Chorus", "Verse 1", "Chorus"}));
         m_editor->moveStep(0, -1);   // out of range: nothing
         m_editor->removeStep(99);
@@ -134,7 +160,7 @@ private slots:
         QCOMPARE(m_editor->arrangementId(), added);
         while (!m_editor->sequence().isEmpty())
             m_editor->removeStep(0);
-        m_editor->addStep(strings(m_editor->groups(), "id")[2]);   // just the chorus
+        m_editor->addStep(strings(m_editor->groups(), "id")[2]);
         m_editor->renameArrangement(added, "Chorus only");
         m_editor->makeDefaultArrangement(added);
         QCOMPARE(strings(m_editor->arrangements(), "name").last(), QStringLiteral("Chorus only"));
