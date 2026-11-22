@@ -1,3 +1,4 @@
+#include "song/lyricspaste.h"
 #include "song/songtext.h"
 
 #include <QtTest>
@@ -21,6 +22,28 @@ Song sample()
     const auto &g = s.groups;
     s.arrangements = {Arrangement{QUuid::createUuid(), "Default", {g[0].id, g[1].id, g[2].id, g[1].id, g[2].id}, {}}};
     return s;
+}
+
+// Each group once in a Default arrangement, plus `repeats` of the first.
+Song withGroups(QList<Group> groups)
+{
+    Song s;
+    s.title = "Round trip";
+    s.groups = groups;
+    QList<QUuid> sequence;
+    for (const Group &g : groups)
+        sequence << g.id;
+    sequence << groups.first().id;
+    s.arrangements = {Arrangement{QUuid::createUuid(), "Default", sequence, {}}};
+    return s;
+}
+
+void verifyLossless(const Song &s)
+{
+    const LyricsEdit e = applyLyricsText(s, lyricsText(s));
+    QCOMPARE(e.song.groups, s.groups);
+    QCOMPARE(e.song.arrangements, s.arrangements);
+    QVERIFY2(e.warnings.isEmpty(), qPrintable(e.warnings.join('\n')));
 }
 
 QStringList labels(const Song &s)
@@ -120,6 +143,119 @@ private slots:
         const QList<QUuid> expected{s.groups[0].id, s.groups[1].id, s.groups[1].id};
         QCOMPARE(e.song.arrangements[0].sequence, expected);
         QVERIFY(e.warnings.join(' ').contains("Chorus"));
+    }
+
+    // #66: labels parseLabel() doesn't know used to read back as lyric lines.
+    void customLabelsSurviveTheRoundTrip()
+    {
+        const Song s = withGroups({
+            Group{QUuid::createUuid(), "Verse 1", "#0078cc", {"Amazing grace how sweet the sound"}},
+            Group{QUuid::createUuid(), "Spoken Word", "", {"Read Psalm 23 here"}},
+            Group{QUuid::createUuid(), "Tag A", "#cc7a00", {"Was blind but now I see"}},
+            Group{QUuid::createUuid(), "Chorus x2", "#cc004f", {"My chains are gone"}},
+        });
+        verifyLossless(s);
+        // Still the same groups after an edit elsewhere.
+        QString text = lyricsText(s);
+        text.replace("the sound", "the sound!");
+        const LyricsEdit e = applyLyricsText(s, text);
+        QCOMPARE(labels(e.song), (QStringList{"Verse 1", "Spoken Word", "Tag A", "Chorus x2"}));
+        QCOMPARE(e.song.arrangements, s.arrangements);
+    }
+
+    void unlabelledGroupsSurviveTheRoundTrip()
+    {
+        const Song s = withGroups({
+            Group{QUuid::createUuid(), "", "", {"Before any label"}},
+            Group{QUuid::createUuid(), "Verse 1", "#0078cc", {"Amazing grace"}},
+            Group{QUuid::createUuid(), "", "", {"Between labels"}},
+        });
+        QVERIFY(lyricsText(s).startsWith("[]\n"));
+        verifyLossless(s);
+    }
+
+    void duplicateGroupsAreNotMerged()
+    {
+        const Song s = withGroups({
+            Group{QUuid::createUuid(), "Chorus", "#cc004f", {"My chains are gone"}},
+            Group{QUuid::createUuid(), "Verse 1", "#0078cc", {"Amazing grace"}},
+            Group{QUuid::createUuid(), "Chorus", "#cc004f", {"My chains are gone"}},
+            Group{QUuid::createUuid(), "Intro", "#b3a624", {""}},
+            Group{QUuid::createUuid(), "Intro", "#b3a624", {""}},
+        });
+        verifyLossless(s);
+    }
+
+    // #67: blank slides (from ProPresenter, or lyric-less sequence entries) used to be
+    // dropped from the text, so any edit deleted them.
+    void blankSlidesSurviveAnEditElsewhere()
+    {
+        const Song s = withGroups({
+            Group{QUuid::createUuid(), "Verse 1", "#0078cc", {"", "First", "", "Last", ""}},
+            Group{QUuid::createUuid(), "Chorus", "#cc004f", {"My chains are gone"}},
+            Group{QUuid::createUuid(), "Blank", "", {"", ""}},
+        });
+        QVERIFY(lyricsText(s).startsWith("[Verse 1]\n(blank)\n\nFirst\n\n(blank)\n\nLast\n\n(blank)\n\n[Chorus]"));
+        verifyLossless(s);
+
+        QString text = lyricsText(s);
+        text.replace("are gone", "are gone!");
+        const LyricsEdit e = applyLyricsText(s, text);
+        QCOMPARE(e.song.groups[0].slides, (QStringList{"", "First", "", "Last", ""}));
+        QCOMPARE(e.song.groups[2].slides, (QStringList{"", ""}));
+        QCOMPARE(e.song.groups[1].slides, QStringList{"My chains are gone!"});
+    }
+
+    // PR #74 review: with two Choruses, renaming the first must keep each group's id, or
+    // the arrangement plays the wrong lyrics.
+    void renamingOneOfTwoDuplicatesKeepsEachGroup()
+    {
+        const Song s = withGroups({
+            Group{QUuid::createUuid(), "Chorus", "#cc004f", {"First chorus"}},
+            Group{QUuid::createUuid(), "Verse 1", "#0078cc", {"Amazing grace"}},
+            Group{QUuid::createUuid(), "Chorus", "#cc004f", {"Second chorus"}},
+        });
+        QString text = lyricsText(s);
+        text.replace(text.indexOf("[Chorus]"), 8, "[Refrain]");
+        const LyricsEdit e = applyLyricsText(s, text);
+        QCOMPARE(labels(e.song), (QStringList{"Refrain", "Verse 1", "Chorus"}));
+        for (int i = 0; i < 3; ++i)
+            QCOMPARE(e.song.groups[i].id, s.groups[i].id);
+        QCOMPARE(e.song.arrangements, s.arrangements);
+    }
+
+    void removingTheFirstOfTwoDuplicatesKeepsTheSecond()
+    {
+        const Song s = withGroups({
+            Group{QUuid::createUuid(), "Chorus", "#cc004f", {"First chorus"}},
+            Group{QUuid::createUuid(), "Verse 1", "#0078cc", {"Amazing grace"}},
+            Group{QUuid::createUuid(), "Chorus", "#cc004f", {"Second chorus"}},
+        });
+        QString text = lyricsText(s);
+        text.remove(0, text.indexOf("[Verse 1]"));
+        const LyricsEdit e = applyLyricsText(s, text);
+        QCOMPARE(e.song.groups.size(), 2);
+        QCOMPARE(e.song.groups[1].id, s.groups[2].id);
+        QCOMPARE(e.song.groups[1].slides, QStringList{"Second chorus"});
+    }
+
+    // PR #74 review: lyrics that look like the editor's own syntax stay lyrics.
+    void lyricsThatLookLikeEditorSyntaxSurvive()
+    {
+        const Song s = withGroups({
+            Group{QUuid::createUuid(), "Verse 1", "#0078cc",
+                  {"(blank)", "(BLANK)", "Amazing grace\n[Spoken Word]\nhow sweet", "[Tag]", "Chorus",
+                   "\\back\\slash", "Verse 2:\nstill a lyric"}},
+        });
+        verifyLossless(s);
+    }
+
+    void aBracketedLyricKeptByAPasteStaysALyric()
+    {
+        Song s = songFromPastedLyrics("Psalm", "[Verse 1]\nThe Lord is my shepherd\n[Spoken Word]");
+        QCOMPARE(s.groups.size(), 1);
+        const LyricsEdit e = applyLyricsText(s, lyricsText(s));
+        QCOMPARE(e.song.groups, s.groups);
     }
 
     void aGroupWithoutLyricsStaysABlankSlide()

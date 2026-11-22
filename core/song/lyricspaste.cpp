@@ -13,10 +13,19 @@ struct Header {
     int repeat = 1;
 };
 
+bool isBlankSlideLine(const QString &line)
+{
+    return line.trimmed().compare(blankSlideLine(), Qt::CaseInsensitive) == 0;
+}
+
 // "[Chorus x2]", "Chorus (x2):", "(Bridge)", "Verse 1:" -> a header; any lyric line -> nullopt.
-std::optional<Header> header(const QString &line)
+std::optional<Header> header(const QString &line, bool editorText)
 {
     QString s = line.trimmed();
+    if (editorText && s.startsWith('[') && s.endsWith(']'))
+        return Header{s.mid(1, s.size() - 2).trimmed()};
+    if (editorText && (s.startsWith('\\') || isBlankSlideLine(s)))
+        return std::nullopt;   // an escaped lyric, or a blank slide (not the "Blank" label)
     if (s.isEmpty() || s.size() > 40)
         return std::nullopt;
     if ((s.startsWith('[') && s.endsWith(']')) || (s.startsWith('(') && s.endsWith(')')))
@@ -113,6 +122,14 @@ QString normalize(QString text)
 
 } // namespace
 
+QString escapeEditorLine(const QString &line)
+{
+    const QString t = line.trimmed();
+    if (t.startsWith('\\') || isBlankSlideLine(t) || header(t, true))
+        return '\\' + line;
+    return line;
+}
+
 QString defaultGroupColor(const QString &label)
 {
     static const QHash<QString, QString> colors = {
@@ -133,15 +150,32 @@ PastedLyrics parsePastedLyrics(const QString &text, const PasteOptions &options)
     bool sawHeader = false;
 
     auto finish = [&] {
-        const QStringList slides = slidesOf(body, options.maxLinesPerSlide);
+        QStringList slides = slidesOf(body, options.maxLinesPerSlide);
         body.clear();
+        if (options.editorText) {
+            for (QString &s : slides) {
+                if (isBlankSlideLine(s)) {
+                    s.clear();
+                    continue;
+                }
+                QStringList lines = s.split('\n');
+                for (QString &l : lines) {
+                    if (l.startsWith('\\'))
+                        l.remove(0, 1);
+                }
+                s = lines.join('\n');
+            }
+        }
         if (!current && slides.isEmpty())
             return;
         const QString label = current ? current->label : QString();
         const int repeat = current ? current->repeat : 1;
 
-        // A label seen before, with no text or the same text, repeats that group.
+        // A label seen before, with no text or the same text, repeats that group. The
+        // editor's groups are already distinct (two identical Choruses stay two).
         for (const Group &g : std::as_const(out.groups)) {
+            if (options.editorText)
+                break;
             if (g.label.compare(label, Qt::CaseInsensitive) == 0
                 && (slides.isEmpty() || slides == g.slides)) {
                 for (int i = 0; i < repeat; ++i)
@@ -150,6 +184,8 @@ PastedLyrics parsePastedLyrics(const QString &text, const PasteOptions &options)
             }
         }
         for (const Group &g : std::as_const(out.groups)) {
+            if (options.editorText)
+                break;
             if (!label.isEmpty() && g.label.compare(label, Qt::CaseInsensitive) == 0) {
                 out.warnings << QStringLiteral("There are two different \"%1\" sections; both were kept.").arg(label);
                 break;
@@ -171,7 +207,7 @@ PastedLyrics parsePastedLyrics(const QString &text, const PasteOptions &options)
             if (!options.title.isEmpty() && line.compare(options.title.trimmed(), Qt::CaseInsensitive) == 0)
                 continue;
         }
-        if (const Footer f = footer(line); f.matched) {
+        if (const Footer f = options.editorText ? Footer{} : footer(line); f.matched) {
             if (!f.ccliNumber.isEmpty())
                 out.credits.ccliNumber = f.ccliNumber;
             if (!f.copyright.isEmpty())
@@ -184,7 +220,7 @@ PastedLyrics parsePastedLyrics(const QString &text, const PasteOptions &options)
             out.credits.authors = QString(line).replace(QRegularExpression(QStringLiteral(R"(\s*\|\s*)")), ", ");
             continue;
         }
-        if (const std::optional<Header> h = header(line)) {
+        if (const std::optional<Header> h = header(line, options.editorText)) {
             finish();
             current = h;
             sawHeader = true;

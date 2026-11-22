@@ -15,7 +15,19 @@ struct PasteOptions {
     // Belongs to the lyrics template once templates are stored (Phase 3).
     int maxLinesPerSlide = 2;
     QString title;              // a first line equal to this (pastes often start with it) is dropped
+    // Reading back the song editor's own text (lyricsText()), which must round-trip: every
+    // "[...]" line is a header with its label as written ("[]" is unlabelled), groups with
+    // the same label are never merged, and there are no footer lines.
+    bool editorText = false;
 };
+
+// In editorText, a slide that is only this line is a blank slide (#67).
+inline QString blankSlideLine() { return QStringLiteral("(blank)"); }
+
+// A lyric line as the editor writes it: with a leading "\\" if editorText would otherwise
+// read it as a header or the blank-slide line ("[Spoken Word]", "Chorus", "(blank)"), or
+// if it starts with "\\" itself. editorText removes it again.
+QString escapeEditorLine(const QString &line);
 
 struct PastedLyrics {
     QList<Group> groups;        // new ids, default colors by kind
