@@ -289,6 +289,27 @@ private slots:
         QCOMPARE(store.list().size(), 2);
     }
 
+    // #80 review: what the parser noticed about a file is kept even when the file is skipped.
+    void warningsOfSkippedFilesAreKept()
+    {
+        QTemporaryDir files, libDir;
+        QByteArray p = pb::bytes(11, pb::arrangement("a", "A", {"g", "missing-group"}));
+        p += pb::bytes(12, pb::cueGroup("g", "Chorus", {}, {"c1"}));
+        p += pb::bytes(13, pb::cue("c1", "Sing"));
+        write(files.filePath("Taken.pro"), p);
+
+        auto lib = Library::open(libDir.path()).library;
+        SongStore store(*lib);
+        Song existing = *propresenter::readBytes(p, "Taken").song;
+        QVERIFY(store.save(existing).ok);
+
+        const propresenter::ImportReport r = propresenter::importFolder(files.path(), store);
+        QVERIFY(r.imported.isEmpty());
+        QCOMPARE(r.skipped.size(), 1);
+        QCOMPARE(r.warnings.size(), 1);
+        QVERIFY2(r.warnings[0].startsWith("Taken.pro: 1 arrangement step(s)"), qPrintable(r.warnings[0]));
+    }
+
     void rtfConversion_data()
     {
         QTest::addColumn<QByteArray>("rtf");

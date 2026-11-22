@@ -102,6 +102,74 @@ private slots:
         QVERIFY(m_songs->report().startsWith("Imported 2 songs"));
     }
 
+    // #68: what the import noticed reaches the operator, not just the counts.
+    void songImportWarningsAreReported()
+    {
+        QVERIFY(m_songs->createFromPaste("Amazing Grace", kLyrics));   // same title, another song
+        QVERIFY(m_songs->importSongs(QUrl::fromLocalFile(FIXTURES_DIR "/songs")));
+        QVERIFY(waitForImport());
+        QVERIFY2(m_songs->report().contains("Amazing Grace") && m_songs->report().contains("both are kept"),
+                 qPrintable(m_songs->report()));
+    }
+
+    void proPresenterImportWarningsAreReported()
+    {
+        QVERIFY(m_songs->importProPresenter(QUrl::fromLocalFile(FIXTURES_DIR "/propresenter")));
+        QVERIFY(waitForImport());
+        QVERIFY2(m_songs->report().startsWith("Imported 1 songs from ProPresenter."), qPrintable(m_songs->report()));
+        QVERIFY2(m_songs->report().contains("Missing Group.pro: 1 arrangement step(s) pointed at groups that don't exist"),
+                 qPrintable(m_songs->report()));
+    }
+
+    void importReportEndsWithTheWarnings()
+    {
+        const SongLibrary::ImportSummary s{{}, {"A"}, {}, {{"bad.json", "truncated"}}, {"a.json: one", "b.json: two"}};
+        QCOMPARE(SongLibrary::importReport(s),
+                 QStringLiteral("Imported 1 songs.\nCouldn't read bad.json: truncated\na.json: one\nb.json: two"));
+    }
+
+    void aLongReportIsSummarized()
+    {
+        QCOMPARE(SongLibrary::summarizeReport("a\nb\nc", 6), QStringLiteral("a\nb\nc"));
+        QCOMPARE(SongLibrary::summarizeReport("1\n2\n3\n4\n5\n6", 6), QStringLiteral("1\n2\n3\n4\n5\n6"));
+        QCOMPARE(SongLibrary::summarizeReport("1\n2\n3\n4\n5\n6\n7\n8\n9", 6),
+                 QStringLiteral("1\n2\n3\n4\n5\n…and 4 more (see Details)"));
+    }
+
+    // Hundreds of warnings stay a few lines in the narrow pane, with the full list behind
+    // Details.
+    void manyWarningsDontSwampTheLibraryPane()
+    {
+        // The same 300 titles twice, as different songs: every one of the second set clashes.
+        QVERIFY(m_songs->importSongs(QUrl::fromLocalFile(writeSongFiles(300))));
+        QVERIFY(waitForImport());
+        QVERIFY(m_songs->importSongs(QUrl::fromLocalFile(writeSongFiles(300))));
+        QVERIFY(waitForImport());
+        QVERIFY2(m_songs->report().count("both are kept") == 300, qPrintable(m_songs->report().left(300)));
+
+        QQuickWindow *window = loadOperatorWindow();
+        auto *label = window->findChild<QQuickItem *>("libraryReport");
+        QVERIFY(label);
+        QCOMPARE(label->property("text").toString(), m_songs->reportSummary());
+        QVERIFY(m_songs->reportSummary().contains("…and 296 more"));
+        QVERIFY(label->property("lineCount").toInt() <= 10);
+        QVERIFY2(label->height() < 250, qPrintable(QString::number(label->height())));
+
+        auto *details = window->findChild<QQuickItem *>("libraryReportDetails");
+        QVERIFY(details && details->isVisible());
+        click(window, details);
+        auto *dialog = window->findChild<QObject *>("libraryReportDialog");
+        QTRY_VERIFY(dialog->property("visible").toBool());
+        QCOMPARE(window->findChild<QObject *>("libraryReportText")->property("text").toString(), m_songs->report());
+    }
+
+    void aShortReportHasNoDetailsButton()
+    {
+        QVERIFY(m_songs->createFromPaste("Amazing Grace", kLyrics));
+        QQuickWindow *window = loadOperatorWindow();
+        QVERIFY(!window->findChild<QQuickItem *>("libraryReportDetails")->isVisible());
+    }
+
     void goLiveShowsTheSelectedSongsSlide()
     {
         QVERIFY(m_songs->createFromPaste("Amazing Grace", kLyrics));

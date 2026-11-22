@@ -5,6 +5,7 @@
 #include <QDir>
 #include <QFile>
 #include <QTemporaryDir>
+#include <QSqlQuery>
 #include <QtTest>
 
 using namespace visualis;
@@ -204,6 +205,28 @@ private slots:
         QCOMPARE(r.failed.size(), 1);
         QCOMPARE(r.failed[0].first, QStringLiteral("Broken.visualis-song.json"));
         QCOMPARE(store.list().size(), 2);
+    }
+
+    // #80 review: "both are kept" only for a song that was kept.
+    void aTitleClashThatFailsToSaveIsNotReportedAsKept()
+    {
+        QTemporaryDir lib, in;
+        auto library = Library::open(lib.path()).library;
+        SongStore store(*library);
+        Song existing = fixture("Holy Holy Holy");
+        QVERIFY(store.save(existing).ok);
+
+        // The fixture has no id, so it's a new song with a taken title. A read-only database
+        // makes its save fail.
+        QFile::copy(fixtures + "/Holy Holy Holy.visualis-song.json", in.filePath("Clash.visualis-song.json"));
+        QVERIFY(QSqlQuery(library->database()).exec("PRAGMA query_only = ON"));
+
+        const SongImportReport r = importSongs(in.path(), store);
+        QVERIFY(r.imported.isEmpty());
+        QCOMPARE(r.failed.size(), 1);
+        QCOMPARE(r.failed[0].first, QStringLiteral("Clash.visualis-song.json"));
+        QVERIFY2(r.warnings.isEmpty(), qPrintable(r.warnings.join('\n')));
+        QCOMPARE(store.list().size(), 1);
     }
 
     // #69

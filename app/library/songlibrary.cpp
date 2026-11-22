@@ -272,6 +272,18 @@ QString SongLibrary::importReport(const ImportSummary &s)
     }
     for (const auto &[file, error] : s.failed)
         lines << QStringLiteral("Couldn't read %1: %2").arg(file, error);
+    lines += s.warnings;
+    return lines.join('\n');
+}
+
+QString SongLibrary::summarizeReport(const QString &report, int maxLines)
+{
+    QStringList lines = report.split('\n');
+    if (lines.size() <= maxLines)
+        return report;
+    const qsizetype hidden = lines.size() - (maxLines - 1);
+    lines.resize(maxLines - 1);
+    lines << QStringLiteral("…and %1 more (see Details)").arg(hidden);
     return lines.join('\n');
 }
 

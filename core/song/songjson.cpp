@@ -238,14 +238,16 @@ SongImportReport importSongs(const QString &folder, SongStore &store, const Impo
             report.skipped << std::pair{file.fileName(), QStringLiteral("this song is already in the library")};
             continue;
         }
-        if (titles.contains(song.title.toLower()))
-            report.warnings << QStringLiteral("%1: a different song titled \"%2\" is already in the library; both are kept")
-                                   .arg(file.fileName(), song.title);
+        const bool titleTaken = titles.contains(song.title.toLower());
         const SongStore::Result saved = store.save(song);
         if (!saved.ok) {
             report.failed << std::pair{file.fileName(), saved.error};
             continue;
         }
+        // Only once it's saved: a failed save keeps nothing, so nothing is "both kept".
+        if (titleTaken)
+            report.warnings << QStringLiteral("%1: a different song titled \"%2\" is already in the library; both are kept")
+                                   .arg(file.fileName(), song.title);
         titles.insert(song.title.toLower());
         report.imported << song.title;
     }

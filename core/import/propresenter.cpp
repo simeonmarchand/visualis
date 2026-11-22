@@ -202,6 +202,9 @@ ImportReport importFolder(const QString &folder, SongStore &store, const ImportP
             report.failed << std::pair{file.fileName(), r.error};
             continue;
         }
+        // What the parser noticed is kept whatever happens to the file next.
+        for (const QString &w : std::as_const(r.warnings))
+            report.warnings << QStringLiteral("%1: %2").arg(file.fileName(), w);
         if (!r.looksLikeSong) {
             report.skipped << std::pair{file.fileName(), QStringLiteral("not a song (no Verse, Chorus, or similar groups)")};
             continue;
@@ -217,8 +220,6 @@ ImportReport importFolder(const QString &folder, SongStore &store, const ImportP
         }
         titles.insert(r.song->title.toLower());
         report.imported << r.song->title;
-        for (const QString &w : std::as_const(r.warnings))
-            report.warnings << QStringLiteral("%1: %2").arg(file.fileName(), w);
     }
     if (progress)
         progress(total, total);
