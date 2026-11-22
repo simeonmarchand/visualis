@@ -20,6 +20,7 @@ ColumnLayout {
     }
 
     PlanningCenterDialog { id: pcoDialog }
+    PlanPickerDialog { id: planPicker }
 
     RowLayout {
         spacing: 12
@@ -34,6 +35,13 @@ ColumnLayout {
             text: PlanningCenter.signedIn ? "Account…" : "Sign in…"
             focusPolicy: Qt.NoFocus
             onClicked: pcoDialog.open()
+        }
+        Button {
+            objectName: "importPlanButton"
+            text: "Import plan…"
+            visible: PlanningCenter.signedIn
+            focusPolicy: Qt.NoFocus
+            onClicked: planPicker.open()
         }
         Label {
             text: PlanningCenter.signedIn

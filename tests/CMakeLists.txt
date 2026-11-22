@@ -58,3 +58,6 @@ target_compile_definitions(tst_pcoclient PRIVATE FIXTURES_DIR="${CMAKE_CURRENT_S
 qt_add_executable(pco_live_sandbox pco_live_sandbox.cpp)
 target_link_libraries(pco_live_sandbox PRIVATE Qt6::Network visualis_ui visualis_core)
 target_include_directories(pco_live_sandbox PRIVATE ${CMAKE_SOURCE_DIR}/app)
+visualis_add_test(tst_planimporter Qt6::Network visualis_ui visualis_core)
+target_include_directories(tst_planimporter PRIVATE ${CMAKE_SOURCE_DIR}/app)
+target_compile_definitions(tst_planimporter PRIVATE FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")

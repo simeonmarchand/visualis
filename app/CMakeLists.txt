@@ -15,6 +15,7 @@ qt_add_qml_module(visualis_ui
         qml/LyricsTemplate.qml
         qml/OutputSettings.qml
         qml/PlanningCenterDialog.qml
+        qml/PlanPickerDialog.qml
         qml/SongListPane.qml
         qml/ServicePane.qml
         qml/NameDialog.qml
@@ -33,6 +34,7 @@ qt_add_qml_module(visualis_ui
         pco/credentialstore.h
         pco/planningcenter.h pco/planningcenter.cpp
         pco/pcoclient.h pco/pcoclient.cpp
+        pco/planimporter.h pco/planimporter.cpp
         library/songlibrary.h library/songlibrary.cpp
         library/songeditor.h library/songeditor.cpp
         library/servicelist.h library/servicelist.cpp
