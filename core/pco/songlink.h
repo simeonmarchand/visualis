@@ -23,6 +23,12 @@ ServiceItem linkedItem(ServiceItem item, const Song &song);
 // whether anything changed. A song already linked to another Planning Center song keeps
 // its link.
 bool rememberPcoSong(Song &song, const PcoSong &pco);
+// The operator says this is the song: it takes the Planning Center id even from another
+// link, and fills in credits it has none of. Returns whether anything changed. Whoever held
+// the id before must let go of it (releasePcoSong), or next week's import can't decide.
+bool takePcoSong(Song &song, const PcoSong &pco);
+// Clears the id from a song that holds it. Returns whether it did.
+bool releasePcoSong(Song &song, const QString &pcoSongId);
 
 // The labels in an item's sequence that name no group of the song and aren't lyric-less
 // (Intro, Ending): what the operator should look at ("Bridge 2" when the song has only

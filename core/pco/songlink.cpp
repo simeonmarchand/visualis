@@ -36,6 +36,24 @@ bool rememberPcoSong(Song &song, const PcoSong &pco)
     return changed;
 }
 
+bool takePcoSong(Song &song, const PcoSong &pco)
+{
+    bool changed = false;
+    if (!pco.id.isEmpty() && song.pcoSongId != pco.id) {
+        song.pcoSongId = pco.id;
+        changed = true;
+    }
+    return rememberPcoSong(song, pco) || changed;
+}
+
+bool releasePcoSong(Song &song, const QString &pcoSongId)
+{
+    if (pcoSongId.isEmpty() || song.pcoSongId != pcoSongId)
+        return false;
+    song.pcoSongId.clear();
+    return true;
+}
+
 QStringList unmatchedLabels(const ServiceItem &item, const Song &song)
 {
     QStringList out;

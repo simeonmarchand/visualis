@@ -194,9 +194,19 @@ bool ServiceList::linkSong(int index, const QString &songId)
     std::optional<Song> song = m_songs->loadSong(QUuid::fromString(songId));
     if (!song)
         return false;
-    if (const std::optional<PcoSong> pco = snapshotSong(before.importSnapshot); pco && rememberPcoSong(*song, *pco)) {
+    if (const std::optional<PcoSong> pco = snapshotSong(before.importSnapshot)) {
+        // The Planning Center id moves to the chosen song, so a wrong link (by title, last
+        // week) doesn't stick, and next week matches this one at once.
         QString error;
-        if (!m_songs->saveSong(*song, &error))
+        for (const SongCandidate &c : SongStore(*m_songs->library()).matchCandidates()) {
+            if (c.id == song->id || c.pcoSongId != pco->id)
+                continue;
+            if (std::optional<Song> holder = m_songs->loadSong(c.id); holder && releasePcoSong(*holder, pco->id))
+                m_songs->saveSong(*holder, &error);
+        }
+        if (takePcoSong(*song, *pco))
+            m_songs->saveSong(*song, &error);
+        if (!error.isEmpty())
             setReport(error);   // still linked for this service; it just won't match by id next week
     }
     ServiceItem linked = linkedItem(before, *song);

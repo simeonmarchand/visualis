@@ -181,6 +181,23 @@ private slots:
         QCOMPARE(unmatchedLabels(s.items[0], song), (QStringList{"Bridge 2", "Bridge 3"}));
     }
 
+    void theOperatorsChoiceTakesTheId()
+    {
+        Song s = libSong("Amazing Grace", {group("Verse 1", "a")});
+        s.pcoSongId = "p-old";
+        s.credits.authors = "John Newton";
+        QVERIFY(takePcoSong(s, PcoSong{"p-new", "Amazing Grace", "22025", "Traditional", {}}));
+        QCOMPARE(s.pcoSongId, QStringLiteral("p-new"));
+        QCOMPARE(s.credits.authors, QStringLiteral("John Newton"));   // credits stay fill-only
+        QCOMPARE(s.credits.ccliNumber, QStringLiteral("22025"));
+        QVERIFY(!takePcoSong(s, PcoSong{"p-new", "Amazing Grace", {}, {}, {}}));
+
+        QVERIFY(!releasePcoSong(s, "p-other"));
+        QVERIFY(!releasePcoSong(s, ""));
+        QVERIFY(releasePcoSong(s, "p-new"));
+        QVERIFY(s.pcoSongId.isEmpty());
+    }
+
     void anEmptyReportSaysNothing()
     {
         QVERIFY(SongLinkReport{}.summary().isEmpty());

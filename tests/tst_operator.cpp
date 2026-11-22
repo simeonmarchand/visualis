@@ -2,6 +2,7 @@
 #include "library/songlibrary.h"
 #include "library/library.h"
 #include "pco/planimport.h"
+#include "pco/songlink.h"
 #include "service/servicestore.h"
 #include "service/servicejson.h"
 #include "song/songjson.h"
@@ -580,7 +581,7 @@ private slots:
     }
 
     // #55: an imported service whose songs the library doesn't have yet. Returns its id.
-    QString openImportedService(const QStringList &songTitles)
+    QString openImportedService(const QStringList &songTitles, bool autoLink = false)
     {
         PcoPlanItems plan;
         for (int i = 0; i < songTitles.size(); ++i) {
@@ -596,6 +597,10 @@ private slots:
         PcoPlan p;
         p.id = "70001";
         Service s = serviceFromPlan({"900", "Sunday"}, p, plan, QDateTime::currentDateTimeUtc()).service;
+        if (autoLink) {
+            SongStore songs(*m_songs->library());
+            linkSongs(s, songs);   // as PlanImporter does
+        }
         if (!ServiceStore(*m_songs->library()).save(s).ok)
             qFatal("couldn't save the imported service");
         const QString id = s.id.toString(QUuid::WithoutBraces);
@@ -623,6 +628,29 @@ private slots:
         QCOMPARE(m_songs->loadSong(QUuid::fromString(chosen))->pcoSongId, QStringLiteral("p1"));   // next week: at once
         QVERIFY(m_services->report().contains("Bridge 2"));   // the gap in the song is pointed out
         QCOMPARE(m_services->selectedIndex(), 0);
+    }
+
+    // Review of #85: a wrong link by title doesn't stick. Relinking moves the Planning
+    // Center id, so next week links the right song by id instead of asking again.
+    void relinkingMovesThePlanningCenterId()
+    {
+        QVERIFY(m_songs->createFromPaste("Amazing Grace", kLyrics));
+        const QUuid wrong = QUuid::fromString(m_songs->selectedId());
+        QVERIFY(m_songs->createFromPaste("Amazing Grace Hymn", kLyrics));
+        const QUuid right = QUuid::fromString(m_songs->selectedId());
+
+        openImportedService({"Amazing Grace"}, true);   // links to "Amazing Grace" by title
+        QCOMPARE(item(0)["kind"].toString(), QStringLiteral("song"));
+        QCOMPARE(m_songs->loadSong(wrong)->pcoSongId, QStringLiteral("p1"));
+
+        QVERIFY(m_services->linkSong(0, right.toString(QUuid::WithoutBraces)));
+        QVERIFY(m_songs->loadSong(wrong)->pcoSongId.isEmpty());
+        QCOMPARE(m_songs->loadSong(right)->pcoSongId, QStringLiteral("p1"));
+
+        openImportedService({"Amazing Grace"}, true);   // next week's plan
+        QCOMPARE(item(0)["kind"].toString(), QStringLiteral("song"));
+        m_services->select(0);
+        QCOMPARE(m_services->selectedSongId(), right.toString(QUuid::WithoutBraces));   // by id, not "confirm"
     }
 
     void anImportedSongIsLinkedToTheLibrarysSelectedSong()
