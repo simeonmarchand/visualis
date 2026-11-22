@@ -299,4 +299,15 @@ QList<SongCandidate> SongStore::matchCandidates() const
     return out;
 }
 
+QStringList SongStore::titles() const
+{
+    QStringList out;
+    QSqlQuery q(m_library.database());
+    q.setForwardOnly(true);
+    q.exec("SELECT title FROM song");
+    while (q.next())
+        out << q.value(0).toString();
+    return out;
+}
+
 } // namespace visualis

@@ -4,6 +4,7 @@
 #include "song/songstore.h"
 
 #include <QFileInfoList>
+#include <QHash>
 #include <QSet>
 #include <QString>
 #include <QStringList>
@@ -40,27 +41,41 @@ public:
         SkipSameIdWarnSameTitle,   // Visualis exports: same id is the same song; same title may not be
     };
 
-    // Reads the library's titles once; songs this writer saves are added as it goes.
     ImportWriter(SongStore &store, Duplicates rule);
 
-    // Saves the file's song, or records why not. Inside a SongStore::Batch the save isn't
-    // durable until the batch commits; mark() and batchFailed() keep the report honest if
-    // that commit fails.
+    // Starts a batch of saves (see SongStore::Batch): reads the library's titles again, so
+    // songs created, renamed, or deleted since the last batch count. Nothing else writes
+    // while a batch is open.
+    void startBatch();
+    // Saves the file's song, or records why not.
     void add(ImportFile file);
-    void mark();
+    // The batch's commit failed: the songs it saved weren't kept, and files skipped as
+    // duplicates of them are reported failed too.
     void batchFailed(const QString &error);
 
+    // Each list in file order.
     const SongImportReport &report() const { return m_report; }
 
 private:
+    enum class Outcome { Imported, Skipped, Failed };
+    struct Entry {
+        QString name;
+        Outcome outcome;
+        QString detail;          // the title if imported, else the reason
+        QStringList warnings;    // "file: warning", reported if imported
+        qsizetype duplicateOf = -1;   // a song saved earlier in the same batch
+    };
+    void record(Entry entry);
+    void rebuildReport();
+
     SongStore &m_store;
     Duplicates m_rule;
-    QSet<QString> m_titles;   // lower case
+    QSet<QString> m_titles;               // lower case: the library's, as of startBatch(), and since
+    QHash<QString, qsizetype> m_batchTitles;   // lower-case title -> entry saved in this batch
+    QHash<QUuid, qsizetype> m_batchIds;
+    QList<Entry> m_entries;
+    qsizetype m_batchStart = 0;
     SongImportReport m_report;
-    QStringList m_importedFiles;   // file name per entry of m_report.imported
-    QList<bool> m_addedTitle;      // whether that entry's title was new to m_titles
-    qsizetype m_mark = 0;
-    qsizetype m_warningsMark = 0;
 };
 
 } // namespace visualis

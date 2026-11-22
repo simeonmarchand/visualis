@@ -122,7 +122,7 @@ public:
         QStringList warnings;
         bool stopped = false;   // stopped part way: the lists say what was done before it
         int filesDone = 0;
-        int filesTotal = 0;
+        int filesTotal = 0;   // -1 when stopped before the files were counted
     };
     static QString importReport(const ImportSummary &summary);
     // The first `maxLines - 1` lines and an "…and N more" line, or the report if it fits.

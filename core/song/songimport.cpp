@@ -2,71 +2,100 @@
 
 namespace visualis {
 
+namespace {
+QString titleKey(const QString &title) { return title.trimmed().toLower(); }
+} // namespace
+
 ImportWriter::ImportWriter(SongStore &store, Duplicates rule)
     : m_store(store)
     , m_rule(rule)
 {
-    for (const SongSummary &s : store.list())
-        m_titles.insert(s.title.trimmed().toLower());
+    startBatch();
+}
+
+void ImportWriter::startBatch()
+{
+    m_titles.clear();
+    for (const QString &title : m_store.titles())
+        m_titles.insert(titleKey(title));
+    m_batchTitles.clear();
+    m_batchIds.clear();
+    m_batchStart = m_entries.size();
 }
 
 void ImportWriter::add(ImportFile file)
 {
-    if (!file.error.isEmpty() || (!file.song && file.skipped.isEmpty())) {
-        m_report.failed << std::pair{file.name, file.error};
-        return;
-    }
-    if (!file.skipped.isEmpty()) {
-        m_report.skipped << std::pair{file.name, file.skipped};
-        return;
-    }
+    if (!file.error.isEmpty() || (!file.song && file.skipped.isEmpty()))
+        return record({file.name, Outcome::Failed, file.error, {}});
+    if (!file.skipped.isEmpty())
+        return record({file.name, Outcome::Skipped, file.skipped, {}});
+
     Song &song = *file.song;
-    const QString title = song.title.trimmed().toLower();
+    const QString title = titleKey(song.title);
     QStringList warnings;
     for (const QString &w : std::as_const(file.warnings))
         warnings << QStringLiteral("%1: %2").arg(file.name, w);
     if (m_rule == Duplicates::SkipSameTitle && m_titles.contains(title)) {
-        m_report.skipped << std::pair{file.name, QStringLiteral("a song with this title is already in the library")};
-        return;
+        return record({file.name, Outcome::Skipped, QStringLiteral("a song with this title is already in the library"),
+                       {}, m_batchTitles.value(title, -1)});
     }
     if (m_rule == Duplicates::SkipSameIdWarnSameTitle) {
-        if (!song.id.isNull() && m_store.load(song.id)) {
-            m_report.skipped << std::pair{file.name, QStringLiteral("this song is already in the library")};
-            return;
+        if (!song.id.isNull() && (m_batchIds.contains(song.id) || m_store.load(song.id))) {
+            return record({file.name, Outcome::Skipped, QStringLiteral("this song is already in the library"), {},
+                           m_batchIds.value(song.id, -1)});
         }
         if (m_titles.contains(title))
             warnings << QStringLiteral("%1: a different song titled \"%2\" is already in the library; both are kept")
                             .arg(file.name, song.title);
     }
-    if (const SongStore::Result saved = m_store.save(song); !saved.ok) {
-        m_report.failed << std::pair{file.name, saved.error};
-        return;
-    }
-    m_addedTitle << !m_titles.contains(title);
+    if (const SongStore::Result saved = m_store.save(song); !saved.ok)
+        return record({file.name, Outcome::Failed, saved.error, {}});
     m_titles.insert(title);
-    m_report.imported << song.title;
-    m_importedFiles << file.name;
-    m_report.warnings << warnings;
+    m_batchTitles.insert(title, m_entries.size());
+    m_batchIds.insert(song.id, m_entries.size());
+    record({file.name, Outcome::Imported, song.title, warnings});
 }
 
-void ImportWriter::mark()
+void ImportWriter::record(Entry entry)
 {
-    m_mark = m_report.imported.size();
-    m_warningsMark = m_report.warnings.size();
+    switch (entry.outcome) {
+    case Outcome::Imported:
+        m_report.imported << entry.detail;
+        m_report.warnings << entry.warnings;
+        break;
+    case Outcome::Skipped:
+        m_report.skipped << std::pair{entry.name, entry.detail};
+        break;
+    case Outcome::Failed:
+        m_report.failed << std::pair{entry.name, entry.detail};
+        break;
+    }
+    m_entries << std::move(entry);
 }
 
 void ImportWriter::batchFailed(const QString &error)
 {
-    // The songs saved since mark() were rolled back with the batch.
-    for (qsizetype i = m_mark; i < m_report.imported.size(); ++i) {
-        if (m_addedTitle[i])
-            m_titles.remove(m_report.imported[i].trimmed().toLower());
-        m_report.failed << std::pair{m_importedFiles[i], error};
+    for (qsizetype i = m_batchStart; i < m_entries.size(); ++i) {
+        Entry &e = m_entries[i];
+        const bool rolledBack = e.outcome == Outcome::Imported;
+        const bool skippedForOne = e.outcome == Outcome::Skipped && e.duplicateOf >= m_batchStart;
+        if (rolledBack || skippedForOne) {
+            e.outcome = Outcome::Failed;
+            e.detail = error;
+            e.warnings.clear();
+            e.duplicateOf = -1;
+        }
     }
-    m_report.imported.resize(m_mark);
-    m_importedFiles.resize(m_mark);
-    m_addedTitle.resize(m_mark);
-    m_report.warnings.resize(m_warningsMark);
+    rebuildReport();
+    startBatch();   // the library's titles without the rolled-back songs
+}
+
+void ImportWriter::rebuildReport()
+{
+    const QList<Entry> entries = std::exchange(m_entries, {});
+    m_report = {};
+    for (const Entry &e : entries)
+        record(e);
 }
 
 } // namespace visualis

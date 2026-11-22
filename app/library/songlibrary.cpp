@@ -30,7 +30,7 @@ constexpr int kMaxQueued = 200;
 // The worker never touches the library or SongLibrary.
 struct ImportState {
     std::atomic_bool stop = false;
-    std::atomic_int total = 0;
+    std::atomic_int total = -1;   // until the folder is listed
     QMutex mutex;
     QWaitCondition roomFree;
     QList<ImportFile> ready;
@@ -225,12 +225,22 @@ void SongLibrary::saveImported()
     ImportRun &run = *m_import;
     ImportState &state = *run.state;
     if (run.writer) {
+        bool anyReady;
+        {
+            QMutexLocker lock(&state.mutex);
+            anyReady = !state.ready.isEmpty();
+        }
+        std::optional<SongStore::Batch> batch;
+        if (anyReady) {
+            batch.emplace(*m_store);
+            run.writer->startBatch();
+        }
+        // The budget starts after startBatch() and always admits one file, so a big library
+        // (or a slow machine) slows an import down but can't stop it.
         QElapsedTimer budget;
         budget.start();
-        SongStore::Batch batch(*m_store);
-        run.writer->mark();
         int saved = 0;
-        while (budget.elapsed() < kSaveBudgetMs) {
+        while (anyReady && (saved == 0 || budget.elapsed() < kSaveBudgetMs)) {
             std::optional<ImportFile> next;
             {
                 QMutexLocker lock(&state.mutex);
@@ -246,7 +256,7 @@ void SongLibrary::saveImported()
             ++saved;
         }
         if (saved > 0) {
-            if (const SongStore::Result committed = batch.commit(); !committed.ok)
+            if (const SongStore::Result committed = batch->commit(); !committed.ok)
                 run.writer->batchFailed(committed.error);
             emit importProgressChanged();
         }
@@ -313,7 +323,7 @@ QString SongLibrary::importProgress() const
     if (!m_import->writer)
         return QStringLiteral("Stopping the import…");
     const int total = m_import->state->total;
-    if (total == 0)
+    if (total <= 0)
         return QStringLiteral("Importing…");
     return QStringLiteral("Importing %1 of %2 files…").arg(qMin(m_import->handled + 1, total)).arg(total);
 }
@@ -321,7 +331,9 @@ QString SongLibrary::importProgress() const
 QString SongLibrary::importReport(const ImportSummary &s)
 {
     QStringList lines;
-    if (s.stopped)
+    if (s.stopped && s.filesTotal < 0)
+        lines << QStringLiteral("The import was stopped before its files were counted.");
+    else if (s.stopped)
         lines << QStringLiteral("The import was stopped after %1 of %2 files.").arg(s.filesDone).arg(s.filesTotal);
     lines << (s.source.isEmpty() ? QStringLiteral("Imported %1 songs.").arg(s.imported.size())
                                  : QStringLiteral("Imported %1 songs %2.").arg(s.imported.size()).arg(s.source));
