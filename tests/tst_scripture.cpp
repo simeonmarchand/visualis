@@ -31,6 +31,9 @@ private slots:
         QTest::newRow("multi-word name") << "Song of Songs 2:10" << "Song of Songs 2:10" << "Song of Solomon";
         QTest::newRow("verse letter") << "Mark 1:15a" << "Mark 1:15a" << "Mark";
         QTest::newRow("trailing stop") << "Hebrews 11:1." << "Hebrews 11:1" << "Hebrews";
+        QTest::newRow("last psalm") << "Psalm 150" << "Psalm 150" << "Psalms";
+        QTest::newRow("last verse of a one-chapter book") << "Jude 25" << "Jude 25" << "Jude";
+        QTest::newRow("one-chapter book with chapter") << "Reading: Jude 1:24-25" << "Jude 1:24-25" << "Jude";
     }
 
     void findsReferences()
@@ -59,6 +62,12 @@ private slots:
         QTest::newRow("book name with no numbers") << "Acts";
         QTest::newRow("empty") << "";
         QTest::newRow("number glued to a word") << "Rom8";
+        QTest::newRow("chapter past the book's end") << "John 99:1";
+        QTest::newRow("chapter zero") << "John 0:1";
+        QTest::newRow("no such psalm") << "Psalm 151";
+        QTest::newRow("1 John has 5 chapters, not John 6") << "1 John 6:1";
+        QTest::newRow("one-chapter book, chapter 2") << "Jude 2:1";
+        QTest::newRow("verse zero of a one-chapter book") << "Jude 0";
     }
 
     void ignoresOtherTitles()

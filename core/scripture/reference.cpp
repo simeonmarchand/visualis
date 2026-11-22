@@ -159,6 +159,11 @@ std::optional<ScriptureMention> findScriptureReference(const QString &text)
                 continue;
             const bool whole = from == first && m.capturedEnd() >= last;
             const bool hasVerse = m.hasCaptured(2);
+            // "John 99:1" isn't a reference. In a one-chapter book a lone number is a verse ("Jude 3").
+            const int chapter = m.captured(1).toInt();
+            const bool verseOnly = book->chapters == 1 && !hasVerse;
+            if (chapter < 1 || (!verseOnly && chapter > book->chapters))
+                break;   // not a shorter name either: "1 John 6:1" must not become "John 6:1"
             if (!whole) {
                 const QString bare = QString(key).remove(QRegularExpression(QStringLiteral("^[123] ")));
                 if (!hasVerse || letters(bare) < 3 || clock.match(text.mid(m.capturedEnd())).hasMatch())

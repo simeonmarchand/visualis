@@ -15,7 +15,7 @@ struct ScriptureMention {
 };
 
 // Finds the first scripture reference in `text`, or nothing. Books are the 66-book canon,
-// by full name or a common abbreviation ("1 Cor", "Jn", "Ps").
+// by full name or a common abbreviation ("1 Cor", "Jn", "Ps"), with a chapter the book has.
 //  - A text that is only a reference may name just chapters: "Psalm 23", "Jude 3".
 //  - Inside longer text, only chapter:verse counts ("Scripture Reading: Acts 2:38"), and the
 //    book must be written with at least three letters, so "Psalm 23 Choir" or "Service is
