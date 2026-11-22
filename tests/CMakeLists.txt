@@ -25,6 +25,7 @@ target_compile_definitions(tst_songjson PRIVATE FIXTURES_DIR="${CMAKE_CURRENT_SO
 visualis_add_test(tst_livestate visualis_core)
 visualis_add_test(tst_livejournal visualis_core)
 visualis_add_test(tst_services visualis_core)
+visualis_add_test(tst_media visualis_core)
 visualis_add_test(tst_displayplacement visualis_core)
 visualis_add_test(tst_framewatchdog visualis_core)
 visualis_add_test(tst_videoengine Qt6::Multimedia visualis_ui visualis_core)

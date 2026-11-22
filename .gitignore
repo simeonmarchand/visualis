@@ -26,6 +26,8 @@ CMakeUserPresets.json
 *.mkv
 *.webm
 spikes/output/media/
+# Except the tiny synthetic test clips (ffmpeg testsrc, a few KB; see the README there).
+!tests/fixtures/media/*
 
 # Spike logs and benchmark scratch output
 *.log
