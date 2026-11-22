@@ -165,6 +165,37 @@ private slots:
         QVERIFY(plan.unreadableIds.isEmpty());
     }
 
+    // Review of #103: a malformed section order of the item's own isn't quietly emptied.
+    void aMalformedItemSequenceMarksTheItemUnreadable_data()
+    {
+        QTest::addColumn<QByteArray>("sequence");
+        QTest::newRow("scalar") << QByteArray(R"("Verse 1")");
+        QTest::newRow("not strings") << QByteArray(R"(["Verse 1", 2])");
+        QTest::newRow("object") << QByteArray(R"({"a": 1})");
+    }
+
+    void aMalformedItemSequenceMarksTheItemUnreadable()
+    {
+        QFETCH(QByteArray, sequence);
+        QJsonObject item = QJsonDocument::fromJson(
+            R"({"type":"Item","id":"9","attributes":{"title":"Song","item_type":"song","sequence":1}})").object();
+        QJsonObject attributes = item["attributes"].toObject();
+        attributes["custom_arrangement_sequence"] = QJsonDocument::fromJson("[" + sequence + "]").array().at(0);
+        item["attributes"] = attributes;
+        const QByteArray body = QJsonDocument(QJsonObject{{"data", QJsonArray{item}}}).toJson();
+        const PcoPlanItems plan = planItemsFrom(parsePcoDocument(body).value);
+        QCOMPARE(plan.items.size(), 1);
+        QVERIFY(plan.items[0].customArrangementSequence.isEmpty());
+        QCOMPARE(plan.unreadableIds, QStringList{"9"});
+        QCOMPARE(plan.skipped, QStringList{"Item 9 (\"Song\"): its section order is malformed"});
+
+        attributes["custom_arrangement_sequence"] = QJsonArray{"Verse 1", "Chorus"};   // a good one still reads
+        item["attributes"] = attributes;
+        const PcoPlanItems good = planItemsFrom(parsePcoDocument(QJsonDocument(QJsonObject{{"data", QJsonArray{item}}}).toJson()).value);
+        QCOMPARE(good.items[0].customArrangementSequence, (QStringList{"Verse 1", "Chorus"}));
+        QVERIFY(good.unreadableIds.isEmpty());
+    }
+
     // #56: a re-import needs to know which items weren't read whole, by id.
     void itemsNotReadWholeAreNamedById()
     {

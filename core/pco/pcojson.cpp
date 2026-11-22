@@ -194,6 +194,15 @@ std::optional<Record> record(const QJsonValue &v, qsizetype index, const char *t
 
 bool isNumber(const QJsonValue &v) { return v.isDouble(); }
 
+// A section order: absent, null, or a list of labels.
+bool validSequence(const QJsonValue &v)
+{
+    if (v.isNull() || v.isUndefined())
+        return true;
+    const QJsonArray steps = v.toArray();
+    return v.isArray() && std::all_of(steps.begin(), steps.end(), [](const QJsonValue &e) { return e.isString(); });
+}
+
 // What a relationship of an item points at: nothing, the included record, or why it can't be used.
 struct Related
 {
@@ -305,7 +314,6 @@ PcoPlanItems planItemsFrom(const PcoDocument &doc)
         item.description = str(a, "description");
         item.htmlDetails = a.value("html_details").toString();
         item.keyName = str(a, "key_name");
-        item.customArrangementSequence = stringList(a.value("custom_arrangement_sequence"));
 
         // A broken link keeps the item, without what it pointed at, and says so.
         const auto problem = [&](const QString &what) {
@@ -313,6 +321,12 @@ PcoPlanItems planItemsFrom(const PcoDocument &doc)
             if (!out.unreadableIds.contains(item.id))
                 out.unreadableIds << item.id;
         };
+        // Its own section order, checked like an arrangement's: emptying a malformed one
+        // would quietly change what's sung (#103 review).
+        if (const QJsonValue own = a.value("custom_arrangement_sequence"); validSequence(own))
+            item.customArrangementSequence = stringList(own);
+        else
+            problem(QStringLiteral("its section order is malformed"));
         if (const Related s = related(r->resource, "song", index); !s.problem.isEmpty()) {
             problem(s.problem);
         } else if (s.resource) {
@@ -328,11 +342,7 @@ PcoPlanItems planItemsFrom(const PcoDocument &doc)
         } else if (ar.resource) {
             const QJsonObject ra = attrs(*ar.resource);
             const QJsonValue sequence = ra.value("sequence");
-            const QJsonArray steps = sequence.toArray();
-            const bool sequenceOk = sequence.isNull() || sequence.isUndefined()
-                                    || (sequence.isArray() && std::all_of(steps.begin(), steps.end(),
-                                                                          [](const QJsonValue &e) { return e.isString(); }));
-            if (!sequenceOk)
+            if (!validSequence(sequence))
                 problem(QStringLiteral("its arrangement's section order is malformed"));
             else
                 item.arrangement = PcoArrangement{idOf(ar.resource->value("id")), str(ra, "name"), stringList(sequence),
