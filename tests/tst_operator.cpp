@@ -11,6 +11,7 @@
 #include "propresenterbytes.h"
 #include "song/songlimits.h"
 
+#include <QFont>
 #include <QQmlApplicationEngine>
 #include <QSqlDatabase>
 #include <QSqlError>
@@ -843,6 +844,39 @@ private slots:
         QTRY_VERIFY(resolve->isVisible());
         m_services->leaveBlank(0);
         QTRY_VERIFY(!resolve->isVisible());
+    }
+
+    // #56: an item Planning Center took out stays, marked, and the service can be updated.
+    void anItemRemovedInPlanningCenterIsMarked()
+    {
+        QQuickWindow *window = loadOperatorWindow();
+        const QString id = openImportedService({"Example Song", "Gone Song"});
+        ServiceStore store(*m_songs->library());
+        Service s = *store.load(QUuid::fromString(id));
+        s.items[1].pcoRemoved = true;
+        QVERIFY(store.save(s).ok);
+        m_services->openAdded(id);
+        QVERIFY(m_services->openImported());
+        QVERIFY(item(1)["pcoRemoved"].toBool());
+
+        QQuickItem *row = nullptr;
+        QTRY_VERIFY((row = findItem(window->contentItem(), "serviceItem1")));
+        const auto marked = [](QQuickItem *r) {
+            for (QQuickItem *c : r->childItems()) {
+                if (c->property("text").toString().endsWith("(removed in Planning Center)")
+                    && c->property("font").value<QFont>().strikeOut())
+                    return true;
+            }
+            return false;
+        };
+        QTRY_VERIFY(marked(row));
+        auto *update = window->findChild<QObject *>("reimportService");
+        QVERIFY(update);
+        QVERIFY(update->property("enabled").toBool());
+
+        QVERIFY(m_services->createService("Local only"));
+        QVERIFY(!m_services->openImported());
+        QTRY_VERIFY(!update->property("enabled").toBool());
     }
 
     void importReportNamesSkippedFilesByReason()

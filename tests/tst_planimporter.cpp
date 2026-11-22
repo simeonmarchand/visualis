@@ -6,6 +6,9 @@
 #include "service/servicestore.h"
 
 #include <QFile>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QNetworkAccessManager>
 #include <QSignalSpy>
 #include <QSqlQuery>
@@ -115,6 +118,49 @@ constexpr char kTypes[] = "/services/v2/service_types";
 constexpr char kPlans[] = "/services/v2/service_types/1001/plans";
 constexpr char kPlan[] = "/services/v2/service_types/1001/plans/5001";
 constexpr char kItems[] = "/services/v2/service_types/1001/plans/5001/items";
+
+// A fixture with its items edited: as if the planner changed the plan during the week.
+QByteArray fixtureWith(const QString &name, const std::function<void(QJsonArray &)> &edit)
+{
+    QFile f(QStringLiteral(FIXTURES_DIR "/pco/") + name);
+    if (!f.open(QIODevice::ReadOnly))
+        qFatal("missing fixture %s", qPrintable(name));
+    QJsonObject o = QJsonDocument::fromJson(f.readAll()).object();
+    QJsonArray data = o.value("data").toArray();
+    edit(data);
+    o["data"] = data;
+    return QJsonDocument(o).toJson();
+}
+
+void retitle(QJsonArray &items, const QString &id, const QString &title)
+{
+    for (qsizetype i = 0; i < items.size(); ++i) {
+        QJsonObject it = items[i].toObject();
+        if (it.value("id").toString() == id) {
+            QJsonObject a = it.value("attributes").toObject();
+            a["title"] = title;
+            it["attributes"] = a;
+            items[i] = it;
+        }
+    }
+}
+
+const ServiceItem *byPco(const Service &s, const QString &id)
+{
+    for (const ServiceItem &it : s.items) {
+        if (it.pcoItemId == id)
+            return &it;
+    }
+    return nullptr;
+}
+
+QStringList changeKinds(const PlanImporter &importer)
+{
+    QStringList out;
+    for (const QVariant &c : importer.reimportChanges())
+        out << c.toMap().value("kind").toString();
+    return out;
+}
 
 } // namespace
 
@@ -326,12 +372,11 @@ private slots:
         QVERIFY(idle(importer));
         QCOMPARE(imported.size(), 1);
 
-        const int before = server.requests;
+        // Picked again: it's re-imported into its service (#56), not imported twice.
         importer.importPlan("1001", "5001");
         QVERIFY(idle(importer));
         QCOMPARE(imported.size(), 1);
-        QCOMPARE(server.requests, before);   // refused before asking Planning Center
-        QVERIFY(importer.status().contains("already in the library"));
+        QCOMPARE(importer.reimportServiceId(), imported[0][0].toString());
         QCOMPARE(ServiceStore(*songs.library()).list().size(), 1);
     }
 
@@ -494,6 +539,175 @@ private slots:
         QCOMPARE(imported.size(), 0);
         QVERIFY2(importer.status().contains("another program kept the library busy"), qPrintable(importer.status()));
         QVERIFY(ServiceStore(*songs.library()).list().isEmpty());
+    }
+
+    // #56: the diff first, saved only on Apply, keeping the operator's work.
+    void reimportShowsTheDiffThenApplies()
+    {
+        SongLibrary songs;
+        QVERIFY(songs.openLibrary(m_dir.filePath(QString::number(++m_n))));
+        ServiceList services(&songs, nullptr);
+        FakePlanningCenter server;
+        serve(server);
+        PlanImporter importer;
+        importer.setSongLibrary(&songs);
+        importer.setClient(client(server.url()));
+        connect(&importer, &PlanImporter::imported, &services, [&](const QString &id) { services.openAdded(id); });
+        connect(&importer, &PlanImporter::reimported, &services, [&](const QString &id) { services.openAdded(id); });
+        QSignalSpy imported(&importer, &PlanImporter::imported);
+        importer.importPlan("1001", "5001");
+        QVERIFY(idle(importer));
+        QCOMPARE(imported.size(), 1);
+        const QString id = imported[0][0].toString();
+
+        // The operator's week: a header renamed, a background, the countdown deleted.
+        ServiceStore store(*songs.library());
+        Service mine = *store.load(QUuid::fromString(id));
+        const_cast<ServiceItem *>(byPco(mine, "9002"))->title = "Praise";
+        const_cast<ServiceItem *>(byPco(mine, "9003"))->overrides = QJsonObject{{"background", "blue-motion"}};
+        mine.items.removeAt(0);   // 9001, the countdown
+        QVERIFY(store.save(mine).ok);
+        services.openService(id);
+
+        // The planner's week: Worship and Song One retitled, Song Two taken out.
+        server.clear(kItems);
+        server.onBody(kItems, fixtureWith("items_page1.json", [](QJsonArray &items) {
+            retitle(items, "9002", "Worship Set");
+            retitle(items, "9003", "Example Song One (Reprise)");
+        }));
+        server.onBody(kItems, fixtureWith("items_page2.json", [](QJsonArray &items) { items.removeAt(0); }));
+
+        QSignalSpy ready(&importer, &PlanImporter::reimportChanged);
+        importer.reimport(id);
+        QVERIFY(importer.busy());   // reading; nothing waits on the network
+        QVERIFY(idle(importer));
+        QCOMPARE(importer.reimportServiceId(), id);
+        QCOMPARE(changeKinds(importer), (QStringList{"keptEdit", "changed", "removed"}));
+        QCOMPARE(importer.reimportSummary(), QStringLiteral("1 removed, 1 changed. Kept 1 of your edits."));
+        QCOMPARE(*store.load(QUuid::fromString(id)), mine);   // nothing saved yet
+
+        QSignalSpy reimported(&importer, &PlanImporter::reimported);
+        QVERIFY(importer.applyReimport());
+        QCOMPARE(reimported.size(), 1);
+        QVERIFY(importer.reimportServiceId().isEmpty());
+        const Service s = *store.load(QUuid::fromString(id));
+        QVERIFY(!byPco(s, "9001"));                                         // stays deleted
+        QCOMPARE(byPco(s, "9002")->title, QStringLiteral("Praise"));        // the operator's
+        QCOMPARE(byPco(s, "9003")->title, QStringLiteral("Example Song One (Reprise)"));
+        QCOMPARE(byPco(s, "9003")->overrides, QJsonObject({{"background", "blue-motion"}}));
+        QVERIFY(byPco(s, "9005")->pcoRemoved);                              // flagged, not deleted
+        QVERIFY(importer.status().startsWith("Updated"));
+
+        // The open service shows it: reloaded, so its next edit doesn't save over the merge.
+        const QVariantList items = services.items();
+        QCOMPARE(items.size(), 4);
+        QVERIFY(std::any_of(items.cbegin(), items.cend(), [](const QVariant &v) { return v.toMap()["pcoRemoved"].toBool(); }));
+        QVERIFY(services.openImported());
+
+        // The same plan again (the fake server's queue is spent: serve both pages again).
+        const QByteArray page1 = fixtureWith("items_page1.json", [](QJsonArray &items) {
+            retitle(items, "9002", "Worship Set");
+            retitle(items, "9003", "Example Song One (Reprise)");
+        });
+        server.clear(kItems);
+        server.onBody(kItems, page1);
+        server.onBody(kItems, fixtureWith("items_page2.json", [](QJsonArray &items) { items.removeAt(0); }));
+        importer.reimport(id);
+        QVERIFY(idle(importer));
+        QCOMPARE(changeKinds(importer), QStringList());
+        QCOMPARE(importer.reimportSummary(), QStringLiteral("Up to date with Planning Center."));
+    }
+
+    void aDeletedItemChangedInPlanningCenterCanBeAddedBack()
+    {
+        SongLibrary songs;
+        QVERIFY(songs.openLibrary(m_dir.filePath(QString::number(++m_n))));
+        FakePlanningCenter server;
+        serve(server);
+        PlanImporter importer;
+        importer.setSongLibrary(&songs);
+        importer.setClient(client(server.url()));
+        QSignalSpy imported(&importer, &PlanImporter::imported);
+        importer.importPlan("1001", "5001");
+        QVERIFY(idle(importer));
+        const QString id = imported[0][0].toString();
+        ServiceStore store(*songs.library());
+        Service mine = *store.load(QUuid::fromString(id));
+        mine.items.removeAt(0);   // 9001
+        QVERIFY(store.save(mine).ok);
+
+        server.clear(kItems);
+        server.onBody(kItems, fixtureWith("items_page1.json", [](QJsonArray &items) { retitle(items, "9001", "Countdown (10 min)"); }));
+        server.on(kItems, {"items_page2.json"});
+        importer.reimport(id);
+        QVERIFY(idle(importer));
+        QCOMPARE(changeKinds(importer), QStringList{"changedButDeleted"});
+        QCOMPARE(importer.reimportChanges()[0].toMap()["pcoItemId"].toString(), QStringLiteral("9001"));
+        QVERIFY(importer.applyReimport({"9001"}));
+        const Service s = *store.load(QUuid::fromString(id));
+        QCOMPARE(s.items.first().title, QStringLiteral("Countdown (10 min)"));
+        QVERIFY(s.removedPcoItems.isEmpty());
+    }
+
+    void aCancelledReimportChangesNothing()
+    {
+        SongLibrary songs;
+        QVERIFY(songs.openLibrary(m_dir.filePath(QString::number(++m_n))));
+        FakePlanningCenter server;
+        serve(server);
+        PlanImporter importer;
+        importer.setSongLibrary(&songs);
+        importer.setClient(client(server.url()));
+        QSignalSpy imported(&importer, &PlanImporter::imported);
+        importer.importPlan("1001", "5001");
+        QVERIFY(idle(importer));
+        const QString id = imported[0][0].toString();
+        const Service before = *ServiceStore(*songs.library()).load(QUuid::fromString(id));
+
+        server.clear(kItems);
+        server.onBody(kItems, fixtureWith("items_page1.json", [](QJsonArray &items) { retitle(items, "9002", "Worship Set"); }));
+        server.on(kItems, {"items_page2.json"});
+        importer.reimport(id);
+        QVERIFY(idle(importer));
+        QVERIFY(!importer.reimportServiceId().isEmpty());
+        importer.cancelReimport();
+        QVERIFY(importer.reimportServiceId().isEmpty());
+        QVERIFY(!importer.applyReimport());
+        QCOMPARE(*ServiceStore(*songs.library()).load(QUuid::fromString(id)), before);
+
+        // Cancelled while reading: the answer, when it comes, isn't offered.
+        server.clear(kItems);
+        server.onHeld(kItems, "items_page1.json");
+        server.on(kItems, {"items_page2.json"});
+        importer.reimport(id);
+        QVERIFY(QTest::qWaitFor([&] { return server.requests > 0 && importer.busy(); }, 5000));
+        importer.cancelReimport();
+        server.release();
+        QVERIFY(idle(importer));
+        QVERIFY(importer.reimportServiceId().isEmpty());
+    }
+
+    // A read that comes back empty is far likelier a fault than a planner deleting
+    // everything: merging it would flag every item removed.
+    void anEmptyReadChangesNothing()
+    {
+        SongLibrary songs;
+        QVERIFY(songs.openLibrary(m_dir.filePath(QString::number(++m_n))));
+        FakePlanningCenter server;
+        serve(server);
+        PlanImporter importer;
+        importer.setSongLibrary(&songs);
+        importer.setClient(client(server.url()));
+        QSignalSpy imported(&importer, &PlanImporter::imported);
+        importer.importPlan("1001", "5001");
+        QVERIFY(idle(importer));
+        const QString id = imported[0][0].toString();
+        server.clear(kItems);
+        server.onBody(kItems, R"({"data": [], "included": [], "links": {}})");
+        importer.reimport(id);
+        QVERIFY(idle(importer));
+        QVERIFY(importer.reimportServiceId().isEmpty());
+        QVERIFY(importer.status().contains("nothing was changed"));
     }
 
     void aFailedReadLeavesTheLibraryAlone()

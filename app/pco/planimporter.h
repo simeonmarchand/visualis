@@ -3,6 +3,7 @@
 #include "pco/pcotypes.h"
 #include "pco/planimport.h"
 #include "pco/songlink.h"
+#include "service/service.h"
 
 #include <QDeadlineTimer>
 #include <QObject>
@@ -11,6 +12,7 @@
 #include <QtQml/qqmlregistration.h>
 
 #include <memory>
+#include <optional>
 
 class PcoClient;
 class PlanningCenter;
@@ -32,6 +34,13 @@ class PlanImporter : public QObject
     Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
     // What the last action did, for the operator.
     Q_PROPERTY(QString status READ status NOTIFY statusChanged)
+    // A re-import read and waiting for Apply or Cancel (#56): the service it's for (empty when
+    // none), its diff as {kind, title, field, detail, pcoItemId}, and the diff in a sentence.
+    // `kind` is "added", "removed", "restored", "moved", "changed", "keptEdit",
+    // "keptPosition", "relink" or "changedButDeleted".
+    Q_PROPERTY(QString reimportServiceId READ reimportServiceId NOTIFY reimportChanged)
+    Q_PROPERTY(QVariantList reimportChanges READ reimportChanges NOTIFY reimportChanged)
+    Q_PROPERTY(QString reimportSummary READ reimportSummary NOTIFY reimportChanged)
 
 public:
     explicit PlanImporter(QObject *parent = nullptr);
@@ -51,13 +60,25 @@ public:
     QVariantList plans() const;
     bool busy() const { return m_pending > 0; }
     QString status() const { return m_status; }
+    QString reimportServiceId() const;
+    QVariantList reimportChanges() const;
+    QString reimportSummary() const;
 
     Q_INVOKABLE void loadServiceTypes();
     Q_INVOKABLE void loadPlans(const QString &serviceTypeId);
     // Reads the plan and its items, then saves a new service. A plan that's already in the
-    // library isn't imported again (updating it is re-import's job, #56). A plan with no
-    // items that could be read isn't saved, so it can be tried again.
+    // library is re-imported into its service instead. A plan with no items that could be
+    // read isn't saved, so it can be tried again.
     Q_INVOKABLE void importPlan(const QString &serviceTypeId, const QString &planId);
+
+    // Re-import (#56): reads the service's plan again and merges it with the operator's
+    // copy, without saving: the diff waits for applyReimport() or cancelReimport(). Nothing
+    // the operator did is lost (mergeReimport).
+    Q_INVOKABLE void reimport(const QString &serviceId);
+    // Saves the merge, adding back the deleted items in `addBack` (Planning Center item ids
+    // from "changedButDeleted" lines). Songs the library is sure of are linked, as on import.
+    Q_INVOKABLE bool applyReimport(const QStringList &addBack = {});
+    Q_INVOKABLE void cancelReimport();
 
 signals:
     void serviceTypesChanged();
@@ -66,6 +87,9 @@ signals:
     void statusChanged();
     // A new service is in the library.
     void imported(const QString &serviceId, const QString &title);
+    void reimportChanged();
+    // A re-import was saved into this service.
+    void reimported(const QString &serviceId);
 
 private:
     PcoClient *client();
@@ -80,6 +104,8 @@ private:
                  int library);
     void gaveUpWaiting(const QString &title);
 
+    void offerReimport(const QUuid &serviceId, const visualis::Service &fresh);
+
     QPointer<PlanningCenter> m_pco;
     QPointer<SongLibrary> m_songs;
     std::unique_ptr<PcoClient> m_client;
@@ -90,4 +116,12 @@ private:
     QString m_status;
     int m_lockWaitLimitMs = 10000;
     int m_libraryChanges = 0;
+    struct PendingReimport {
+        QUuid serviceId;
+        visualis::Service fresh;   // the plan as read, as serviceFromPlan made it
+        QVariantList changes;
+        QString summary;
+    };
+    std::optional<PendingReimport> m_reimport;
+    int m_reimportRequest = 0;   // only the latest reimport() answer is offered
 };

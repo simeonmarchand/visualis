@@ -3,6 +3,7 @@
 #include "library/songlibrary.h"
 #include "pco/pcoclient.h"
 #include "pco/planningcenter.h"
+#include "pco/reimport.h"
 #include "pco/songlink.h"
 #include "service/servicestore.h"
 #include "song/songstore.h"
@@ -149,8 +150,7 @@ void PlanImporter::importPlan(const QString &serviceTypeId, const QString &planI
         return;
     }
     if (const auto existing = ServiceStore(*m_songs->library()).findByPcoPlan(planId)) {
-        setStatus(tr("This plan is already in the library as \"%1\". Updating it from Planning Center isn't "
-                     "supported yet.").arg(existing->title));
+        reimport(existing->id.toString(QUuid::WithoutBraces));   // update it, keeping the operator's work
         return;
     }
 
@@ -264,4 +264,147 @@ void PlanImporter::gaveUpWaiting(const QString &title)
     end();
     setStatus(tr("Couldn't save \"%1\": another program kept the library busy. Nothing was imported; try again.")
                   .arg(title));
+}
+
+namespace {
+
+QString changeKindName(ReimportChange::Kind k)
+{
+    using K = ReimportChange::Kind;
+    switch (k) {
+    case K::Added: return QStringLiteral("added");
+    case K::Removed: return QStringLiteral("removed");
+    case K::Restored: return QStringLiteral("restored");
+    case K::Moved: return QStringLiteral("moved");
+    case K::Changed: return QStringLiteral("changed");
+    case K::KeptEdit: return QStringLiteral("keptEdit");
+    case K::KeptPosition: return QStringLiteral("keptPosition");
+    case K::Relink: return QStringLiteral("relink");
+    case K::ChangedButDeleted: return QStringLiteral("changedButDeleted");
+    }
+    return {};
+}
+
+} // namespace
+
+QString PlanImporter::reimportServiceId() const
+{
+    return m_reimport ? m_reimport->serviceId.toString(QUuid::WithoutBraces) : QString();
+}
+
+QVariantList PlanImporter::reimportChanges() const { return m_reimport ? m_reimport->changes : QVariantList(); }
+
+QString PlanImporter::reimportSummary() const { return m_reimport ? m_reimport->summary : QString(); }
+
+void PlanImporter::reimport(const QString &serviceId)
+{
+    PcoClient *pco = client();
+    if (!pco) {
+        setStatus(tr("Sign in to Planning Center first."));
+        return;
+    }
+    if (!m_songs || !m_songs->library()) {
+        setStatus(tr("The library isn't open."));
+        return;
+    }
+    const QUuid id = QUuid::fromString(serviceId);
+    const std::optional<Service> service = ServiceStore(*m_songs->library()).load(id);
+    if (!service || service->pcoPlanId.isEmpty()) {
+        setStatus(tr("This service wasn't imported from Planning Center."));
+        return;
+    }
+    cancelReimport();
+    const int request = ++m_reimportRequest;
+    const QString typeId = service->pcoServiceTypeId;
+    const QString planId = service->pcoPlanId;
+    begin();
+    setStatus(tr("Reading \"%1\" from Planning Center…").arg(service->title));
+    QPointer<PlanImporter> self(this);
+    pco->plan(typeId, planId, [self, pco, id, typeId, planId, request](PcoResult<PcoPlan> plan) {
+        if (!self)
+            return;
+        if (!plan.ok()) {
+            self->end();
+            self->setStatus(plan.error.message);
+            return;
+        }
+        pco->planItems(typeId, planId, [self, id, typeId, request, plan = plan.value](PcoResult<PcoPlanItems> items) {
+            if (!self)
+                return;
+            self->end();
+            if (request != self->m_reimportRequest)
+                return;   // cancelled, or asked again since
+            if (!items.ok()) {
+                self->setStatus(items.error.message);
+                return;
+            }
+            const PlanImport fresh = serviceFromPlan({typeId, {}}, plan, items.value, QDateTime::currentDateTimeUtc());
+            if (fresh.service.items.isEmpty()) {
+                // Most likely a read that went wrong: merging it would flag every item removed.
+                self->setStatus(tr("Planning Center sent no items for this plan that could be read, so nothing "
+                                   "was changed."));
+                return;
+            }
+            self->offerReimport(id, fresh.service);
+        });
+    });
+}
+
+void PlanImporter::offerReimport(const QUuid &serviceId, const Service &fresh)
+{
+    const std::optional<Service> local = m_songs && m_songs->library()
+                                             ? ServiceStore(*m_songs->library()).load(serviceId) : std::nullopt;
+    if (!local) {
+        setStatus(tr("The service is gone from the library."));
+        return;
+    }
+    const ReimportResult r = mergeReimport(*local, fresh);
+    PendingReimport p{serviceId, fresh, {}, r.summary()};
+    for (const ReimportChange &c : r.changes) {
+        p.changes.append(QVariantMap{{"kind", changeKindName(c.kind)}, {"title", c.title}, {"field", c.field},
+                                     {"detail", c.detail}, {"pcoItemId", c.pcoItemId}});
+    }
+    m_reimport = p;
+    setStatus(r.summary());
+    emit reimportChanged();
+}
+
+bool PlanImporter::applyReimport(const QStringList &addBack)
+{
+    if (!m_reimport || !m_songs || !m_songs->library())
+        return false;
+    ServiceStore store(*m_songs->library());
+    // Against the service as it is now, in case the operator changed it meanwhile.
+    const std::optional<Service> local = store.load(m_reimport->serviceId);
+    if (!local) {
+        setStatus(tr("The service is gone from the library."));
+        cancelReimport();
+        return false;
+    }
+    ReimportResult r = mergeReimport(*local, m_reimport->fresh, QSet<QString>(addBack.cbegin(), addBack.cend()));
+    SongStore songs(*m_songs->library());
+    const SongLinkReport links = linkSongs(r.service, songs);
+    if (const ServiceStore::Result saved = store.save(r.service); !saved.ok) {
+        setStatus(saved.error);
+        return false;
+    }
+    QString status = tr("Updated \"%1\" from Planning Center. %2").arg(r.service.title, r.summary());
+    if (const QString s = links.summary(); !s.isEmpty())
+        status += QLatin1Char(' ') + s;
+    for (const QString &missing : links.unmatched)
+        status += QLatin1Char(' ') + tr("No group for %1.").arg(missing);
+    m_reimport.reset();
+    emit reimportChanged();
+    setStatus(status);
+    emit reimported(r.service.id.toString(QUuid::WithoutBraces));
+    return true;
+}
+
+void PlanImporter::cancelReimport()
+{
+    ++m_reimportRequest;   // an answer still on its way is dropped
+    if (!m_reimport)
+        return;
+    m_reimport.reset();
+    emit reimportChanged();
 }

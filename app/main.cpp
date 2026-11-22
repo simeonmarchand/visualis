@@ -80,9 +80,13 @@ int main(int argc, char *argv[])
     if (auto *importer = engine.singletonInstance<PlanImporter *>("Visualis.Ui", "PlanImporter")) {
         importer->setPlanningCenter(engine.singletonInstance<PlanningCenter *>("Visualis.Ui", "PlanningCenter"));
         importer->setSongLibrary(songs);
-        if (services)
+        if (services) {
             QObject::connect(importer, &PlanImporter::imported, services,
                              [services](const QString &id) { services->openAdded(id); });
+            // Reloaded from the library, so the list's next edit doesn't save over the merge.
+            QObject::connect(importer, &PlanImporter::reimported, services,
+                             [services](const QString &id) { services->openAdded(id); });
+        }
     }
 
     // Back to what was live if the last run crashed (#25), then journal every change.

@@ -11,7 +11,7 @@ ColumnLayout {
     id: pane
     spacing: 8
 
-    readonly property bool dialogOpen: nameDialog.visible || deleteDialog.visible || pasteDialog.visible
+    readonly property bool dialogOpen: nameDialog.visible || deleteDialog.visible || pasteDialog.visible || reimportDialog.visible
     // The selected item, if it's an imported song not linked to the library yet (#55).
     readonly property var selectedPlaceholder: {
         const items = ServiceList.items
@@ -89,11 +89,13 @@ ColumnLayout {
                 anchors.rightMargin: 8
                 verticalAlignment: Text.AlignVCenter
                 elide: Text.ElideRight
-                text: !row.modelData.songPlaceholder ? row.modelData.title
+                text: row.modelData.pcoRemoved ? row.modelData.title + " (removed in Planning Center)"
+                      : !row.modelData.songPlaceholder ? row.modelData.title
                       : row.modelData.suggestions.length > 0
                         ? row.modelData.title + " (confirm: " + row.modelData.suggestions[0].title + "?)"
                         : row.modelData.title + " (song not in library)"
                 font.bold: row.isHeader
+                font.strikeout: row.modelData.pcoRemoved
                 font.capitalization: row.isHeader ? Font.AllUppercase : Font.MixedCase
                 color: row.isHeader ? "#8b8f96" : (row.modelData.hasSlides ? "#d0d3d8" : "#6b6f76")
             }
@@ -198,7 +200,26 @@ ColumnLayout {
             enabled: ServiceList.openId !== ""
             onTriggered: pane.ask("Rename service", "Service name", false, ServiceList.openTitle, name => ServiceList.renameService(name))
         }
+        MenuItem {
+            objectName: "reimportService"
+            text: "Update from Planning Center…"
+            enabled: ServiceList.openImported && !PlanImporter.busy
+            onTriggered: {
+                reimportDialog.open()
+                PlanImporter.reimport(ServiceList.openId)
+            }
+        }
         MenuItem { text: "Delete…"; enabled: ServiceList.openId !== ""; onTriggered: deleteDialog.open() }
+    }
+
+    ReimportDialog { id: reimportDialog }
+    // Also when the plan picker re-imports a plan that's already a service.
+    Connections {
+        target: PlanImporter
+        function onReimportChanged() {
+            if (PlanImporter.reimportServiceId !== "" && !reimportDialog.visible)
+                reimportDialog.open()
+        }
     }
 
     Menu {
