@@ -10,6 +10,8 @@
 #include <QtQml/qqmlextensionplugin.h>
 #include <QtTest>
 
+#include "testkeychain.h"
+
 Q_IMPORT_QML_PLUGIN(Visualis_UiPlugin)
 
 using namespace visualis;
@@ -35,6 +37,8 @@ class SongEditorTest : public QObject
     Q_OBJECT
 
 private slots:
+    void initTestCase() { useTestKeychainEntry(); }
+
     void init()
     {
         QVERIFY(m_dir.isValid());
