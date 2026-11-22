@@ -2,7 +2,6 @@
 
 #include "library/songlibrary.h"
 #include "pco/pcoclient.h"
-#include "pco/planimport.h"
 #include "pco/planningcenter.h"
 #include "pco/songlink.h"
 #include "service/servicestore.h"
@@ -10,6 +9,7 @@
 
 #include <QDate>
 #include <QDateTime>
+#include <QTimer>
 
 using namespace visualis;
 
@@ -182,16 +182,6 @@ void PlanImporter::importPlan(const QString &serviceTypeId, const QString &planI
 
 void PlanImporter::save(const PcoServiceType &type, const PcoPlan &plan, const PcoPlanItems &items)
 {
-    if (!m_songs || !m_songs->library()) {
-        setStatus(tr("The library isn't open, so there's nowhere to save the service."));
-        return;
-    }
-    ServiceStore store(*m_songs->library());
-    // Checked again: the same plan may have been imported while this one was reading.
-    if (const auto existing = store.findByPcoPlan(plan.id)) {
-        setStatus(tr("This plan is already in the library as \"%1\".").arg(existing->title));
-        return;
-    }
     PlanImport r = serviceFromPlan(type, plan, items, QDateTime::currentDateTimeUtc());
     if (r.service.items.isEmpty()) {
         // Nothing to run, and saving it would block a retry (a plan is imported once).
@@ -202,9 +192,39 @@ void PlanImporter::save(const PcoServiceType &type, const PcoPlan &plan, const P
         return;
     }
     // Songs the library is sure of become song items (#55); the rest wait for the operator.
+    // Reading songs never waits on another program's write lock (WAL), so it's done once,
+    // before the first attempt to save.
     SongStore songStore(*m_songs->library());
-    const SongLinkReport links = linkSongs(r.service, songStore);
-    const ServiceStore::Result saved = store.save(r.service);
+    SongLinkReport links = linkSongs(r.service, songStore);
+    begin();
+    trySave(std::move(r), std::move(links), QDeadlineTimer(m_lockWaitLimitMs));
+}
+
+void PlanImporter::trySave(PlanImport r, SongLinkReport links, QDeadlineTimer deadline)
+{
+    if (!m_songs || !m_songs->library()) {
+        end();
+        setStatus(tr("The library isn't open, so there's nowhere to save the service."));
+        return;
+    }
+    // The duplicate-plan check is part of the save's transaction: the same plan may have
+    // been imported while this one was reading.
+    const ServiceStore::Result saved = ServiceStore(*m_songs->library()).saveNewPlan(r.service);
+    if (saved.busy && !deadline.hasExpired()) {
+        // Another program has the library locked. Try again shortly rather than wait here,
+        // which would hold up the operator window and the outputs.
+        setStatus(tr("Waiting for the library: another program is using it…"));
+        QTimer::singleShot(kLockRetryMs, this, [this, r = std::move(r), links = std::move(links), deadline]() mutable {
+            trySave(std::move(r), std::move(links), deadline);
+        });
+        return;
+    }
+    end();
+    if (saved.busy) {
+        setStatus(tr("Couldn't save \"%1\": another program kept the library busy. Nothing was imported; try again.")
+                      .arg(r.service.title));
+        return;
+    }
     if (!saved.ok) {
         setStatus(saved.error);
         return;

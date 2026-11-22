@@ -229,6 +229,47 @@ private slots:
     }
 
     // #54: a v3 library's services gain the plan link, empty, and keep everything else.
+    // #76: the duplicate check and the save are one transaction, and the write lock is
+    // never waited for.
+    void saveNewPlanRefusesAPlanAlreadyImported()
+    {
+        Service a;
+        a.title = "Sunday";
+        a.pcoPlanId = "70001";
+        QVERIFY(m_services->saveNewPlan(a).ok);
+        Service again;
+        again.title = "Sunday (again)";
+        again.pcoPlanId = "70001";
+        const ServiceStore::Result r = m_services->saveNewPlan(again);
+        QVERIFY(!r.ok && !r.busy);
+        QCOMPARE(r.existing, QStringLiteral("Sunday"));
+        QVERIFY(again.id.isNull());   // left as it was
+        QCOMPARE(m_services->list().size(), 1);
+        QVERIFY(m_services->save(again).ok);   // save() itself doesn't refuse: re-import (#56) may need it
+    }
+
+    void saveNewPlanDoesNotWaitForALockHeldElsewhere()
+    {
+        auto other = Library::open(m_library->folder()).library;
+        QSqlQuery lock(other->database());
+        QVERIFY(lock.exec("BEGIN IMMEDIATE"));
+        Service s;
+        s.title = "Sunday";
+        s.pcoPlanId = "70002";
+        QElapsedTimer took;
+        took.start();
+        const ServiceStore::Result r = m_services->saveNewPlan(s);
+        QVERIFY(!r.ok);
+        QVERIFY(r.busy);
+        QVERIFY2(took.elapsed() < Library::kBusyTimeoutMs / 2, qPrintable(QString("waited %1 ms").arg(took.elapsed())));
+        QVERIFY(QSqlQuery(other->database()).exec("ROLLBACK"));
+        QVERIFY(m_services->saveNewPlan(s).ok);
+        // The connection's usual busy timeout is back for other saves.
+        QSqlQuery timeout(m_library->database());
+        QVERIFY(timeout.exec("PRAGMA busy_timeout") && timeout.next());
+        QCOMPARE(timeout.value(0).toInt(), Library::kBusyTimeoutMs);
+    }
+
     void aVersion3LibraryGainsThePlanLink()
     {
         const QString folder = m_dir.filePath("v3");

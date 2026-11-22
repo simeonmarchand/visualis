@@ -44,6 +44,8 @@ public:
     static OpenResult open(const QString &folder, const std::vector<Migration> &migrations);
 
     static const std::vector<Migration> &migrations();
+    // How long a write waits for another connection's lock before failing.
+    static constexpr int kBusyTimeoutMs = 5000;
     static int latestVersion();
 
     ~Library();

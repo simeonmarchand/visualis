@@ -1,3 +1,4 @@
+#include "library/library.h"
 #include "library/servicelist.h"
 #include "library/songlibrary.h"
 #include "pco/pcoclient.h"
@@ -7,6 +8,7 @@
 #include <QFile>
 #include <QNetworkAccessManager>
 #include <QSignalSpy>
+#include <QSqlQuery>
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QTemporaryDir>
@@ -331,6 +333,82 @@ private slots:
         QCOMPARE(server.requests, before);   // refused before asking Planning Center
         QVERIFY(importer.status().contains("already in the library"));
         QCOMPARE(ServiceStore(*songs.library()).list().size(), 1);
+    }
+
+    // #76: another program holding the library's write lock never holds up the event loop.
+    // The import waits on a timer and saves once the lock is free.
+    void aLockedLibraryDelaysTheSaveWithoutBlocking()
+    {
+        const QString folder = m_dir.filePath(QString::number(++m_n));
+        SongLibrary songs;
+        QVERIFY(songs.openLibrary(folder));
+        auto other = Library::open(folder).library;   // stands in for another program
+        QVERIFY(other);
+        QSqlQuery lock(other->database());
+        QVERIFY(lock.exec("BEGIN IMMEDIATE"));
+        bool held = true;
+
+        FakePlanningCenter server;
+        serve(server);
+        PlanImporter importer;
+        importer.setSongLibrary(&songs);
+        importer.setClient(client(server.url()));
+        QSignalSpy imported(&importer, &PlanImporter::imported);
+        int ticksWhileHeld = 0;
+        qint64 longestGap = 0;
+        QElapsedTimer sinceTick;
+        QTimer ticker;
+        ticker.setInterval(10);
+        connect(&ticker, &QTimer::timeout, this, [&] {
+            ticksWhileHeld += held ? 1 : 0;
+            longestGap = qMax(longestGap, sinceTick.restart());
+        });
+        sinceTick.start();
+        ticker.start();
+
+        importer.importPlan("1001", "5001");
+        QTRY_VERIFY(importer.status().contains("Waiting for the library"));
+        QVERIFY(importer.busy());
+        // Released by a timer on this thread: if the save blocked, it couldn't run.
+        QTimer::singleShot(500, this, [&] {
+            QSqlQuery(other->database()).exec("ROLLBACK");
+            held = false;
+        });
+        QVERIFY(idle(importer));
+        QVERIFY2(ticksWhileHeld >= 10, qPrintable(QString("only %1 ticks while locked").arg(ticksWhileHeld)));
+        // A save that waited on SQLite's busy timeout would stall for all of it.
+        QVERIFY2(longestGap < Library::kBusyTimeoutMs / 2, qPrintable(QString("stalled %1 ms").arg(longestGap)));
+        QCOMPARE(imported.size(), 1);
+        QVERIFY(importer.status().startsWith("Imported"));
+        QCOMPARE(ServiceStore(*songs.library()).list().size(), 1);
+    }
+
+    void aLibraryLockedTooLongFailsClearlyAndCanBeRetried()
+    {
+        const QString folder = m_dir.filePath(QString::number(++m_n));
+        SongLibrary songs;
+        QVERIFY(songs.openLibrary(folder));
+        auto other = Library::open(folder).library;
+        QSqlQuery lock(other->database());
+        QVERIFY(lock.exec("BEGIN IMMEDIATE"));
+
+        FakePlanningCenter server;
+        serve(server);
+        PlanImporter importer;
+        importer.setSongLibrary(&songs);
+        importer.setClient(client(server.url()));
+        importer.setLockWaitLimit(600);
+        QSignalSpy imported(&importer, &PlanImporter::imported);
+        importer.importPlan("1001", "5001");
+        QVERIFY(idle(importer));
+        QCOMPARE(imported.size(), 0);
+        QVERIFY2(importer.status().contains("another program kept the library busy"), qPrintable(importer.status()));
+
+        QVERIFY(QSqlQuery(other->database()).exec("ROLLBACK"));
+        QVERIFY(ServiceStore(*songs.library()).list().isEmpty());
+        importer.importPlan("1001", "5001");
+        QVERIFY(idle(importer));
+        QCOMPARE(imported.size(), 1);
     }
 
     void aFailedReadLeavesTheLibraryAlone()
