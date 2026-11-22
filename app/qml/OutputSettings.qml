@@ -19,6 +19,30 @@ ColumnLayout {
         }
     }
 
+    PlanningCenterDialog { id: pcoDialog }
+
+    RowLayout {
+        spacing: 12
+        Label {
+            text: "Planning Center"
+            color: "#d0d3d8"
+            Layout.preferredWidth: 80
+            elide: Text.ElideRight
+        }
+        Button {
+            objectName: "planningCenterButton"
+            text: PlanningCenter.signedIn ? "Account…" : "Sign in…"
+            focusPolicy: Qt.NoFocus
+            onClicked: pcoDialog.open()
+        }
+        Label {
+            text: PlanningCenter.signedIn
+                  ? (PlanningCenter.organization !== "" ? PlanningCenter.organization : "Signed in")
+                  : "Not signed in"
+            color: "#8b8f96"
+        }
+    }
+
     // Background video: a stopgap until the media library and service items.
     RowLayout {
         spacing: 12

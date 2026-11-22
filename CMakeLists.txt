@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # QRhi is private API; ADR 0001 accepts that and keeps its use to app/video/videoengine.cpp.
 set(QT_NO_PRIVATE_MODULE_WARNING ON)
-find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui GuiPrivate Quick Multimedia Sql Test)
+find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui GuiPrivate Quick Multimedia Network Sql Test)
 qt_standard_project_setup(REQUIRES 6.8)
 
 enable_testing()
