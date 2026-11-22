@@ -214,8 +214,8 @@ const std::vector<Migration> &Library::migrations()
              "CREATE INDEX template_name ON template(name COLLATE NOCASE)",
              "ALTER TABLE song ADD COLUMN default_template TEXT NOT NULL DEFAULT ''",
              "ALTER TABLE song_group ADD COLUMN slide_overrides TEXT NOT NULL DEFAULT '[]'"}},
-        // Items taken out of the plan in Planning Center stay, flagged, until the operator removes them (#56).
-        // Imported items the operator deleted, so a re-import doesn't add them back.
+        // Re-import (#56): items Planning Center took out stay, flagged, until the operator
+        // removes them; imported items the operator deleted are remembered, so they stay deleted.
         {6, {"ALTER TABLE service_item ADD COLUMN pco_removed INTEGER NOT NULL DEFAULT 0",
              "CREATE TABLE service_removed_pco_item ("
              " service_id TEXT NOT NULL REFERENCES service(id) ON DELETE CASCADE,"
