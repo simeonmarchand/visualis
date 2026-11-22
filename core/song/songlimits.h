@@ -7,8 +7,10 @@
 namespace visualis {
 
 // How big a song may be, so one huge file (an import, a crash journal) can't make the GUI
-// thread save tens of thousands of rows or expand millions of slides (#83). Set far above
-// any real song: the church's largest have about 30 groups and 150 slides played.
+// thread save tens of thousands of rows or expand millions of slides (#83). A false refusal
+// on a Sunday is worse than a slow import, so each is at least 18x the largest in the
+// church's ProPresenter library (151 songs, measured 2026-11: 24 groups, 15 slides in a
+// group, 41 slides, 2 arrangements, 36 steps, 555 characters in a slide, 71 played).
 namespace songlimits {
 constexpr int kGroups = 500;
 constexpr int kSlidesPerGroup = 500;
