@@ -385,10 +385,8 @@ void MediaLibrary::finishImport()
     if (!run->discard) {
         SongLibrary::ImportSummary &summary = run->summary;
         summary.filesDone = run->state->done;
-        summary.filesTotal = qMax(int(run->state->total), summary.filesDone);
-        summary.stopped = run->state->stop && summary.filesDone < run->state->total;
-        if (run->state->stop && run->state->total < 0)
-            summary.stopped = true;
+        summary.filesTotal = run->state->total;   // -1 if stopped before the files were counted
+        summary.stopped = run->state->stop && (summary.filesTotal < 0 || summary.filesDone < summary.filesTotal);
         setReport(SongLibrary::importReport(summary));
     }
     emit importingChanged();
