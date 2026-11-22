@@ -11,6 +11,8 @@
 #include <QSaveFile>
 #include <QSet>
 
+#include <algorithm>
+
 namespace visualis {
 
 namespace {
@@ -72,8 +74,16 @@ QByteArray songToJson(const Song &s)
 {
     QJsonArray groups;
     for (const Group &g : s.groups) {
-        groups.append(QJsonObject{{"id", idText(g.id)}, {"label", g.label}, {"color", g.color},
-                                  {"slides", QJsonArray::fromStringList(g.slides)}});
+        QJsonObject group{{"id", idText(g.id)}, {"label", g.label}, {"color", g.color},
+                          {"slides", QJsonArray::fromStringList(g.slides)}};
+        // Only when there are some, so files without overrides read as they always have.
+        if (std::any_of(g.slideOverrides.cbegin(), g.slideOverrides.cend(), [](const QJsonObject &o) { return !o.isEmpty(); })) {
+            QJsonArray overrides;
+            for (const QJsonObject &o : g.slideOverrides)
+                overrides.append(o);
+            group["slideOverrides"] = overrides;
+        }
+        groups.append(group);
     }
     QJsonArray arrangements;
     for (const Arrangement &a : s.arrangements) {
@@ -95,6 +105,8 @@ QByteArray songToJson(const Song &s)
         {"arrangements", arrangements},
         {"defaultArrangement", idOrNull(s.defaultArrangement)},
     };
+    if (!s.defaultTemplate.isNull())
+        o["defaultTemplate"] = idText(s.defaultTemplate);
     if (s.created.isValid())
         o["created"] = time(s.created);
     if (s.updated.isValid())
@@ -136,6 +148,7 @@ SongJsonResult songFromJson(const QByteArray &json)
     s.credits = {credits.value("ccliNumber").toString(), credits.value("authors").toString(),
                  credits.value("copyright").toString()};
     s.pcoSongId = o.value("pcoSongId").toString();
+    s.defaultTemplate = QUuid::fromString(o.value("defaultTemplate").toString());
     s.created = QDateTime::fromString(o.value("created").toString(), Qt::ISODateWithMs);
     s.updated = QDateTime::fromString(o.value("updated").toString(), Qt::ISODateWithMs);
 
@@ -151,7 +164,14 @@ SongJsonResult songFromJson(const QByteArray &json)
         QStringList slides;
         for (const QJsonValue &slide : g.value("slides").toArray())
             slides << slide.toString();
-        s.groups << Group{id, g.value("label").toString(), g.value("color").toString(), slides};
+        Group group{id, g.value("label").toString(), g.value("color").toString(), slides};
+        // Parallel to the slides; extras would belong to no slide.
+        for (const QJsonValue &o : g.value("slideOverrides").toArray()) {
+            if (group.slideOverrides.size() == group.slides.size())
+                break;
+            group.slideOverrides << o.toObject();
+        }
+        s.groups << group;
     }
 
     for (const QJsonValue &v : o.value("arrangements").toArray()) {

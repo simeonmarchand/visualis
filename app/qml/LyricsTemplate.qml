@@ -4,6 +4,8 @@ import QtQuick
 // The built-in lyrics template (Phase 1). Sizes are fractions of the output's height and
 // margins fractions of its width and height, so one template fits any resolution. The
 // template editor and stored templates arrive in Phase 3 (plan 5.4).
+// builtInLyricsTemplate() (core/template/template.cpp) holds the same values; tst_template
+// fails if the two differ.
 QtObject {
     // Text
     readonly property string fontFamily: "Helvetica Neue"
