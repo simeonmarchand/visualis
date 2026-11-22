@@ -119,5 +119,6 @@ ColumnLayout {
 
     PasteSongDialog {
         id: pasteDialog
+        objectName: "libraryPasteDialog"
     }
 }

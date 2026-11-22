@@ -428,6 +428,81 @@ private slots:
         QVERIFY(store.list().isEmpty());
     }
 
+    // #83: each limit is checked by the worker's reader, not only the group count.
+    void theReaderRefusesASongOverAnyLimit_data()
+    {
+        using namespace songlimits;
+        QTest::addColumn<QString>("limit");
+        QTest::addColumn<QString>("reason");
+        QTest::newRow("slides in a group") << "slides per group"
+            << QStringLiteral("too many slides in \"Verse 1\": 501; the limit is 500");
+        QTest::newRow("slides") << "slides" << QStringLiteral("too many slides: 10,001; the limit is 10,000");
+        QTest::newRow("arrangements") << "arrangements" << QStringLiteral("too many arrangements: 101; the limit is 100");
+        QTest::newRow("steps") << "steps" << QStringLiteral("too many steps in arrangement \"Long\": 1,001; the limit is 1,000");
+        QTest::newRow("characters") << "characters"
+            << QStringLiteral("too many characters in a slide of \"Verse 1\": 10,001; the limit is 10,000");
+    }
+    void theReaderRefusesASongOverAnyLimit()
+    {
+        using namespace songlimits;
+        QFETCH(QString, limit);
+        QFETCH(QString, reason);
+        Song s;
+        s.id = QUuid::createUuid();
+        s.title = "Over";
+        s.groups = {Group{QUuid::createUuid(), "Verse 1", "", {"line"}}};
+        if (limit == "slides per group") {
+            s.groups[0].slides = QStringList(kSlidesPerGroup + 1, "line");
+        } else if (limit == "slides") {
+            s.groups.clear();
+            for (int i = 0; i <= kSlides / kSlidesPerGroup; ++i)   // 21 groups of 500
+                s.groups << Group{QUuid::createUuid(), QStringLiteral("Verse %1").arg(i + 1), "",
+                                  QStringList(i == 0 ? 1 : kSlidesPerGroup, "line")};
+        } else if (limit == "arrangements") {
+            for (int i = 0; i <= kArrangements; ++i)
+                s.arrangements << Arrangement{QUuid::createUuid(), QStringLiteral("A %1").arg(i), {s.groups[0].id}, {}};
+        } else if (limit == "steps") {
+            s.arrangements = {Arrangement{QUuid::createUuid(), "Long", QList<QUuid>(kSteps + 1, s.groups[0].id), {}}};
+        } else {
+            s.groups[0].slides = {QString(kCharactersPerSlide + 1, QChar('a'))};
+        }
+        QCOMPARE(songLimitError(s), reason);
+        QTemporaryDir files;
+        QFile f(files.filePath(songFileName(s.title)));
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        f.write(songToJson(s));
+        f.close();
+        const ImportFile read = readSongFile(QFileInfo(f.fileName()));
+        QVERIFY2(read.error.isEmpty(), qPrintable(read.error));
+        QVERIFY(!read.song);
+        QCOMPARE(read.skipped, reason);
+    }
+
+    // #83: a song handed straight to the writer is refused by the save, and reported failed.
+    void importWriterRefusesAnOversizedSong()
+    {
+        QTemporaryDir lib;
+        auto library = Library::open(lib.path()).library;
+        SongStore store(*library);
+        ImportWriter writer(store, ImportWriter::Duplicates::SkipSameIdWarnSameTitle);
+        Song huge = fixture("Amazing Grace");
+        const Group verse = huge.groups[0];
+        huge.groups.clear();
+        for (int i = 0; i <= songlimits::kGroups; ++i) {
+            Group g = verse;
+            g.id = QUuid::createUuid();
+            huge.groups << g;
+        }
+        for (Arrangement &a : huge.arrangements)
+            a.sequence = {huge.groups[0].id};
+        writer.add({"huge.json", huge, {}, {}, {"a warning"}});
+        QVERIFY(writer.report().imported.isEmpty());
+        QCOMPARE(writer.report().failed,
+                 (QList<std::pair<QString, QString>>{{"huge.json", "too many groups: 501; the limit is 500"}}));
+        QCOMPARE(writer.report().warnings, QStringList{"huge.json: a warning"});
+        QVERIFY(store.list().isEmpty());
+    }
+
     // #69
     void importSkipsFilesTooLargeToBeSongsAndReportsProgress()
     {

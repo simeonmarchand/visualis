@@ -1,5 +1,6 @@
 #include "songstore.h"
 #include "library/library.h"
+#include "songlimits.h"
 
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -103,6 +104,10 @@ SongStore::SongStore(Library &library)
 
 SongStore::Result SongStore::save(Song &song)
 {
+    // Before anything else, so no caller (paste, the editor, an import) can make this thread
+    // write an unbounded song (#83).
+    if (QString tooBig = songLimitError(song); !tooBig.isEmpty())
+        return {false, tooBig};
     // Work on a copy so a failed save leaves the caller's song exactly as it was.
     Song s = song;
     if (s.id.isNull())
