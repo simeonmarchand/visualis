@@ -42,7 +42,8 @@ struct SongMatch {
 //  1. the library song already linked to this Planning Center song;
 //  2. the one song with this CCLI number;
 //  3. the one song whose title is the same once case, accents, punctuation, "&"/"and", a
-//     leading "The", and a trailing "(Live)"-style note are set aside: linked "by title"
+//     leading "The", and a trailing recording note ("(Live)", "(Acoustic)", "(feat. …)") are
+//     set aside: linked "by title"
 //     (Simeon's decision on #55: week one has nothing else to go on). Not if that song is
 //     already linked to another Planning Center song or has another CCLI number;
 //  4. otherwise similar titles, or several equal ones, for the operator to confirm, the

@@ -44,6 +44,15 @@ private slots:
         QTest::newRow("two notes") << "Be Thou My Vision (Live) [Acoustic]" << "be thou my vision";
         QTest::newRow("all note") << "(Untitled)" << "untitled";
         QTest::newRow("hyphen") << "Joy-to-the-World" << "joy to the world";
+        QTest::newRow("live somewhere") << "Be Thou My Vision (Live at the Cathedral)" << "be thou my vision";
+        QTest::newRow("radio edit") << "Be Thou My Vision (Radio Edit)" << "be thou my vision";
+        QTest::newRow("featuring") << "Be Thou My Vision (feat. A Choir)" << "be thou my vision";
+        QTest::newRow("remastered") << "Be Thou My Vision [Remastered 2011]" << "be thou my vision";
+        QTest::newRow("official") << "Be Thou My Vision (Official Audio)" << "be thou my vision";
+        // Review of #85: a note that names the song stays part of the title.
+        QTest::newRow("subtitle") << "Psalm 23 (I Am Not Alone)" << "psalm 23 i am not alone";
+        QTest::newRow("language") << "Amazing Grace (Spanish)" << "amazing grace spanish";
+        QTest::newRow("live as a word") << "Alive (Forever)" << "alive forever";
     }
 
     void normalizesTitles()
@@ -86,13 +95,37 @@ private slots:
         QCOMPARE(none.candidates.size(), 3);
     }
 
-    // A note in brackets is set aside, so "(Spanish)" makes two equal titles: confirmed.
-    void aSharedCcliAndTitleIsConfirmed()
+    // "(Spanish)" names a different song, so the shared CCLI is settled by title...
+    void aSharedCcliIsSettledByTheWholeTitle()
     {
         const QList<SongCandidate> lib{song("Amazing Grace", "22025"), song("Amazing Grace (Spanish)", "22025")};
         const SongMatch m = matchSong(pco("Amazing Grace", "22025"), lib);
+        QCOMPARE(m.kind, Kind::Linked);
+        QCOMPARE(m.songId, lib[0].id);
+    }
+
+    // ...while a recording note doesn't, so two of those are confirmed.
+    void aSharedCcliAndTitleIsConfirmed()
+    {
+        const QList<SongCandidate> lib{song("Amazing Grace", "22025"), song("Amazing Grace (Live)", "22025")};
+        const SongMatch m = matchSong(pco("Amazing Grace", "22025"), lib);
         QCOMPARE(m.kind, Kind::Confirm);
         QCOMPARE(m.candidates.size(), 2);
+    }
+
+    // Review of #85: two songs that differ only in a subtitle are never auto-linked, but the
+    // operator is asked.
+    void aDifferentSubtitleIsOnlySuggested()
+    {
+        const QList<SongCandidate> lib{song("Psalm 23 (Surely Goodness and Mercy)"), song("Joy to the World")};
+        const SongMatch m = matchSong(pco("Psalm 23 (I Am Not Alone)"), lib);
+        QCOMPARE(m.kind, Kind::Confirm);
+        QCOMPARE(m.by, By::SimilarTitle);
+        QCOMPARE(m.candidates, QList<QUuid>{lib[0].id});
+
+        const SongMatch live = matchSong(pco("Psalm 23 (Surely Goodness and Mercy) (Live)"), lib);
+        QCOMPARE(live.kind, Kind::Linked);   // a recording note still doesn't matter
+        QCOMPARE(live.by, By::Title);
     }
 
     // 3. Simeon's decision on #55: one exactly equal title links, shown as "by title".

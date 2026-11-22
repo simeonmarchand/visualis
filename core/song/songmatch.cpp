@@ -82,9 +82,22 @@ SongMatch confirm(SongMatch::By by, QList<QUuid> ids)
 
 } // namespace
 
+// What's left of a title with every bracketed note removed, for suggesting "Psalm 23 (I Am
+// Not Alone)" when the library has "Psalm 23 (Surely Goodness)": never for linking.
+static QString withoutNotes(const QString &title)
+{
+    static const QRegularExpression note(QStringLiteral("\\s*[(\\[][^)\\]]*[)\\]]"));
+    const QString stripped = QString(title).remove(note);
+    return normalizedTitle(stripped.trimmed().isEmpty() ? title : stripped);
+}
+
 QString normalizedTitle(const QString &title)
 {
-    static const QRegularExpression note(QStringLiteral("\\s*[(\\[][^)\\]]*[)\\]]\\s*$"));
+    // Only notes about a recording. Others name the song ("Psalm 23 (I Am Not Alone)").
+    static const QRegularExpression note(
+        QStringLiteral("\\s*[(\\[]\\s*(?:live(?:\\s+[^)\\]]*)?|acoustic|studio(?:\\s+version)?|radio\\s+(?:version|edit)"
+                       "|(?:feat|ft)\\.?\\s[^)\\]]*|official[^)\\]]*|remaster(?:ed)?[^)\\]]*)\\s*[)\\]]\\s*$"),
+        QRegularExpression::CaseInsensitiveOption);
     static const QRegularExpression apostrophe(QStringLiteral("['\\x{2019}\\x{2018}`]"));
     static const QRegularExpression other(QStringLiteral("[^\\p{L}\\p{N}]+"), QRegularExpression::UseUnicodePropertiesOption);
     QString s = folded(title);
@@ -152,6 +165,8 @@ SongMatch matchSong(const PcoSong &song, const QList<SongCandidate> &library)
             equal << &c;
         else if (const int s = similarity(title, theirs); s >= 0)
             near << Near{&c, s};
+        else if (withoutNotes(c.title) == withoutNotes(song.title))
+            near << Near{&c, 5};   // the same but for a note in brackets: ask
     }
     const auto byAuthor = [&](QList<const SongCandidate *> list) {
         std::stable_partition(list.begin(), list.end(),
