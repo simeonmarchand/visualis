@@ -208,8 +208,7 @@ const std::vector<Migration> &Library::migrations()
         // kind are copied out for listing. Built-in templates live in code, not here. A song's
         // default template is a plain id, not a foreign key: one that's gone falls back to the
         // built-in for its kind. Slide overrides are a JSON array parallel to the group's slides.
-        // Version 5 is #56's; renumber whichever merges second.
-        {6, {"CREATE TABLE template ("
+        {5, {"CREATE TABLE template ("
              " id TEXT PRIMARY KEY, name TEXT NOT NULL, kind TEXT NOT NULL, body TEXT NOT NULL,"
              " created_at TEXT NOT NULL, updated_at TEXT NOT NULL)",
              "CREATE INDEX template_name ON template(name COLLATE NOCASE)",

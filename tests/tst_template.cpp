@@ -338,7 +338,7 @@ private slots:
     {
         QTemporaryDir dir;
         const auto &all = Library::migrations();
-        const std::vector<Migration> v4(all.begin(), all.begin() + 4);
+        const std::vector<Migration> v4(all.begin(), all.begin() + 4);   // before templates
         QCOMPARE(v4.back().version, 4);
         {
             auto old = Library::open(dir.path(), v4);
