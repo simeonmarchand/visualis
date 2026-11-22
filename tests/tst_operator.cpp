@@ -430,11 +430,10 @@ private slots:
         longestGap = qMax(longestGap, sinceTick.elapsed());
         qInfo() << "import took" << took.elapsed() << "ms;" << ticks << "ticks, longest gap" << longestGap << "ms";
         QVERIFY(!m_songs->importing());
-        // On this thread the whole import would be one gap; on a worker, no gap comes near
-        // half of it.
-        const qint64 allowed = qMax<qint64>(150, took.elapsed() / 2);
-        QVERIFY2(longestGap < allowed, qPrintable(QString("the event loop stalled for %1 ms of a %2 ms import")
-                                                       .arg(longestGap).arg(took.elapsed())));
+        // On this thread the whole import would be one gap. A 10 ms timer late by more than a
+        // few frames means the window and outputs would stutter.
+        QVERIFY2(longestGap < kMaxStallMs, qPrintable(QString("the event loop stalled for %1 ms of a %2 ms import")
+                                                           .arg(longestGap).arg(took.elapsed())));
         QVERIFY(ticks >= 5);
 
         // The same songs and report as importing on this thread.
@@ -468,29 +467,58 @@ private slots:
         QVERIFY(waitForImport());
     }
 
-    void openingAnotherLibraryStopsAnImport()
+    void openingAnotherLibraryStopsAnImportWithoutWaitingForIt()
     {
-        const QString folder = writeSongFiles(400);
+        const QString first = m_dir.filePath(QString::number(m_libraries));
+        const QString folder = writeSongFiles(1000);
         QVERIFY(m_songs->importSongs(QUrl::fromLocalFile(folder)));
-        QSignalSpy finished(m_songs, &SongLibrary::importFinished);
+        QTRY_VERIFY(m_songs->importProgress().contains(" of 1000"));   // under way
+        QElapsedTimer took;
+        took.start();
         QVERIFY(m_songs->openLibrary(m_dir.filePath(QString::number(++m_libraries))));
-        QVERIFY(!m_songs->importing());
-        QTest::qWait(100);   // anything the stopped import queued arrives, and is dropped
-        QCOMPARE(finished.count(), 0);
-        QVERIFY(m_songs->songs().isEmpty());
-        QVERIFY(m_songs->importSongs(QUrl::fromLocalFile(folder)));
-        QVERIFY(waitForImport());
-        QCOMPARE(m_songs->songs().size(), 400);
+        QVERIFY2(took.elapsed() < kMaxStallMs, qPrintable(QString("opening took %1 ms").arg(took.elapsed())));
+        QVERIFY(m_songs->songs().isEmpty());   // the new library, at once
+        QVERIFY(m_songs->importing());         // the old import is stopping...
+        QCOMPARE(m_songs->importProgress(), QStringLiteral("Stopping the import…"));
+        QVERIFY(!m_songs->importSongs(QUrl::fromLocalFile(folder)));
+
+        QVERIFY(waitForImport());   // ...and says what it got through
+        const QString report = m_songs->report();
+        QVERIFY2(report.startsWith("The import was stopped after "), qPrintable(report));
+        const int imported = QRegularExpression("Imported (\\d+) songs").match(report).captured(1).toInt();
+        QVERIFY(imported > 0 && imported < 1000);
+        QVERIFY(m_songs->songs().isEmpty());   // into the old library, not this one
+        QVERIFY(m_songs->openLibrary(first));
+        QCOMPARE(m_songs->songs().size(), imported);
     }
 
-    void importReportGroupsSkipsByReason()
+    void quittingMidImportWaitsOnlyBriefly()
     {
-        const QString report = SongLibrary::importReport(
-            {"from ProPresenter", {"A", "B"},
-             {{"x.pro", "not a song"}, {"y.pro", "too large to be a song"}, {"z.pro", "not a song"}},
-             {{"bad.pro", "truncated"}}, {}});
-        QCOMPARE(report, QStringLiteral("Imported 2 songs from ProPresenter.\nSkipped 2: not a song.\n"
-                                        "Skipped 1: too large to be a song.\nCouldn't read bad.pro: truncated"));
+        const QString folder = writeSongFiles(1000);
+        QVERIFY(m_songs->importSongs(QUrl::fromLocalFile(folder)));
+        QTRY_VERIFY(m_songs->importProgress().contains(" of 1000"));
+        QElapsedTimer took;
+        took.start();
+        m_engine.reset();   // the singletons go with the engine, as at quit
+        m_songs = nullptr;
+        QVERIFY2(took.elapsed() < 3500, qPrintable(QString("quitting took %1 ms").arg(took.elapsed())));
+        QTest::qWait(50);   // nothing from the stopped worker arrives at a deleted object
+    }
+
+    void importReportNamesSkippedFilesByReason()
+    {
+        SongLibrary::ImportSummary s{"from ProPresenter", {"A", "B"},
+                                     {{"x.pro", "not a song"}, {"y.pro", "too large to be a song"}, {"z.pro", "not a song"}},
+                                     {{"bad.pro", "truncated"}}, {}};
+        QCOMPARE(SongLibrary::importReport(s),
+                 QStringLiteral("Imported 2 songs from ProPresenter.\n"
+                                "Skipped 2: not a song:\n  x.pro\n  z.pro\n"
+                                "Skipped 1: too large to be a song:\n  y.pro\n"
+                                "Couldn't read bad.pro: truncated"));
+        s.stopped = true;
+        s.filesDone = 5;
+        s.filesTotal = 9;
+        QVERIFY(SongLibrary::importReport(s).startsWith("The import was stopped after 5 of 9 files.\nImported 2 songs"));
     }
 
 private:
@@ -614,6 +642,7 @@ private:
     }
 
     QTemporaryDir m_dir;
+    static constexpr qint64 kMaxStallMs = 100;
     int m_libraries = 0;
     int m_folders = 0;
     std::unique_ptr<QQmlApplicationEngine> m_engine;
