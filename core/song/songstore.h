@@ -3,11 +3,16 @@
 #include "song.h"
 
 #include <QList>
+#include <functional>
 #include <optional>
 
 namespace visualis {
 
 class Library;
+
+// Called by folder imports before each file, and once more at the end (done == total). Return
+// false to stop: the import ends after the file in hand, reporting what it did so far.
+using ImportProgress = std::function<bool(int done, int total)>;
 
 struct SongSummary {
     QUuid id;

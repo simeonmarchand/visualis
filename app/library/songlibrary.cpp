@@ -9,6 +9,7 @@
 #include "song/songstore.h"
 
 #include <QDir>
+#include <QThread>
 #include <QLoggingCategory>
 #include <QQmlEngine>
 #include <QStandardPaths>
@@ -17,12 +18,44 @@ using namespace visualis;
 
 Q_LOGGING_CATEGORY(lcLibrary, "visualis.library")
 
+// What the worker shares with the GUI thread. The worker writes `summary` before it ends;
+// the GUI reads it only after QThread::finished.
+struct ImportState {
+    std::atomic_bool stop = false;
+    std::atomic_int done = 0;
+    std::atomic_int total = 0;
+    SongLibrary::ImportSummary summary;
+};
+
+struct SongLibrary::ImportRun {
+    QThread *thread = nullptr;
+    std::shared_ptr<ImportState> state;
+    // The library an import was stopped to switch away from: closed once the worker is done,
+    // so closing it never waits on the worker's connection.
+    std::unique_ptr<SongStore> retiredStore;
+    std::unique_ptr<Library> retiredLibrary;
+};
+
 SongLibrary::SongLibrary(QObject *parent)
     : QObject(parent)
 {
+    m_importPoll.setInterval(100);
+    connect(&m_importPoll, &QTimer::timeout, this, &SongLibrary::importProgressChanged);
 }
 
-SongLibrary::~SongLibrary() = default;
+SongLibrary::~SongLibrary()
+{
+    if (!m_import)
+        return;
+    // Quitting mid-import: give the file in hand a moment, then leave the worker to the
+    // process exit. It holds nothing of this object's.
+    m_import->state->stop = true;
+    disconnect(m_import->thread, nullptr, this, nullptr);
+    if (m_import->thread->wait(3000))
+        delete m_import->thread;
+    else
+        qCWarning(lcLibrary) << "import still running at quit; left to finish its file";
+}
 
 QString SongLibrary::defaultFolder()
 {
@@ -31,6 +64,15 @@ QString SongLibrary::defaultFolder()
 
 bool SongLibrary::openLibrary(const QString &folder)
 {
+    if (m_import) {
+        // Stop it without waiting; the old library closes when the worker is done.
+        m_import->state->stop = true;
+        if (!m_import->retiredLibrary) {
+            m_import->retiredStore = std::move(m_store);
+            m_import->retiredLibrary = std::move(m_library);
+        }
+        emit importProgressChanged();
+    }
     m_store.reset();
     m_library.reset();
     m_selected.reset();
@@ -120,32 +162,117 @@ bool SongLibrary::goLive(int index)
     return live && live->show(*m_selected, {}, index);
 }
 
-void SongLibrary::importProPresenter(const QUrl &folder)
+bool SongLibrary::importProPresenter(const QUrl &folder)
 {
-    if (!m_store)
-        return;
-    const propresenter::ImportReport r = propresenter::importFolder(folder.toLocalFile(), *m_store);
-    QStringList lines{QStringLiteral("Imported %1 songs from ProPresenter.").arg(r.imported.size())};
-    if (!r.skipped.isEmpty())
-        lines << QStringLiteral("Skipped %1 (not songs, or already in the library).").arg(r.skipped.size());
-    for (const auto &[file, error] : r.failed)
-        lines << QStringLiteral("Couldn't read %1: %2").arg(file, error);
-    setReport(lines.join('\n'));
-    emit songsChanged();
+    const QString path = folder.toLocalFile();
+    return startImport([path](SongStore &store, const ImportProgress &progress) {
+        const propresenter::ImportReport r = propresenter::importFolder(path, store, progress);
+        return ImportSummary{QStringLiteral("from ProPresenter"), r.imported, r.skipped, r.failed, r.warnings};
+    });
 }
 
-void SongLibrary::importSongs(const QUrl &folder)
+bool SongLibrary::importSongs(const QUrl &folder)
 {
-    if (!m_store)
-        return;
-    const SongImportReport r = visualis::importSongs(folder.toLocalFile(), *m_store);
-    QStringList lines{QStringLiteral("Imported %1 songs.").arg(r.imported.size())};
-    if (!r.skipped.isEmpty())
-        lines << QStringLiteral("Skipped %1 already in the library.").arg(r.skipped.size());
-    for (const auto &[file, error] : r.failed)
-        lines << QStringLiteral("Couldn't read %1: %2").arg(file, error);
-    setReport(lines.join('\n'));
+    const QString path = folder.toLocalFile();
+    return startImport([path](SongStore &store, const ImportProgress &progress) {
+        const SongImportReport r = visualis::importSongs(path, store, progress);
+        return ImportSummary{{}, r.imported, r.skipped, r.failed, r.warnings};
+    });
+}
+
+bool SongLibrary::startImport(const ImportJob &job)
+{
+    if (!m_library || m_import)
+        return false;
+    auto state = std::make_shared<ImportState>();
+    const QString libraryFolder = m_library->folder();
+    // The worker opens the library again: a SQLite connection belongs to the thread that
+    // made it. WAL and the busy timeout let both write. It closes its library before it
+    // ends, so the GUI never waits on that.
+    QThread *thread = QThread::create([state, libraryFolder, job] {
+        const ImportProgress progress = [state](int done, int total) {
+            state->done = done;
+            state->total = total;
+            return !state->stop;
+        };
+        ImportSummary summary;
+        {
+            Library::OpenResult opened = Library::open(libraryFolder);
+            if (opened.library) {
+                SongStore store(*opened.library);
+                summary = job(store, progress);
+            } else {
+                summary.failed << std::pair{QStringLiteral("the library"), opened.message};
+            }
+        }
+        summary.filesDone = state->done;
+        summary.filesTotal = state->total;
+        summary.stopped = state->stop && state->done < state->total;
+        state->summary = summary;
+    });
+    m_import = std::make_unique<ImportRun>();
+    m_import->thread = thread;
+    m_import->state = state;
+    connect(thread, &QThread::finished, this, &SongLibrary::finishImport);
+    thread->start();
+    m_importPoll.start();
+    emit importingChanged();
+    emit importProgressChanged();
+    return true;
+}
+
+void SongLibrary::finishImport()
+{
+    m_importPoll.stop();
+    std::unique_ptr<ImportRun> run = std::move(m_import);
+    run->thread->wait();   // already finished: returns at once
+    delete run->thread;
+    const ImportSummary &summary = run->state->summary;
+    setReport(importReport(summary));
+    if (summary.stopped)
+        qCInfo(lcLibrary) << "import stopped after" << summary.filesDone << "of" << summary.filesTotal << "files";
+    run.reset();   // closes a library this import outlived
+    emit importingChanged();
+    emit importProgressChanged();
     emit songsChanged();
+    emit importFinished();
+}
+
+QString SongLibrary::importProgress() const
+{
+    if (!m_import)
+        return {};
+    if (m_import->state->stop)
+        return QStringLiteral("Stopping the import…");
+    const int total = m_import->state->total;
+    if (total == 0)
+        return QStringLiteral("Importing…");
+    return QStringLiteral("Importing %1 of %2 files…").arg(qMin(m_import->state->done + 1, total)).arg(total);
+}
+
+QString SongLibrary::importReport(const ImportSummary &s)
+{
+    QStringList lines;
+    if (s.stopped)
+        lines << QStringLiteral("The import was stopped after %1 of %2 files.").arg(s.filesDone).arg(s.filesTotal);
+    lines << (s.source.isEmpty() ? QStringLiteral("Imported %1 songs.").arg(s.imported.size())
+                                 : QStringLiteral("Imported %1 songs %2.").arg(s.imported.size()).arg(s.source));
+    // Skips grouped by reason, in the order first seen, each file named so it can be found.
+    QStringList reasons;
+    QHash<QString, QStringList> files;
+    for (const auto &[file, reason] : s.skipped) {
+        if (!files.contains(reason))
+            reasons << reason;
+        files[reason] << file;
+    }
+    for (const QString &reason : std::as_const(reasons)) {
+        lines << QStringLiteral("Skipped %1: %2:").arg(files[reason].size()).arg(reason);
+        for (const QString &file : std::as_const(files[reason]))
+            lines << QStringLiteral("  %1").arg(file);
+    }
+    for (const auto &[file, error] : s.failed)
+        lines << QStringLiteral("Couldn't read %1: %2").arg(file, error);
+    return lines.join('\n');
 }
 
 bool SongLibrary::createFromPaste(const QString &title, const QString &lyrics)

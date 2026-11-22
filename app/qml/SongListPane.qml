@@ -67,7 +67,7 @@ ColumnLayout {
             id: importButton
             text: "Import…"
             focusPolicy: Qt.NoFocus
-            enabled: SongLibrary.error === ""
+            enabled: SongLibrary.error === "" && !SongLibrary.importing
             onClicked: importMenu.popup(importButton, 0, importButton.height)
         }
     }
@@ -76,7 +76,7 @@ ColumnLayout {
         objectName: "libraryReport"
         Layout.fillWidth: true
         visible: text !== ""
-        text: SongLibrary.report
+        text: SongLibrary.importing ? SongLibrary.importProgress : SongLibrary.report
         wrapMode: Text.WordWrap
         color: "#8b8f96"
     }

@@ -253,6 +253,42 @@ private slots:
         QCOMPARE(store.list().size(), 1);
     }
 
+    // #69: one huge or bogus file can't take all the memory.
+    void aFileTooLargeToBeASongIsSkippedUnread()
+    {
+        QTemporaryDir files, libDir;
+        write(files.filePath("Joy to the World.pro"), sampleSong());
+        QFile huge(files.filePath("Huge.pro"));
+        QVERIFY(huge.open(QIODevice::WriteOnly));
+        QVERIFY(huge.resize(propresenter::kMaxFileBytes + 1));   // sparse: no disk used
+        huge.close();
+
+        auto lib = Library::open(libDir.path()).library;
+        SongStore store(*lib);
+        const propresenter::ImportReport r = propresenter::importFolder(files.path(), store);
+        QCOMPARE(r.imported, QStringList{"Joy to the World"});
+        QCOMPARE(r.skipped.size(), 1);
+        QCOMPARE(r.skipped[0].first, QStringLiteral("Huge.pro"));
+        QCOMPARE(propresenter::readFile(huge.fileName()).error, QStringLiteral("too large to be a song"));
+    }
+
+    void importReportsProgressAndCanBeStopped()
+    {
+        QTemporaryDir files, libDir;
+        for (int i = 0; i < 4; ++i)
+            write(files.filePath(QString("Song %1.pro").arg(i)), sampleSong());
+        auto lib = Library::open(libDir.path()).library;
+        SongStore store(*lib);
+        QList<std::pair<int, int>> calls;
+        const propresenter::ImportReport r = propresenter::importFolder(files.path(), store, [&](int done, int total) {
+            calls << std::pair{done, total};
+            return done < 2;   // stop before the third file
+        });
+        QCOMPARE(calls, (QList<std::pair<int, int>>{{0, 4}, {1, 4}, {2, 4}}));
+        QCOMPARE(r.imported, (QStringList{"Song 0", "Song 1"}));
+        QCOMPARE(store.list().size(), 2);
+    }
+
     void rtfConversion_data()
     {
         QTest::addColumn<QByteArray>("rtf");

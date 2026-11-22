@@ -1,14 +1,19 @@
 #pragma once
 
 #include "song/song.h"
+#include "song/songstore.h"
 
 #include <QObject>
+#include <QTimer>
 #include <QUrl>
 #include <QVariantList>
 #include <QtQml/qqmlregistration.h>
 
+#include <functional>
 #include <memory>
 #include <optional>
+
+class QThread;
 
 namespace visualis {
 class Library;
@@ -36,6 +41,10 @@ class SongLibrary : public QObject
     Q_PROPERTY(QVariantList selectedSlides READ selectedSlides NOTIFY selectionChanged)
     // What the last import or paste did, for the operator.
     Q_PROPERTY(QString report READ report NOTIFY reportChanged)
+    // An import is running or stopping (#69); "Importing 120 of 800 files…" says how far
+    // it's got.
+    Q_PROPERTY(bool importing READ importing NOTIFY importingChanged)
+    Q_PROPERTY(QString importProgress READ importProgress NOTIFY importProgressChanged)
 
 public:
     explicit SongLibrary(QObject *parent = nullptr);
@@ -52,8 +61,13 @@ public:
     // Takes slide `index` of the selected song live.
     Q_INVOKABLE bool goLive(int index);
 
-    Q_INVOKABLE void importProPresenter(const QUrl &folder);
-    Q_INVOKABLE void importSongs(const QUrl &folder);   // a folder of Visualis JSON exports
+    // Imports run on a worker thread with their own library connection (#69), so the
+    // operator window and outputs keep going. One at a time: false, with nothing started,
+    // while another runs or stops. When it's done the song list refreshes, `report` says what
+    // it did, and importFinished() is emitted. Opening another library stops an import after
+    // the file in hand, without waiting for it; its report says what it got through.
+    Q_INVOKABLE bool importProPresenter(const QUrl &folder);
+    Q_INVOKABLE bool importSongs(const QUrl &folder);   // a folder of Visualis JSON exports
     // Creates a song from pasted lyrics and selects it. Returns false (with `report` saying
     // why) when there's no title or no lyrics.
     Q_INVOKABLE bool createFromPaste(const QString &title, const QString &lyrics);
@@ -76,6 +90,8 @@ public:
     QString selectedTitle() const;
     QVariantList selectedSlides() const;
     QString report() const { return m_report; }
+    bool importing() const { return m_import != nullptr; }
+    QString importProgress() const;
 
     // Whether a title matches the search: every word of it appears, ignoring case.
     static bool matches(const QString &title, const QString &search);
@@ -85,8 +101,30 @@ signals:
     void songsChanged();
     void selectionChanged();
     void reportChanged();
+    void importingChanged();
+    void importProgressChanged();
+    void importFinished();
+
+public:
+    // What an import did. Both importers' results become one of these, so the report is
+    // written in one place (importReport).
+    struct ImportSummary {
+        QString source;   // "from ProPresenter", or empty
+        QStringList imported;
+        QList<std::pair<QString, QString>> skipped;   // file name, reason
+        QList<std::pair<QString, QString>> failed;    // file name, error
+        QStringList warnings;
+        bool stopped = false;   // stopped part way: the lists say what was done before it
+        int filesDone = 0;
+        int filesTotal = 0;
+    };
+    static QString importReport(const ImportSummary &summary);
 
 private:
+    using ImportJob = std::function<ImportSummary(visualis::SongStore &, const visualis::ImportProgress &)>;
+    struct ImportRun;
+    bool startImport(const ImportJob &job);
+    void finishImport();
     void setReport(const QString &report);
 
     std::unique_ptr<visualis::Library> m_library;
@@ -95,4 +133,8 @@ private:
     QString m_search;
     std::optional<visualis::Song> m_selected;
     QString m_report;
+    // The running import; null when none. The worker only touches its shared state, never
+    // this object, so it can outlive it at quit.
+    std::unique_ptr<ImportRun> m_import;
+    QTimer m_importPoll;   // reads the worker's progress for the pane
 };

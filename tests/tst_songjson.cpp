@@ -205,6 +205,29 @@ private slots:
         QCOMPARE(r.failed[0].first, QStringLiteral("Broken.visualis-song.json"));
         QCOMPARE(store.list().size(), 2);
     }
+
+    // #69
+    void importSkipsFilesTooLargeToBeSongsAndReportsProgress()
+    {
+        QTemporaryDir lib, in;
+        auto library = Library::open(lib.path()).library;
+        SongStore store(*library);
+        QFile::copy(fixtures + "/Amazing Grace.visualis-song.json", in.filePath("Amazing Grace.visualis-song.json"));
+        QFile huge(in.filePath("Huge.visualis-song.json"));
+        QVERIFY(huge.open(QIODevice::WriteOnly));
+        QVERIFY(huge.resize(kMaxSongFileBytes + 1));
+        huge.close();
+
+        QList<std::pair<int, int>> calls;
+        const SongImportReport r = importSongs(in.path(), store, [&](int done, int total) {
+            calls << std::pair{done, total};
+            return true;
+        });
+        QCOMPARE(r.imported, QStringList{"Amazing Grace"});
+        QCOMPARE(r.skipped.size(), 1);
+        QCOMPARE(r.skipped[0].first, QStringLiteral("Huge.visualis-song.json"));
+        QCOMPARE(calls, (QList<std::pair<int, int>>{{0, 2}, {1, 2}, {2, 2}}));
+    }
 };
 
 QTEST_GUILESS_MAIN(SongJsonTest)

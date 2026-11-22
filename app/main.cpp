@@ -7,6 +7,7 @@
 #include "video/videoengine.h"
 
 #include <QCommandLineParser>
+#include <QEventLoop>
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
@@ -65,7 +66,12 @@ int main(int argc, char *argv[])
         songs->openLibrary(parser.isSet(libraryOpt) ? parser.value(libraryOpt) : SongLibrary::defaultFolder());
     if (parser.isSet(importOpt) && songs && services) {
         const QUrl folder = QUrl::fromLocalFile(QFileInfo(parser.value(importOpt)).absoluteFilePath());
-        songs->importSongs(folder);   // first, so the services' songs are there
+        // Songs first, so the services' songs are there. The import runs on a worker; wait
+        // for it (the window keeps running) so --command below sees the imported service.
+        QEventLoop wait;
+        QObject::connect(songs, &SongLibrary::importFinished, &wait, &QEventLoop::quit);
+        if (songs->importSongs(folder))
+            wait.exec();
         services->importServices(folder);
     }
 

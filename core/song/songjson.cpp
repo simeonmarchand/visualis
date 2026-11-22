@@ -200,7 +200,7 @@ SongExportReport exportSongs(SongStore &store, const QString &folder)
     return report;
 }
 
-SongImportReport importSongs(const QString &folder, SongStore &store)
+SongImportReport importSongs(const QString &folder, SongStore &store, const ImportProgress &progress)
 {
     SongImportReport report;
     QSet<QString> titles;
@@ -209,13 +209,26 @@ SongImportReport importSongs(const QString &folder, SongStore &store)
 
     const QFileInfoList files =
         QDir(folder).entryInfoList({QStringLiteral("*") + kSuffix}, QDir::Files, QDir::Name | QDir::IgnoreCase);
-    for (const QFileInfo &file : files) {
+    const int total = int(files.size());
+    for (int i = 0; i < total; ++i) {
+        const QFileInfo &file = files[i];
+        if (progress && !progress(i, total))
+            return report;
+        if (file.size() > kMaxSongFileBytes) {
+            report.skipped << std::pair{file.fileName(), QStringLiteral("too large to be a song")};
+            continue;
+        }
         QFile f(file.absoluteFilePath());
         if (!f.open(QIODevice::ReadOnly)) {
             report.failed << std::pair{file.fileName(), f.errorString()};
             continue;
         }
-        SongJsonResult r = songFromJson(f.readAll());
+        const QByteArray bytes = f.read(kMaxSongFileBytes + 1);   // bounded, in case it grew since listed
+        if (bytes.size() > kMaxSongFileBytes) {
+            report.skipped << std::pair{file.fileName(), QStringLiteral("too large to be a song")};
+            continue;
+        }
+        SongJsonResult r = songFromJson(bytes);
         if (!r.song) {
             report.failed << std::pair{file.fileName(), r.error};
             continue;
@@ -236,6 +249,8 @@ SongImportReport importSongs(const QString &folder, SongStore &store)
         titles.insert(song.title.toLower());
         report.imported << song.title;
     }
+    if (progress)
+        progress(total, total);
     return report;
 }
 

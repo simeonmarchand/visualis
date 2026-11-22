@@ -170,10 +170,17 @@ ReadResult readFile(const QString &path)
         r.error = f.errorString();
         return r;
     }
-    return readBytes(f.readAll(), QFileInfo(path).completeBaseName());
+    // Bounded, in case the file grew since it was listed.
+    const QByteArray bytes = f.read(kMaxFileBytes + 1);
+    if (bytes.size() > kMaxFileBytes) {
+        ReadResult r;
+        r.error = QStringLiteral("too large to be a song");
+        return r;
+    }
+    return readBytes(bytes, QFileInfo(path).completeBaseName());
 }
 
-ImportReport importFolder(const QString &folder, SongStore &store)
+ImportReport importFolder(const QString &folder, SongStore &store, const ImportProgress &progress)
 {
     ImportReport report;
     QSet<QString> titles;
@@ -181,7 +188,15 @@ ImportReport importFolder(const QString &folder, SongStore &store)
         titles.insert(s.title.trimmed().toLower());
 
     const QFileInfoList files = QDir(folder).entryInfoList({"*.pro"}, QDir::Files, QDir::Name | QDir::IgnoreCase);
-    for (const QFileInfo &file : files) {
+    const int total = int(files.size());
+    for (int i = 0; i < total; ++i) {
+        const QFileInfo &file = files[i];
+        if (progress && !progress(i, total))
+            return report;
+        if (file.size() > kMaxFileBytes) {
+            report.skipped << std::pair{file.fileName(), QStringLiteral("too large to be a song")};
+            continue;
+        }
         ReadResult r = readFile(file.absoluteFilePath());
         if (!r.song) {
             report.failed << std::pair{file.fileName(), r.error};
@@ -205,6 +220,8 @@ ImportReport importFolder(const QString &folder, SongStore &store)
         for (const QString &w : std::as_const(r.warnings))
             report.warnings << QStringLiteral("%1: %2").arg(file.fileName(), w);
     }
+    if (progress)
+        progress(total, total);
     return report;
 }
 

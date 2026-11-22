@@ -7,9 +7,9 @@
 #include <QStringList>
 #include <optional>
 
-namespace visualis {
+#include "songstore.h"
 
-class SongStore;
+namespace visualis {
 
 // Songs as human-readable JSON (plan 5.9), so a church's songs never depend on this app's
 // database. One file per song, "<title>.visualis-song.json". Also the test fixture format.
@@ -54,6 +54,8 @@ struct SongImportReport {
 // Imports every *.visualis-song.json in `folder`. Never overwrites: a song whose id is already
 // in the library is skipped. A title already in the library under another id is imported with
 // a warning, since it may be a different song.
-SongImportReport importSongs(const QString &folder, SongStore &store);
+// Files over kMaxSongFileBytes are skipped unread: a song is a few KB.
+constexpr qint64 kMaxSongFileBytes = 4 * 1024 * 1024;
+SongImportReport importSongs(const QString &folder, SongStore &store, const ImportProgress &progress = {});
 
 } // namespace visualis
