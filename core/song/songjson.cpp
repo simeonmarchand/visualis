@@ -1,4 +1,5 @@
 #include "songjson.h"
+#include "songlimits.h"
 #include "songstore.h"
 
 #include <QDir>
@@ -251,9 +252,16 @@ ImportFile readSongFile(const QFileInfo &file)
         return out;
     }
     SongJsonResult r = songFromJson(bytes);
-    if (!r.song)
+    if (!r.song) {
         out.error = r.error;
-    out.song = r.song;
+        return out;
+    }
+    // Checked here, on the worker, so an oversized song never reaches the library's writer (#83).
+    if (const QString tooBig = songLimitError(*r.song); !tooBig.isEmpty()) {
+        out.skipped = tooBig;
+        return out;
+    }
+    out.song = std::move(r.song);
     return out;
 }
 
