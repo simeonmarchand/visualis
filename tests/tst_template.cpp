@@ -636,6 +636,51 @@ private slots:
         QVERIFY(edited.warnings[0].contains("Chorus"));
     }
 
+    // Codex's second pass on #102 (2): the caller gets the template as it loads back.
+    void saveReturnsTheTemplateAsItLoads()
+    {
+        TemplateStore store(*m_library);
+        Template t = sample();
+        t.name = "  Spaced name  ";
+        t.regions[0].name = " Title ";
+        t.regions[0].style.fontFamily = " Avenir Next\t";
+        t.regions[0].style.color = "#80FFCC00";
+        t.regions[0].style.shadow.color = "#ABCDEF";
+        QVERIFY(store.save(t).ok);
+        QCOMPARE(t.name, QStringLiteral("Spaced name"));
+        QCOMPARE(t.regions[0].name, QStringLiteral("Title"));
+        QCOMPARE(t.regions[0].style.fontFamily, QStringLiteral("Avenir Next"));
+        QCOMPARE(t.regions[0].style.color, QStringLiteral("#80ffcc00"));
+        QCOMPARE(t.regions[0].style.shadow.color, QStringLiteral("#abcdef"));
+        compareTemplates(*store.load(t.id), t);
+        QCOMPARE(store.list().last().name, QStringLiteral("Spaced name"));
+    }
+
+    // Codex's second pass on #102 (1): the parser tidies slides it reads, so a group the
+    // operator didn't touch must still count as unchanged and keep its slides as they were.
+    void untouchedSlidesKeepTheirTextAndOverrides()
+    {
+        const QJsonObject gold{{"regions", QJsonObject{{"main", QJsonObject{{"color", "#ffcc00"}}}}}};
+        Song s;
+        s.title = "Untidy";
+        s.groups = {Group{QUuid::createUuid(), "Verse 1", {}, {" one ", "two\t\nthree", QStringLiteral("four ")}},
+                    Group{QUuid::createUuid(), "Chorus", {}, {"sing"}}};
+        s.groups[0].slideOverrides = {gold, {}, gold};
+
+        const LyricsEdit same = applyLyricsText(s, lyricsText(s));
+        QCOMPARE(same.song.groups[0].slides, s.groups[0].slides);
+        QCOMPARE(same.song.groups[0].slideOverrides, s.groups[0].slideOverrides);
+        QVERIFY2(same.warnings.isEmpty(), qPrintable(same.warnings.join('\n')));
+
+        // Editing another group leaves this one alone too.
+        QString text = lyricsText(s);
+        text.replace("[Chorus]\nsing", "[Chorus]\nsing it");
+        const LyricsEdit other = applyLyricsText(s, text);
+        QCOMPARE(other.song.groups[0].slides, s.groups[0].slides);
+        QCOMPARE(other.song.groups[0].slideOverrides, s.groups[0].slideOverrides);
+        QVERIFY(other.warnings.isEmpty());
+    }
+
 private:
     std::optional<QTemporaryDir> m_dir;
     std::unique_ptr<Library> m_library;

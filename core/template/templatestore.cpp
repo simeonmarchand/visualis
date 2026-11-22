@@ -64,12 +64,16 @@ TemplateStore::Result TemplateStore::save(Template &tmpl)
     t.updated = now;
     ++t.revision;
 
-    const QByteArray body = templateToJson(t);
+    QByteArray body = templateToJson(t);
     if (body.size() > templatelimits::kBytes)
         return {false, QStringLiteral("\"%1\" is too large to save.").arg(t.name)};
-    // What's stored must read back as it is: a value the reader would replace isn't saved.
-    if (const TemplateJsonResult back = templateFromJson(body); !back.tmpl || !back.warnings.isEmpty())
+    // A value the reader would replace isn't saved. What it only tidies (trimmed text,
+    // lowercase colors) is, and the caller gets the tidied template: the one that loads back.
+    const TemplateJsonResult back = templateFromJson(body);
+    if (!back.tmpl || !back.warnings.isEmpty())
         return {false, QStringLiteral("Couldn't save \"%1\": %2").arg(t.name, back.tmpl ? back.warnings.first() : back.error)};
+    t = *back.tmpl;
+    body = templateToJson(t);   // stored tidied too
 
     QSqlQuery q(m_library.database());
     q.prepare("INSERT INTO template (id, name, kind, body, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?) "

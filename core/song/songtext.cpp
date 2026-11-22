@@ -6,35 +6,57 @@
 
 namespace visualis {
 
+namespace {
+
+// One group as the editor shows it.
+QString groupText(const Group &g)
+{
+    QStringList lines{QStringLiteral("[%1]").arg(g.label)};
+    const bool onlyBlank = std::all_of(g.slides.cbegin(), g.slides.cend(),
+                                       [](const QString &s) { return s.trimmed().isEmpty(); });
+    // One blank slide is how a header with no lyrics reads back (an Intro).
+    if (!onlyBlank || g.slides.size() > 1) {
+        QStringList slides;
+        for (const QString &s : g.slides) {
+            QStringList slideLines = s.split('\n');
+            for (QString &l : slideLines)
+                l = escapeEditorLine(l);
+            slides << (s.trimmed().isEmpty() ? blankSlideLine() : slideLines.join('\n'));
+        }
+        lines << slides.join(QStringLiteral("\n\n"));
+    }
+    return lines.join('\n');
+}
+
+PasteOptions editorOptions()
+{
+    PasteOptions options;
+    options.maxLinesPerSlide = 1000;   // the editor's slide breaks are the operator's own
+    options.editorText = true;
+    return options;
+}
+
+// The slides `g` reads back as from its own editor text. The parser trims lines and
+// normalizes spaces, so this, not g.slides, is what an untouched group parses to.
+QStringList slidesAsEdited(const Group &g)
+{
+    const PastedLyrics parsed = parsePastedLyrics(groupText(g), editorOptions());
+    return parsed.groups.size() == 1 ? parsed.groups[0].slides : QStringList();
+}
+
+} // namespace
+
 QString lyricsText(const Song &song)
 {
     QStringList blocks;
-    for (const Group &g : song.groups) {
-        QStringList lines{QStringLiteral("[%1]").arg(g.label)};
-        const bool onlyBlank = std::all_of(g.slides.cbegin(), g.slides.cend(),
-                                           [](const QString &s) { return s.trimmed().isEmpty(); });
-        // One blank slide is how a header with no lyrics reads back (an Intro).
-        if (!onlyBlank || g.slides.size() > 1) {
-            QStringList slides;
-            for (const QString &s : g.slides) {
-                QStringList slideLines = s.split('\n');
-                for (QString &l : slideLines)
-                    l = escapeEditorLine(l);
-                slides << (s.trimmed().isEmpty() ? blankSlideLine() : slideLines.join('\n'));
-            }
-            lines << slides.join(QStringLiteral("\n\n"));
-        }
-        blocks << lines.join('\n');
-    }
+    for (const Group &g : song.groups)
+        blocks << groupText(g);
     return blocks.join(QStringLiteral("\n\n"));
 }
 
 LyricsEdit applyLyricsText(const Song &song, const QString &text)
 {
-    PasteOptions options;
-    options.maxLinesPerSlide = 1000;   // the editor's slide breaks are the operator's own
-    options.editorText = true;
-    const PastedLyrics parsed = parsePastedLyrics(text, options);
+    const PastedLyrics parsed = parsePastedLyrics(text, editorOptions());
 
     const QList<Group> &old = song.groups;
     QList<int> matchOf(parsed.groups.size(), -1);   // parsed group -> old group index
@@ -76,11 +98,14 @@ LyricsEdit applyLyricsText(const Song &song, const QString &text)
             const Group &was = old[matchOf[p]];
             g.id = was.id;
             g.color = was.color;
-            // Slide overrides follow unchanged slides only; remapping edited text is #95's.
+            // A group whose text wasn't touched keeps its slides exactly as they were (the parser
+            // would trim them) and its slide overrides. Remapping edited text is #95's.
             const bool hadOverrides = std::any_of(was.slideOverrides.cbegin(), was.slideOverrides.cend(),
                                                   [](const QJsonObject &o) { return !o.isEmpty(); });
-            if (g.slides == was.slides)
+            if (g.slides == slidesAsEdited(was)) {
+                g.slides = was.slides;
                 g.slideOverrides = was.slideOverrides;
+            }
             else if (hadOverrides)
                 out.warnings << QStringLiteral("\"%1\"'s lyrics changed, so its per-slide style changes were dropped.").arg(g.label);
         } else if (!song.arrangements.isEmpty()) {
