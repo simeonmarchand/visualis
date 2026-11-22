@@ -83,6 +83,59 @@ private slots:
         QCOMPARE(*loaded, s);   // every field, including slide text, colors, and step order
     }
 
+    // #77: imports save many songs per transaction, one disk sync per batch.
+    void aBatchCommitsItsSavesTogether()
+    {
+        SongStore store(*m_lib);
+        {
+            SongStore::Batch batch(store);
+            for (const char *title : {"One", "Two", "Three"}) {
+                Song s = sampleSong();
+                s.title = title;
+                SAVE_OK(store, s);
+            }
+            QVERIFY(batch.commit().ok);
+        }
+        QCOMPARE(store.list().size(), 3);
+
+        {
+            SongStore::Batch batch(store);
+            Song s = sampleSong();
+            s.title = "Never committed";
+            SAVE_OK(store, s);
+        }   // destroyed uncommitted: rolled back
+        QCOMPARE(store.list().size(), 3);
+    }
+
+    void aSongThatFailsInABatchDoesNotLoseTheOthers()
+    {
+        QSqlQuery trigger(m_lib->database());
+        QVERIFY(trigger.exec("CREATE TEMP TRIGGER refuse BEFORE INSERT ON song_group "
+                             "WHEN NEW.label = 'Refused' BEGIN SELECT RAISE(ABORT, 'refused'); END"));
+        SongStore store(*m_lib);
+        SongStore::Batch batch(store);
+        Song before = sampleSong();
+        before.title = "Before";
+        SAVE_OK(store, before);
+        Song bad = sampleSong();
+        bad.title = "Bad";
+        bad.groups[0].label = "Refused";   // fails after the song row is written
+        const Song unchanged = bad;
+        const SongStore::Result r = store.save(bad);
+        QVERIFY(!r.ok);
+        QVERIFY(r.error.contains("refused"));
+        QCOMPARE(bad, unchanged);
+        Song after = sampleSong();
+        after.title = "After";
+        SAVE_OK(store, after);
+        QVERIFY(batch.commit().ok);
+
+        QStringList titles;
+        for (const SongSummary &s : store.list())
+            titles << s.title;
+        QCOMPARE(titles, (QStringList{"After", "Before"}));   // none of Bad, not even its song row
+    }
+
     void savingGivesIdsToNewParts()
     {
         SongStore store(*m_lib);

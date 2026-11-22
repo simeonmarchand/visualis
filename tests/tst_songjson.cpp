@@ -305,6 +305,91 @@ private slots:
         QCOMPARE(store.list().size(), 1);
     }
 
+    // #77 review: a batch whose commit fails reports its songs failed, and files skipped as
+    // duplicates of them too; skips for songs already in the library stand; order is kept.
+    void importWriterReportsARolledBackBatchAsFailed()
+    {
+        QTemporaryDir lib;
+        auto library = Library::open(lib.path()).library;
+        SongStore store(*library);
+        ImportWriter writer(store, ImportWriter::Duplicates::SkipSameTitle);
+        writer.add({"first.json", fixture("Amazing Grace"), {}, {}, {}});
+        const Song holy = fixture("Holy Holy Holy");
+        {
+            SongStore::Batch batch(store);
+            writer.startBatch();
+            writer.add({"b1.json", holy, {}, {}, {"a warning"}});
+            writer.add({"b2.json", holy, {}, {}, {}});                      // a duplicate of b1
+            writer.add({"notes.json", {}, "not a song", {}, {}});
+            writer.add({"c.json", fixture("Amazing Grace"), {}, {}, {}});   // a duplicate of the library's
+        }   // the commit never happened: rolled back
+        writer.batchFailed("disk full");
+        QCOMPARE(store.list().size(), 1);
+        QCOMPARE(writer.report().imported, QStringList{"Amazing Grace"});
+        QCOMPARE(writer.report().failed,
+                 (QList<std::pair<QString, QString>>{{"b1.json", "disk full"}, {"b2.json", "disk full"}}));
+        QCOMPARE(writer.report().skipped.size(), 2);
+        QCOMPARE(writer.report().skipped[0].first, QStringLiteral("notes.json"));
+        QCOMPARE(writer.report().skipped[1].first, QStringLiteral("c.json"));
+        // What the parser noticed stands (#80); it was about the file, not the save.
+        QCOMPARE(writer.report().warnings, QStringList{"b1.json: a warning"});
+        writer.add({"again.json", holy, {}, {}, {}});   // its title is free again
+        QCOMPARE(writer.report().imported.size(), 2);
+    }
+
+    // #80 with #77: "both are kept" goes when the batch that kept the song rolls back; the
+    // parser's warnings for skipped and failed files stay.
+    void importWriterDropsBothKeptForARolledBackSong()
+    {
+        QTemporaryDir lib;
+        auto library = Library::open(lib.path()).library;
+        SongStore store(*library);
+        Song existing = fixture("Holy Holy Holy");
+        QVERIFY(store.save(existing).ok);
+        ImportWriter writer(store, ImportWriter::Duplicates::SkipSameIdWarnSameTitle);
+        {
+            SongStore::Batch batch(store);
+            writer.startBatch();
+            writer.add({"clash.json", fixture("Holy Holy Holy"), {}, {}, {}});
+            QCOMPARE(writer.report().warnings.size(), 1);
+            writer.add({"notes.json", {}, "not a song", {}, {"no groups"}});
+            writer.add({"bad.json", {}, {}, "unreadable", {"odd header"}});
+        }
+        writer.batchFailed("disk full");
+        QCOMPARE(writer.report().warnings, (QStringList{"notes.json: no groups", "bad.json: odd header"}));
+        QCOMPARE(store.list().size(), 1);
+    }
+
+    // #77 review: the operator can add, rename, or delete songs between batches; each batch
+    // sees the library as it is.
+    void importWriterSeesTitlesChangedBetweenBatches()
+    {
+        QTemporaryDir lib;
+        auto library = Library::open(lib.path()).library;
+        SongStore store(*library);
+        ImportWriter pro(store, ImportWriter::Duplicates::SkipSameTitle);
+        ImportWriter json(store, ImportWriter::Duplicates::SkipSameIdWarnSameTitle);
+
+        Song operators = fixture("Holy Holy Holy");   // the operator pastes it mid-import
+        QVERIFY(store.save(operators).ok);
+        pro.startBatch();
+        pro.add({"holy.pro", fixture("Holy Holy Holy"), {}, {}, {}});
+        QCOMPARE(pro.report().skipped.size(), 1);
+        json.startBatch();
+        json.add({"holy.json", fixture("Holy Holy Holy"), {}, {}, {}});
+        QCOMPARE(json.report().warnings.size(), 1);   // a different song with that title
+
+        operators.title = "Holy (Short)";   // renamed...
+        QVERIFY(store.save(operators).ok);
+        for (const SongSummary &s : store.list()) {   // ...and the imported copy deleted
+            if (s.id != operators.id)
+                QVERIFY(store.remove(s.id));
+        }
+        pro.startBatch();
+        pro.add({"holy again.pro", fixture("Holy Holy Holy"), {}, {}, {}});
+        QCOMPARE(pro.report().imported, QStringList{"Holy, Holy, Holy"});
+    }
+
     // #69
     void importSkipsFilesTooLargeToBeSongsAndReportsProgress()
     {

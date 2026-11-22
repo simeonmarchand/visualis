@@ -1,6 +1,7 @@
 #pragma once
 
 #include "song/song.h"
+#include "song/songimport.h"
 #include "song/songstore.h"
 
 #include <QObject>
@@ -63,8 +64,10 @@ public:
     // Takes slide `index` of the selected song live.
     Q_INVOKABLE bool goLive(int index);
 
-    // Imports run on a worker thread with their own library connection (#69), so the
-    // operator window and outputs keep going. One at a time: false, with nothing started,
+    // Imports read and parse files on a worker thread (#69) and save what they read here, in
+    // batches of a few milliseconds between events (#77): this library's connection is its
+    // only writer, so no save ever waits on another connection's lock, and the operator
+    // window and outputs keep going. One at a time: false, with nothing started,
     // while another runs or stops. When it's done the song list refreshes, `report` says what
     // it did, and importFinished() is emitted. Opening another library stops an import after
     // the file in hand, without waiting for it; its report says what it got through.
@@ -119,18 +122,31 @@ public:
         QStringList warnings;
         bool stopped = false;   // stopped part way: the lists say what was done before it
         int filesDone = 0;
-        int filesTotal = 0;
+        int filesTotal = 0;   // -1 when stopped before the files were counted
     };
     static QString importReport(const ImportSummary &summary);
     // The first `maxLines - 1` lines and an "…and N more" line, or the report if it fits.
     static QString summarizeReport(const QString &report, int maxLines);
     static constexpr int kReportSummaryLines = 6;
 
+    // Time spent saving imported songs per batch, before the batch commits (one disk sync).
+    static constexpr int kSaveBudgetMs = 5;
+
 private:
-    using ImportJob = std::function<ImportSummary(visualis::SongStore &, const visualis::ImportProgress &)>;
+    // How an import lists and reads its files (on the worker), and what counts as a song
+    // already in the library (when saving).
+    struct ImportJob {
+        QString source;
+        std::function<QFileInfoList()> list;
+        std::function<visualis::ImportFile(const QFileInfo &)> read;
+        visualis::ImportWriter::Duplicates duplicates;
+    };
     struct ImportRun;
     bool startImport(const ImportJob &job);
+    void saveImported();   // one time-budgeted batch of what the worker has read
+    void stopImport();     // tells the worker to stop and keeps the report so far
     void finishImport();
+    ImportSummary importSummary() const;
     void setReport(const QString &report);
 
     std::unique_ptr<visualis::Library> m_library;
@@ -142,5 +158,5 @@ private:
     // The running import; null when none. The worker only touches its shared state, never
     // this object, so it can outlive it at quit.
     std::unique_ptr<ImportRun> m_import;
-    QTimer m_importPoll;   // reads the worker's progress for the pane
+    QTimer m_importSave;   // saves what the worker has read, a batch at a time
 };

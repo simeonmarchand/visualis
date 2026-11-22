@@ -136,10 +136,13 @@ SongStore::Result SongStore::save(Song &song)
             return {false, QStringLiteral("\"%1\" uses an arrangement that belongs to another song.").arg(s.title)};
     }
 
-    if (!db.transaction())
-        return {false, db.lastError().text()};
+    // A savepoint, not BEGIN: alone it is a transaction of its own; inside a Batch it nests,
+    // so one song that fails rolls back without losing the others.
+    if (QString err = run(db, "SAVEPOINT song_save", {}); !err.isEmpty())
+        return {false, err};
     auto fail = [&](const QString &error) {
-        db.rollback();
+        run(db, "ROLLBACK TO song_save", {});
+        run(db, "RELEASE song_save", {});
         return Result{false, QStringLiteral("Couldn't save \"%1\": %2").arg(s.title, error)};
     };
 
@@ -194,9 +197,34 @@ SongStore::Result SongStore::save(Song &song)
             return fail(err);
     }
 
-    if (!db.commit())
-        return fail(db.lastError().text());
+    if (const QString released = run(db, "RELEASE song_save", {}); !released.isEmpty())
+        return fail(released);
     song = s;
+    return {};
+}
+
+SongStore::Batch::Batch(SongStore &store)
+    : m_db(store.m_library.database())
+{
+    m_open = m_db.transaction();
+}
+
+SongStore::Batch::~Batch()
+{
+    if (m_open)
+        m_db.rollback();
+}
+
+SongStore::Result SongStore::Batch::commit()
+{
+    if (!m_open)
+        return {false, m_db.lastError().text()};
+    m_open = false;
+    if (!m_db.commit()) {
+        const QString error = m_db.lastError().text();
+        m_db.rollback();
+        return {false, error};
+    }
     return {};
 }
 
@@ -268,6 +296,17 @@ QList<SongCandidate> SongStore::matchCandidates() const
     while (q.next())
         out << SongCandidate{uuid(q.value(0)), q.value(1).toString(), q.value(2).toString(), q.value(3).toString(),
                              q.value(4).toString()};
+    return out;
+}
+
+QStringList SongStore::titles() const
+{
+    QStringList out;
+    QSqlQuery q(m_library.database());
+    q.setForwardOnly(true);
+    q.exec("SELECT title FROM song");
+    while (q.next())
+        out << q.value(0).toString();
     return out;
 }
 

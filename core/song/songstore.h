@@ -4,6 +4,7 @@
 #include "songmatch.h"
 
 #include <QList>
+#include <QSqlDatabase>
 #include <functional>
 #include <optional>
 
@@ -43,6 +44,25 @@ public:
     QList<SongSummary> list() const;
     // Every song with what matching a Planning Center song needs (#55).
     QList<SongCandidate> matchCandidates() const;
+    // Every title, in no order: cheaper than list() for duplicate checks.
+    QStringList titles() const;
+
+    // Several saves in one transaction, so they cost one disk sync (imports, #77). Each
+    // save() inside it still lands or fails whole, but none is durable until commit(). Rolled
+    // back if destroyed uncommitted.
+    class Batch
+    {
+    public:
+        explicit Batch(SongStore &store);
+        ~Batch();
+        Batch(const Batch &) = delete;
+        Batch &operator=(const Batch &) = delete;
+        Result commit();
+
+    private:
+        QSqlDatabase m_db;
+        bool m_open = false;
+    };
 
 private:
     Library &m_library;

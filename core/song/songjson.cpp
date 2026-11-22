@@ -228,60 +228,48 @@ SongExportReport exportSongs(SongStore &store, const QString &folder)
     return report;
 }
 
+QFileInfoList songFiles(const QString &folder)
+{
+    return QDir(folder).entryInfoList({QStringLiteral("*") + kSuffix}, QDir::Files, QDir::Name | QDir::IgnoreCase);
+}
+
+ImportFile readSongFile(const QFileInfo &file)
+{
+    ImportFile out{file.fileName(), {}, {}, {}, {}};
+    if (file.size() > kMaxSongFileBytes) {
+        out.skipped = QStringLiteral("too large to be a song");
+        return out;
+    }
+    QFile f(file.absoluteFilePath());
+    if (!f.open(QIODevice::ReadOnly)) {
+        out.error = f.errorString();
+        return out;
+    }
+    const QByteArray bytes = f.read(kMaxSongFileBytes + 1);   // bounded, in case it grew since listed
+    if (bytes.size() > kMaxSongFileBytes) {
+        out.skipped = QStringLiteral("too large to be a song");
+        return out;
+    }
+    SongJsonResult r = songFromJson(bytes);
+    if (!r.song)
+        out.error = r.error;
+    out.song = r.song;
+    return out;
+}
+
 SongImportReport importSongs(const QString &folder, SongStore &store, const ImportProgress &progress)
 {
-    SongImportReport report;
-    QSet<QString> titles;
-    for (const SongSummary &s : store.list())
-        titles.insert(s.title.trimmed().toLower());
-
-    const QFileInfoList files =
-        QDir(folder).entryInfoList({QStringLiteral("*") + kSuffix}, QDir::Files, QDir::Name | QDir::IgnoreCase);
+    ImportWriter writer(store, ImportWriter::Duplicates::SkipSameIdWarnSameTitle);
+    const QFileInfoList files = songFiles(folder);
     const int total = int(files.size());
     for (int i = 0; i < total; ++i) {
-        const QFileInfo &file = files[i];
         if (progress && !progress(i, total))
-            return report;
-        if (file.size() > kMaxSongFileBytes) {
-            report.skipped << std::pair{file.fileName(), QStringLiteral("too large to be a song")};
-            continue;
-        }
-        QFile f(file.absoluteFilePath());
-        if (!f.open(QIODevice::ReadOnly)) {
-            report.failed << std::pair{file.fileName(), f.errorString()};
-            continue;
-        }
-        const QByteArray bytes = f.read(kMaxSongFileBytes + 1);   // bounded, in case it grew since listed
-        if (bytes.size() > kMaxSongFileBytes) {
-            report.skipped << std::pair{file.fileName(), QStringLiteral("too large to be a song")};
-            continue;
-        }
-        SongJsonResult r = songFromJson(bytes);
-        if (!r.song) {
-            report.failed << std::pair{file.fileName(), r.error};
-            continue;
-        }
-        Song &song = *r.song;
-        if (!song.id.isNull() && store.load(song.id)) {
-            report.skipped << std::pair{file.fileName(), QStringLiteral("this song is already in the library")};
-            continue;
-        }
-        const bool titleTaken = titles.contains(song.title.toLower());
-        const SongStore::Result saved = store.save(song);
-        if (!saved.ok) {
-            report.failed << std::pair{file.fileName(), saved.error};
-            continue;
-        }
-        // Only once it's saved: a failed save keeps nothing, so nothing is "both kept".
-        if (titleTaken)
-            report.warnings << QStringLiteral("%1: a different song titled \"%2\" is already in the library; both are kept")
-                                   .arg(file.fileName(), song.title);
-        titles.insert(song.title.toLower());
-        report.imported << song.title;
+            return writer.report();
+        writer.add(readSongFile(files[i]));
     }
     if (progress)
         progress(total, total);
-    return report;
+    return writer.report();
 }
 
 } // namespace visualis

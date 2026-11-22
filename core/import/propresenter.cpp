@@ -180,50 +180,45 @@ ReadResult readFile(const QString &path)
     return readBytes(bytes, QFileInfo(path).completeBaseName());
 }
 
+QFileInfoList presentationFiles(const QString &folder)
+{
+    return QDir(folder).entryInfoList({"*.pro"}, QDir::Files, QDir::Name | QDir::IgnoreCase);
+}
+
+ImportFile readForImport(const QFileInfo &file)
+{
+    ImportFile out{file.fileName(), {}, {}, {}, {}};
+    if (file.size() > kMaxFileBytes) {
+        out.skipped = QStringLiteral("too large to be a song");
+        return out;
+    }
+    ReadResult r = readFile(file.absoluteFilePath());
+    if (!r.song) {
+        out.error = r.error;
+        return out;
+    }
+    out.warnings = r.warnings;
+    if (!r.looksLikeSong) {
+        out.skipped = QStringLiteral("not a song (no Verse, Chorus, or similar groups)");
+        return out;
+    }
+    out.song = std::move(r.song);
+    return out;
+}
+
 ImportReport importFolder(const QString &folder, SongStore &store, const ImportProgress &progress)
 {
-    ImportReport report;
-    QSet<QString> titles;
-    for (const SongSummary &s : store.list())
-        titles.insert(s.title.trimmed().toLower());
-
-    const QFileInfoList files = QDir(folder).entryInfoList({"*.pro"}, QDir::Files, QDir::Name | QDir::IgnoreCase);
+    ImportWriter writer(store, ImportWriter::Duplicates::SkipSameTitle);
+    const QFileInfoList files = presentationFiles(folder);
     const int total = int(files.size());
     for (int i = 0; i < total; ++i) {
-        const QFileInfo &file = files[i];
         if (progress && !progress(i, total))
-            return report;
-        if (file.size() > kMaxFileBytes) {
-            report.skipped << std::pair{file.fileName(), QStringLiteral("too large to be a song")};
-            continue;
-        }
-        ReadResult r = readFile(file.absoluteFilePath());
-        if (!r.song) {
-            report.failed << std::pair{file.fileName(), r.error};
-            continue;
-        }
-        // What the parser noticed is kept whatever happens to the file next.
-        for (const QString &w : std::as_const(r.warnings))
-            report.warnings << QStringLiteral("%1: %2").arg(file.fileName(), w);
-        if (!r.looksLikeSong) {
-            report.skipped << std::pair{file.fileName(), QStringLiteral("not a song (no Verse, Chorus, or similar groups)")};
-            continue;
-        }
-        if (titles.contains(r.song->title.toLower())) {
-            report.skipped << std::pair{file.fileName(), QStringLiteral("a song with this title is already in the library")};
-            continue;
-        }
-        const SongStore::Result saved = store.save(*r.song);
-        if (!saved.ok) {
-            report.failed << std::pair{file.fileName(), saved.error};
-            continue;
-        }
-        titles.insert(r.song->title.toLower());
-        report.imported << r.song->title;
+            return writer.report();
+        writer.add(readForImport(files[i]));
     }
     if (progress)
         progress(total, total);
-    return report;
+    return writer.report();
 }
 
 } // namespace visualis::propresenter

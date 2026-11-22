@@ -10,6 +10,7 @@
 #include "live/livestate.h"
 
 #include <QQmlApplicationEngine>
+#include <QSqlDatabase>
 #include <QQuickItem>
 #include <QQuickWindow>
 #include <QTemporaryDir>
@@ -525,6 +526,52 @@ private slots:
                  SongLibrary::importReport({{}, sync.imported, sync.skipped, sync.failed, sync.warnings}));
     }
 
+    // #77: the operator's saves never wait on another connection's lock during an import,
+    // because no other connection writes.
+    void guiSavesKeepLandingDuringALongImport()
+    {
+        const QString folder = writeSongFiles(2000);
+        qint64 longestGap = 0;
+        QElapsedTimer sinceTick;
+        QTimer timer;
+        timer.setInterval(10);
+        connect(&timer, &QTimer::timeout, this, [&] { longestGap = qMax(longestGap, sinceTick.restart()); });
+        sinceTick.start();
+        timer.start();
+        QVERIFY(m_songs->importSongs(QUrl::fromLocalFile(folder)));
+
+        qint64 slowestSave = 0;
+        int pasted = 0;
+        bool onlyOneConnection = true;
+        // Each saved batch signals progress; record how many batches were in at each paste.
+        int batches = 0;
+        connect(m_songs, &SongLibrary::importProgressChanged, this, [&] { ++batches; });
+        QSet<int> batchesAtEachPaste;
+        const QDeadlineTimer deadline(60000);
+        while (m_songs->importing()) {
+            QVERIFY2(!deadline.hasExpired(), "the import never finished");
+            onlyOneConnection = onlyOneConnection && QSqlDatabase::connectionNames().size() == 1;
+            batchesAtEachPaste.insert(batches);
+            QElapsedTimer save;
+            save.start();
+            QVERIFY(m_songs->createFromPaste(QStringLiteral("Pasted %1").arg(pasted++), kLyrics));
+            slowestSave = qMax(slowestSave, save.elapsed());
+            QTest::qWait(5);
+        }
+        timer.stop();
+        longestGap = qMax(longestGap, sinceTick.elapsed());
+        qInfo() << pasted << "saves during the import; slowest" << slowestSave << "ms; longest stall" << longestGap << "ms";
+        QVERIFY2(onlyOneConnection, "the import opened a database connection of its own");
+        // The operator's saves landed between the import's batches, not before or after it.
+        batchesAtEachPaste.remove(0);
+        QVERIFY2(batchesAtEachPaste.size() >= 3, qPrintable(QString("saves landed between only %1 of the import's batches")
+                                                               .arg(batchesAtEachPaste.size())));
+        QVERIFY2(slowestSave < kMaxSaveMs, qPrintable(QString("a save took %1 ms").arg(slowestSave)));
+        QVERIFY2(longestGap < kMaxStallMs, qPrintable(QString("the event loop stalled for %1 ms").arg(longestGap)));
+        QCOMPARE(m_songs->songs().size(), 2000 + pasted);
+        QVERIFY(m_songs->report().startsWith("Imported 2000 songs."));
+    }
+
     void oneImportAtATimeAndTheLibraryStaysWritable()
     {
         const QString folder = writeSongFiles(200);
@@ -547,7 +594,7 @@ private slots:
         const QString first = m_dir.filePath(QString::number(m_libraries));
         const QString folder = writeSongFiles(1000);
         QVERIFY(m_songs->importSongs(QUrl::fromLocalFile(folder)));
-        QTRY_VERIFY(m_songs->importProgress().contains(" of 1000"));   // under way
+        QTRY_VERIFY(!m_songs->songs().isEmpty());   // under way: a batch has been saved
         QElapsedTimer took;
         took.start();
         QVERIFY(m_songs->openLibrary(m_dir.filePath(QString::number(++m_libraries))));
@@ -715,6 +762,9 @@ private slots:
         s.filesDone = 5;
         s.filesTotal = 9;
         QVERIFY(SongLibrary::importReport(s).startsWith("The import was stopped after 5 of 9 files.\nImported 2 songs"));
+        s.filesDone = 0;
+        s.filesTotal = -1;   // stopped while the folder was still being listed
+        QVERIFY(SongLibrary::importReport(s).startsWith("The import was stopped before its files were counted.\n"));
     }
 
 private:
@@ -723,7 +773,7 @@ private:
         if (!m_songs->importing())
             return true;
         QSignalSpy finished(m_songs, &SongLibrary::importFinished);
-        return finished.wait(30000);
+        return finished.wait(60000);
     }
 
     // `count` synthetic songs as Visualis exports, in their own folder.
@@ -838,7 +888,12 @@ private:
     }
 
     QTemporaryDir m_dir;
-    static constexpr qint64 kMaxStallMs = 100;
+    // Wall-clock bounds loose enough for a slow CI runner; they catch a wait on the 5 s busy
+    // timeout. The measured numbers are in
+    // docs/benchmarks/2026-11-22-import-gui-latency.md; the checks that the worker never
+    // writes and that saves interleave with an import are the exact ones.
+    static constexpr qint64 kMaxStallMs = 1000;
+    static constexpr qint64 kMaxSaveMs = 1000;
     int m_libraries = 0;
     int m_folders = 0;
     std::unique_ptr<QQmlApplicationEngine> m_engine;

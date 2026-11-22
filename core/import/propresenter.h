@@ -6,6 +6,7 @@
 #include <QStringList>
 #include <optional>
 
+#include "song/songimport.h"
 #include "song/songstore.h"
 
 namespace visualis {
@@ -26,18 +27,16 @@ struct ReadResult {
 ReadResult readFile(const QString &path);
 ReadResult readBytes(const QByteArray &bytes, const QString &title);
 
-struct ImportReport {
-    QStringList imported;                     // titles
-    QList<std::pair<QString, QString>> skipped;  // file name, reason
-    QList<std::pair<QString, QString>> failed;   // file name, error
-    QStringList warnings;                     // "file: warning"
-};
+using ImportReport = SongImportReport;
 
 // Imports every .pro file in `folder` that looks like a song. Skips presentations that aren't
 // songs and songs whose title is already in the library, so running it twice adds nothing.
 // A file that can't be read is reported and the rest carry on.
 // Files over kMaxFileBytes are skipped unread: a real one is tens of KB.
 constexpr qint64 kMaxFileBytes = 16 * 1024 * 1024;
+// The two steps of importFolder, for an import split across threads (see songimport.h).
+QFileInfoList presentationFiles(const QString &folder);
+ImportFile readForImport(const QFileInfo &file);
 ImportReport importFolder(const QString &folder, SongStore &store, const ImportProgress &progress = {});
 
 } // namespace propresenter
