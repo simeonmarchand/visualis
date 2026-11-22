@@ -24,7 +24,10 @@ Window {
     // test, row 8). While typing in a text field the keys type instead, and while a dialog
     // is open even Esc belongs to the dialog.
     readonly property bool editingText: activeFocusItem instanceof TextInput || activeFocusItem instanceof TextEdit
-    readonly property bool keysEnabled: !editingText && !songList.dialogOpen
+    // The song editor is its own window: while it's in front, keys edit the song. `visible`
+    // too, because `active` isn't always cleared when the window closes.
+    readonly property bool editorInFront: songEditor.visible && songEditor.active
+    readonly property bool keysEnabled: !editingText && !songList.dialogOpen && !editorInFront
 
     Shortcut {
         sequences: ["Right", "Down", "Space", "PgDown"]   // clickers send Page Down / Page Up
@@ -53,7 +56,7 @@ Window {
     Shortcut {
         sequence: "Esc"   // the panic key: works even while typing in search
         context: Qt.ApplicationShortcut
-        enabled: !songList.dialogOpen
+        enabled: !songList.dialogOpen && !root.editorInFront
         onActivated: Commands.run("clear_all")
     }
     // Shift + a group's first letter: Shift+C the next Chorus, Shift+V the next Verse...
@@ -71,6 +74,7 @@ Window {
 
     OutputWindow { id: audienceOutput; role: "audience" }
     OutputWindow { id: stageOutput; role: "stage" }
+    SongEditorWindow { id: songEditor }
 
     Component.onCompleted: {
         OutputController.setOperatorWindow(root)
@@ -126,6 +130,7 @@ Window {
             SlideGrid {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
+                onEditRequested: songId => songEditor.edit(songId)
             }
         }
 

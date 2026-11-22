@@ -14,12 +14,24 @@ ColumnLayout {
     // Only highlight when the song on screen here is the one that's live.
     readonly property bool showingLiveSong: LiveState.songId !== "" && LiveState.songId === SongLibrary.selectedId
 
-    Label {
+    signal editRequested(string songId)
+
+    RowLayout {
         Layout.fillWidth: true
-        text: SongLibrary.selectedTitle !== "" ? SongLibrary.selectedTitle : "Choose a song"
-        color: "#d0d3d8"
-        font.pixelSize: 20
-        elide: Text.ElideRight
+        Label {
+            Layout.fillWidth: true
+            text: SongLibrary.selectedTitle !== "" ? SongLibrary.selectedTitle : "Choose a song"
+            color: "#d0d3d8"
+            font.pixelSize: 20
+            elide: Text.ElideRight
+        }
+        Button {
+            objectName: "editSong"
+            text: "Edit…"
+            focusPolicy: Qt.NoFocus
+            visible: SongLibrary.selectedId !== ""
+            onClicked: pane.editRequested(SongLibrary.selectedId)
+        }
     }
 
     GridView {

@@ -7,6 +7,7 @@ qt_add_library(visualis_core STATIC
     song/lyricspaste.h song/lyricspaste.cpp
     song/slidelist.h song/slidelist.cpp
     song/songjson.h song/songjson.cpp
+    song/songtext.h song/songtext.cpp
     import/protobuf.h import/protobuf.cpp
     import/rtf.h import/rtf.cpp
     import/propresenter.h import/propresenter.cpp
