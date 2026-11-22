@@ -588,6 +588,7 @@ private slots:
 
         QSignalSpy reimported(&importer, &PlanImporter::reimported);
         QVERIFY(importer.applyReimport());
+        QVERIFY(idle(importer));
         QCOMPARE(reimported.size(), 1);
         QVERIFY(importer.reimportServiceId().isEmpty());
         const Service s = *store.load(QUuid::fromString(id));
@@ -644,9 +645,103 @@ private slots:
         QCOMPARE(changeKinds(importer), QStringList{"changedButDeleted"});
         QCOMPARE(importer.reimportChanges()[0].toMap()["pcoItemId"].toString(), QStringLiteral("9001"));
         QVERIFY(importer.applyReimport({"9001"}));
+        QVERIFY(idle(importer));
         const Service s = *store.load(QUuid::fromString(id));
         QCOMPARE(s.items.first().title, QStringLiteral("Countdown (10 min)"));
         QVERIFY(s.removedPcoItems.isEmpty());
+    }
+
+    // A re-import that's ready to apply, for the lock tests: Worship renamed in Planning Center.
+    QString readyReimport(SongLibrary &songs, FakePlanningCenter &server, PlanImporter &importer)
+    {
+        serve(server);
+        importer.setSongLibrary(&songs);
+        importer.setClient(client(server.url()));
+        QSignalSpy imported(&importer, &PlanImporter::imported);
+        importer.importPlan("1001", "5001");
+        if (!idle(importer) || imported.isEmpty())
+            qFatal("import failed: %s", qPrintable(importer.status()));
+        server.clear(kItems);
+        server.onBody(kItems, fixtureWith("items_page1.json", [](QJsonArray &items) { retitle(items, "9002", "Worship Set"); }));
+        server.on(kItems, {"items_page2.json"});
+        const QString id = imported[0][0].toString();
+        importer.reimport(id);
+        if (!idle(importer) || importer.reimportServiceId() != id)
+            qFatal("re-import not offered: %s", qPrintable(importer.status()));
+        return id;
+    }
+
+    // #76 for re-import: another program's lock never holds up the event loop.
+    void aLockedLibraryDelaysApplyWithoutBlocking()
+    {
+        const QString folder = m_dir.filePath(QString::number(++m_n));
+        SongLibrary songs;
+        QVERIFY(songs.openLibrary(folder));
+        FakePlanningCenter server;
+        PlanImporter importer;
+        const QString id = readyReimport(songs, server, importer);
+
+        auto other = Library::open(folder).library;   // stands in for another program
+        QVERIFY(other);
+        QSqlQuery lock(other->database());
+        QVERIFY(lock.exec("BEGIN IMMEDIATE"));
+        QSignalSpy reimported(&importer, &PlanImporter::reimported);
+        QElapsedTimer clock;
+        clock.start();
+        QVERIFY(importer.applyReimport());
+        QVERIFY2(clock.elapsed() < Library::kBusyTimeoutMs / 2, "Apply waited on the lock");
+        QVERIFY(importer.busy());
+        QVERIFY(importer.status().contains("Waiting for the library"));
+        QTimer::singleShot(300, this, [&] { QSqlQuery(other->database()).exec("ROLLBACK"); });
+        QVERIFY(idle(importer));
+        QCOMPARE(reimported.size(), 1);
+        QCOMPARE(byPco(*ServiceStore(*songs.library()).load(QUuid::fromString(id)), "9002")->title, QStringLiteral("Worship Set"));
+    }
+
+    void aLibraryLockedTooLongLeavesTheServiceAlone()
+    {
+        const QString folder = m_dir.filePath(QString::number(++m_n));
+        SongLibrary songs;
+        QVERIFY(songs.openLibrary(folder));
+        FakePlanningCenter server;
+        PlanImporter importer;
+        const QString id = readyReimport(songs, server, importer);
+        const Service before = *ServiceStore(*songs.library()).load(QUuid::fromString(id));
+
+        auto other = Library::open(folder).library;
+        QSqlQuery lock(other->database());
+        QVERIFY(lock.exec("BEGIN IMMEDIATE"));
+        importer.setLockWaitLimit(600);
+        QSignalSpy reimported(&importer, &PlanImporter::reimported);
+        QVERIFY(importer.applyReimport());
+        QVERIFY(idle(importer));
+        QCOMPARE(reimported.size(), 0);
+        QVERIFY2(importer.status().contains("kept the library busy"), qPrintable(importer.status()));
+        QVERIFY(importer.reimportServiceId().isEmpty());
+        QVERIFY(QSqlQuery(other->database()).exec("ROLLBACK"));
+        QCOMPARE(*ServiceStore(*songs.library()).load(QUuid::fromString(id)), before);
+    }
+
+    void openingAnotherLibraryCancelsTheUpdate()
+    {
+        const QString folder = m_dir.filePath(QString::number(++m_n));
+        SongLibrary songs;
+        QVERIFY(songs.openLibrary(folder));
+        FakePlanningCenter server;
+        PlanImporter importer;
+        const QString id = readyReimport(songs, server, importer);
+        const Service before = *ServiceStore(*songs.library()).load(QUuid::fromString(id));
+
+        QVERIFY(songs.openLibrary(m_dir.filePath(QString::number(++m_n))));
+        QSignalSpy reimported(&importer, &PlanImporter::reimported);
+        importer.applyReimport();
+        QVERIFY(idle(importer));
+        QCOMPARE(reimported.size(), 0);
+        QVERIFY(importer.status().contains("another library was opened"));
+
+        auto first = Library::open(folder).library;
+        QVERIFY(first);
+        QCOMPARE(*ServiceStore(*first).load(QUuid::fromString(id)), before);   // untouched
     }
 
     void aCancelledReimportChangesNothing()

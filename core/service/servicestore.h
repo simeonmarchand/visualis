@@ -25,7 +25,7 @@ public:
     struct Result {
         bool ok = true;
         QString error;          // for the operator
-        bool busy = false;      // saveNewPlan: another program holds the library's write lock
+        bool busy = false;      // saveNewPlan, saveWithoutWaiting: another program holds the write lock
         QString existing;       // saveNewPlan: the title of the service already made from the plan
     };
 
@@ -38,6 +38,9 @@ public:
     // transaction. It never waits for the write lock: if another program holds it, it fails
     // at once with `busy` set, so the caller can try again later without blocking (#76).
     Result saveNewPlan(Service &service);
+    // save(), but like saveNewPlan it never waits for the write lock: `busy` says to try
+    // again later (a re-import's Apply, #56).
+    Result saveWithoutWaiting(Service &service);
     // A song item whose song is no longer in the library comes back as a placeholder with
     // its title, so a service never points at nothing.
     std::optional<Service> load(const QUuid &id) const;
@@ -48,7 +51,8 @@ public:
     std::optional<ServiceSummary> findByPcoPlan(const QString &pcoPlanId) const;
 
 private:
-    Result save(Service &service, bool newPlan);
+    enum class Mode { Wait, NoWait, NewPlan };
+    Result save(Service &service, Mode mode);
 
     Library &m_library;
 };

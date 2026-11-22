@@ -57,15 +57,20 @@ ServiceStore::ServiceStore(Library &library)
 
 ServiceStore::Result ServiceStore::save(Service &service)
 {
-    return save(service, false);
+    return save(service, Mode::Wait);
 }
 
 ServiceStore::Result ServiceStore::saveNewPlan(Service &service)
 {
-    return save(service, true);
+    return save(service, Mode::NewPlan);
 }
 
-ServiceStore::Result ServiceStore::save(Service &service, bool newPlan)
+ServiceStore::Result ServiceStore::saveWithoutWaiting(Service &service)
+{
+    return save(service, Mode::NoWait);
+}
+
+ServiceStore::Result ServiceStore::save(Service &service, Mode mode)
 {
     Service s = service;   // a failed save leaves the caller's service as it was
     if (s.title.trimmed().isEmpty())
@@ -97,9 +102,9 @@ ServiceStore::Result ServiceStore::save(Service &service, bool newPlan)
             return {false, QStringLiteral("\"%1\" uses an item that belongs to another service.").arg(s.title)};
     }
 
-    if (newPlan) {
-        // Take the write lock now, without waiting for it, so the duplicate check below
-        // holds until the commit.
+    if (mode != Mode::Wait) {
+        // Take the write lock now, without waiting for it, so nothing below waits either
+        // (and a new plan's duplicate check holds until the commit).
         QSqlQuery q(db);
         q.exec("PRAGMA busy_timeout = 0");
         const bool begun = q.exec("BEGIN IMMEDIATE");
@@ -109,7 +114,7 @@ ServiceStore::Result ServiceStore::save(Service &service, bool newPlan)
             const bool busy = error.nativeErrorCode() == QLatin1String("5");   // SQLITE_BUSY
             return {false, busy ? QStringLiteral("The library is in use by another program.") : error.text(), busy};
         }
-        if (const auto existing = findByPcoPlan(s.pcoPlanId)) {
+        if (const auto existing = mode == Mode::NewPlan ? findByPcoPlan(s.pcoPlanId) : std::nullopt) {
             db.rollback();
             return {false, QStringLiteral("This plan is already in the library as \"%1\".").arg(existing->title), false,
                     existing->title};

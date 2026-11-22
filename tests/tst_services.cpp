@@ -272,6 +272,32 @@ private slots:
         QCOMPARE(timeout.value(0).toInt(), Library::kBusyTimeoutMs);
     }
 
+    // A re-import's Apply (#56) saves an existing service the same way: never waiting.
+    void saveWithoutWaitingSaysBusyAndChangesNothing()
+    {
+        Service s;
+        s.title = "Sunday";
+        s.items = {item(Kind::Header, "Worship")};
+        QVERIFY(m_services->save(s).ok);
+        auto other = Library::open(m_library->folder()).library;
+        QSqlQuery lock(other->database());
+        QVERIFY(lock.exec("BEGIN IMMEDIATE"));
+
+        Service edited = s;
+        edited.items[0].title = "Praise";
+        QElapsedTimer took;
+        took.start();
+        const ServiceStore::Result r = m_services->saveWithoutWaiting(edited);
+        QVERIFY(!r.ok);
+        QVERIFY(r.busy);
+        QVERIFY2(took.elapsed() < Library::kBusyTimeoutMs / 2, qPrintable(QString("waited %1 ms").arg(took.elapsed())));
+        QCOMPARE(edited.items[0].title, QStringLiteral("Praise"));   // the caller's copy, untouched
+        QVERIFY(QSqlQuery(other->database()).exec("ROLLBACK"));
+        QCOMPARE(m_services->load(s.id)->items[0].title, QStringLiteral("Worship"));
+        QVERIFY(m_services->saveWithoutWaiting(edited).ok);
+        QCOMPARE(m_services->load(s.id)->items[0].title, QStringLiteral("Praise"));
+    }
+
     void aVersion3LibraryGainsThePlanLink()
     {
         const QString folder = m_dir.filePath("v3");

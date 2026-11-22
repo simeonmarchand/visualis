@@ -8,6 +8,7 @@
 #include <QDeadlineTimer>
 #include <QObject>
 #include <QPointer>
+#include <QSet>
 #include <QVariantList>
 #include <QtQml/qqmlregistration.h>
 
@@ -77,6 +78,9 @@ public:
     Q_INVOKABLE void reimport(const QString &serviceId);
     // Saves the merge, adding back the deleted items in `addBack` (Planning Center item ids
     // from "changedButDeleted" lines). Songs the library is sure of are linked, as on import.
+    // Like an import's save it never waits on another program's lock (#76): it retries, then
+    // gives up with the service unchanged. Returns whether a save was started; `reimported`
+    // says when it's done.
     Q_INVOKABLE bool applyReimport(const QStringList &addBack = {});
     Q_INVOKABLE void cancelReimport();
 
@@ -104,7 +108,8 @@ private:
                  int library);
     void gaveUpWaiting(const QString &title);
 
-    void offerReimport(const QUuid &serviceId, const visualis::Service &fresh);
+    void offerReimport(const QUuid &serviceId, const visualis::Service &fresh, int library);
+    void tryApply(const QSet<QString> &addBack, QDeadlineTimer deadline, int request);
 
     QPointer<PlanningCenter> m_pco;
     QPointer<SongLibrary> m_songs;
@@ -121,6 +126,7 @@ private:
         visualis::Service fresh;   // the plan as read, as serviceFromPlan made it
         QVariantList changes;
         QString summary;
+        int library = 0;           // m_libraryChanges when read: only applied to that library
     };
     std::optional<PendingReimport> m_reimport;
     int m_reimportRequest = 0;   // only the latest reimport() answer is offered
