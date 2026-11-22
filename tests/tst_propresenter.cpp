@@ -2,6 +2,7 @@
 #include "import/protobuf.h"
 #include "import/rtf.h"
 #include "library/library.h"
+#include "song/songlimits.h"
 #include "song/songstore.h"
 
 #include <QFile>
@@ -308,6 +309,52 @@ private slots:
         QCOMPARE(r.skipped.size(), 1);
         QCOMPARE(r.warnings.size(), 1);
         QVERIFY2(r.warnings[0].startsWith("Taken.pro: 1 arrangement step(s)"), qPrintable(r.warnings[0]));
+    }
+
+    // #83: the worker's reader refuses a song over the limits, so it never reaches a save,
+    // and what the parser noticed is still reported.
+    void anOversizedSongIsSkippedWhenRead()
+    {
+        QTemporaryDir files, libDir;
+        QByteArray p = pb::bytes(11, pb::arrangement("a", "A", {"g0", "missing-group"}));
+        for (int i = 0; i <= songlimits::kGroups; ++i) {
+            p += pb::bytes(12, pb::cueGroup(QString("g%1").arg(i), "Verse", {}, {QString("c%1").arg(i)}));
+            p += pb::bytes(13, pb::cue(QString("c%1").arg(i), "Sing"));
+        }
+        write(files.filePath("Huge.pro"), p);
+
+        const ImportFile read = propresenter::readForImport(QFileInfo(files.filePath("Huge.pro")));
+        QVERIFY(!read.song);
+        QVERIFY(read.error.isEmpty());
+        QCOMPARE(read.skipped, QStringLiteral("too many groups: 501; the limit is 500"));
+        QCOMPARE(read.warnings.size(), 1);
+
+        auto lib = Library::open(libDir.path()).library;
+        SongStore store(*lib);
+        const propresenter::ImportReport r = propresenter::importFolder(files.path(), store);
+        QVERIFY(r.imported.isEmpty());
+        QCOMPARE(r.skipped, (QList<std::pair<QString, QString>>{{"Huge.pro", read.skipped}}));
+        QCOMPARE(r.warnings.size(), 1);
+        QVERIFY(r.warnings[0].startsWith("Huge.pro: "));
+        QVERIFY(store.list().isEmpty());
+    }
+
+    // #77 review: a presentation that isn't a song is passed over by the worker's reader with
+    // what the parser noticed kept.
+    void aPresentationThatIsNotASongKeepsItsWarningsWhenRead()
+    {
+        QTemporaryDir files;
+        QByteArray p = pb::bytes(12, pb::cueGroup("g", "", {}, {"c1"}));
+        p += pb::bytes(13, pb::cue("c1", "In the beginning was the Word"));
+        p += pb::bytes(13, pb::cue("c2", "Loose"));   // outside any group: a warning
+        write(files.filePath("Sermon.pro"), p);
+
+        const ImportFile read = propresenter::readForImport(QFileInfo(files.filePath("Sermon.pro")));
+        QCOMPARE(read.name, QStringLiteral("Sermon.pro"));
+        QVERIFY(!read.song);
+        QVERIFY(read.error.isEmpty());
+        QCOMPARE(read.skipped, QStringLiteral("not a song (no Verse, Chorus, or similar groups)"));
+        QCOMPARE(read.warnings.size(), 1);
     }
 
     void rtfConversion_data()

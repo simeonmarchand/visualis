@@ -2,6 +2,7 @@
 #include "protobuf.h"
 #include "rtf.h"
 #include "song/labels.h"
+#include "song/songlimits.h"
 #include "song/songstore.h"
 
 #include <QDir>
@@ -200,6 +201,11 @@ ImportFile readForImport(const QFileInfo &file)
     out.warnings = r.warnings;
     if (!r.looksLikeSong) {
         out.skipped = QStringLiteral("not a song (no Verse, Chorus, or similar groups)");
+        return out;
+    }
+    // Checked here, on the worker, so an oversized song never reaches the library's writer (#83).
+    if (const QString tooBig = songLimitError(*r.song); !tooBig.isEmpty()) {
+        out.skipped = tooBig;
         return out;
     }
     out.song = std::move(r.song);

@@ -11,6 +11,8 @@
 
 #include <QQmlApplicationEngine>
 #include <QSqlDatabase>
+#include <QSqlError>
+#include <QSqlQuery>
 #include <QQuickItem>
 #include <QQuickWindow>
 #include <QTemporaryDir>
@@ -587,6 +589,41 @@ private slots:
         QVERIFY(m_songs->report().startsWith("Imported 200 songs."));
         QVERIFY(m_songs->importSongs(QUrl::fromLocalFile(folder)));   // free again
         QVERIFY(waitForImport());
+    }
+
+    // #77 review: when a batch's commit really fails, the import reports its songs failed,
+    // keeps none of them, and leaves the library writable.
+    void aBatchThatFailsToCommitIsReportedAndKeepsNothing()
+    {
+        const QString folder = writeSongFiles(3);
+        Song breaks;
+        breaks.title = "Breaks the Commit";
+        breaks.groups = {Group{QUuid::createUuid(), "Breaks the commit", "", {"line"}}};
+        QFile f(QDir(folder).filePath(songFileName(breaks.title)));
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        f.write(songToJson(breaks));
+        f.close();
+        // A dangling default arrangement: the foreign key is deferred, so the save goes through
+        // and the commit fails, as a full disk or I/O error would.
+        QCOMPARE(QSqlDatabase::connectionNames().size(), 1);
+        QSqlQuery trigger(QSqlDatabase::database(QSqlDatabase::connectionNames().first()));
+        QVERIFY2(trigger.exec("CREATE TEMP TRIGGER breaks_commit AFTER INSERT ON song_group "
+                              "WHEN NEW.label = 'Breaks the commit' BEGIN "
+                              "UPDATE song SET default_arrangement = 'missing' WHERE id = NEW.song_id; END"),
+                 qPrintable(trigger.lastError().text()));
+
+        QVERIFY(m_songs->importSongs(QUrl::fromLocalFile(folder)));
+        QVERIFY(waitForImport());
+        const QString report = m_songs->report();
+        QVERIFY2(report.contains(QStringLiteral("Couldn't read %1: ").arg(QFileInfo(f).fileName())), qPrintable(report));
+        QVERIFY2(report.contains("FOREIGN KEY"), qPrintable(report));
+        const QStringList kept = titles(m_songs->songs());
+        QVERIFY(!kept.contains("Breaks the Commit"));
+        // Whatever shared the failed batch is reported failed too; the rest is in and says so.
+        QVERIFY2(report.startsWith(QStringLiteral("Imported %1 songs.").arg(kept.size())), qPrintable(report));
+        QCOMPARE(report.count("Couldn't read "), 4 - kept.size());
+        QVERIFY(m_songs->createFromPaste("After the Failure", kLyrics));
+        QVERIFY(titles(m_songs->songs()).contains("After the Failure"));
     }
 
     void openingAnotherLibraryStopsAnImportWithoutWaitingForIt()

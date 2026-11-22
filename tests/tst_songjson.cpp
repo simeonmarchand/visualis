@@ -1,5 +1,6 @@
 #include "library/library.h"
 #include "song/songjson.h"
+#include "song/songlimits.h"
 #include "song/songstore.h"
 
 #include <QDir>
@@ -350,13 +351,17 @@ private slots:
         {
             SongStore::Batch batch(store);
             writer.startBatch();
-            writer.add({"clash.json", fixture("Holy Holy Holy"), {}, {}, {}});
-            QCOMPARE(writer.report().warnings.size(), 1);
+            writer.add({"clash.json", fixture("Holy Holy Holy"), {}, {}, {"its own warning"}});
+            QCOMPARE(writer.report().warnings.size(), 2);
             writer.add({"notes.json", {}, "not a song", {}, {"no groups"}});
             writer.add({"bad.json", {}, {}, "unreadable", {"odd header"}});
         }
         writer.batchFailed("disk full");
-        QCOMPARE(writer.report().warnings, (QStringList{"notes.json: no groups", "bad.json: odd header"}));
+        // The song's own parser warning stays; only "both are kept" goes with the save.
+        QCOMPARE(writer.report().warnings,
+                 (QStringList{"clash.json: its own warning", "notes.json: no groups", "bad.json: odd header"}));
+        QCOMPARE(writer.report().failed,
+                 (QList<std::pair<QString, QString>>{{"clash.json", "disk full"}, {"bad.json", "unreadable"}}));
         QCOMPARE(store.list().size(), 1);
     }
 
@@ -388,6 +393,39 @@ private slots:
         pro.startBatch();
         pro.add({"holy again.pro", fixture("Holy Holy Holy"), {}, {}, {}});
         QCOMPARE(pro.report().imported, QStringList{"Holy, Holy, Holy"});
+    }
+
+    // #83: the worker's reader refuses a song over the limits, so it never reaches a save.
+    void anOversizedSongIsSkippedWhenRead()
+    {
+        QTemporaryDir files, lib;
+        Song huge = fixture("Amazing Grace");
+        huge.title = "Huge";
+        const Group verse = huge.groups[0];
+        huge.groups.clear();
+        for (int i = 0; i <= songlimits::kGroups; ++i) {
+            Group g = verse;
+            g.id = QUuid::createUuid();
+            huge.groups << g;
+        }
+        for (Arrangement &a : huge.arrangements)
+            a.sequence = {huge.groups[0].id};
+        QFile f(files.filePath(songFileName(huge.title)));
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        f.write(songToJson(huge));
+        f.close();
+
+        const ImportFile read = readSongFile(QFileInfo(f.fileName()));
+        QVERIFY(!read.song);
+        QVERIFY(read.error.isEmpty());
+        QCOMPARE(read.skipped, QStringLiteral("too many groups: 501; the limit is 500"));
+
+        auto library = Library::open(lib.path()).library;
+        SongStore store(*library);
+        const SongImportReport r = importSongs(files.path(), store);
+        QVERIFY(r.imported.isEmpty());
+        QCOMPARE(r.skipped, (QList<std::pair<QString, QString>>{{QFileInfo(f).fileName(), read.skipped}}));
+        QVERIFY(store.list().isEmpty());
     }
 
     // #69
