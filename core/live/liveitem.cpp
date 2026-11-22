@@ -1,5 +1,7 @@
 #include "live/liveitem.h"
 
+#include "song/songlimits.h"
+
 namespace visualis {
 
 namespace {
@@ -29,6 +31,12 @@ LiveItem liveItem(const ServiceItem &item, const std::optional<Song> &song)
     case ServiceItem::Kind::Song:
         if (!song)
             return live;
+        // Before matching the custom sequence, which is labels x groups (#83).
+        live.error = songLimitError(*song);
+        if (live.error.isEmpty() && item.customSequence.size() > songlimits::kSteps)
+            live.error = limitError(QStringLiteral("steps in the sequence"), item.customSequence.size(), songlimits::kSteps);
+        if (!live.error.isEmpty())
+            return live;
         live.song = *song;
         live.arrangement = item.arrangement;
         if (const QList<QUuid> custom = sequenceByLabel(*song, item.customSequence); !custom.isEmpty()) {
@@ -44,7 +52,7 @@ LiveItem liveItem(const ServiceItem &item, const std::optional<Song> &song)
     default:
         return live;
     }
-    live.slides = songSlides(live.song, live.arrangement);
+    live.slides = songSlides(live.song, live.arrangement, &live.error);
     return live;
 }
 

@@ -7,11 +7,25 @@ LiveState::LiveState(QObject *parent)
 {
 }
 
+std::optional<QList<SongSlide>> LiveState::slidesOrRefuse(const Song &song, const QUuid &arrangement)
+{
+    QString error;
+    QList<SongSlide> slides = songSlides(song, arrangement, &error);
+    if (!error.isEmpty()) {
+        emit refused(QStringLiteral("\"%1\" can't be shown: %2.").arg(song.title, error));
+        return std::nullopt;
+    }
+    return slides;
+}
+
 bool LiveState::show(const Song &song, const QUuid &arrangement, int index)
 {
+    std::optional<QList<SongSlide>> slides = slidesOrRefuse(song, arrangement);
+    if (!slides)
+        return false;
     m_song = song;
     m_arrangement = arrangement;
-    m_slides = songSlides(song, arrangement);
+    m_slides = std::move(*slides);
     m_itemId = QUuid();
     const bool valid = index >= 0 && index < m_slides.size();
     m_index = valid ? index : -1;
@@ -20,20 +34,24 @@ bool LiveState::show(const Song &song, const QUuid &arrangement, int index)
     return valid;
 }
 
-void LiveState::restore(const Song &song, const QUuid &arrangement, int index, bool textCleared,
+bool LiveState::restore(const Song &song, const QUuid &arrangement, int index, bool textCleared,
                         bool backgroundCleared, const QUuid &service, const QUuid &item)
 {
+    std::optional<QList<SongSlide>> slides = slidesOrRefuse(song, arrangement);
+    if (!slides)
+        return false;
     if (service != m_serviceId)
         m_items.clear();
     m_serviceId = service;
     m_itemId = item;
     m_song = song;
     m_arrangement = arrangement;
-    m_slides = songSlides(song, arrangement);
+    m_slides = std::move(*slides);
     m_index = index >= 0 && index < m_slides.size() ? index : -1;
     m_textCleared = textCleared;
     m_backgroundCleared = backgroundCleared;
     emit changed();
+    return true;
 }
 
 void LiveState::setService(const QUuid &id, const QList<LiveItem> &items)

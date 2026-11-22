@@ -1,4 +1,5 @@
 #include "live/commands.h"
+#include "live/liveitem.h"
 #include "live/livestate.h"
 
 #include <QSignalSpy>
@@ -70,6 +71,20 @@ QList<LiveItem> service()
     missing.kind = ServiceItem::Kind::Placeholder;
     return {liveItem(header("Worship"), std::nullopt), liveItem(songItem(a), a), liveItem(missing, std::nullopt),
             liveItem(songItem(b), b), liveItem(textItem("Welcome", "Welcome!"), std::nullopt)};
+}
+
+
+// One group of `slides` slides, played `steps` times: structurally small, huge expanded.
+Song repeated(int slides, int steps)
+{
+    Song s;
+    s.title = "Huge";
+    QStringList text;
+    for (int i = 0; i < slides; ++i)
+        text << QString::number(i);
+    s.groups = {Group{QUuid::createUuid(), "Verse", "", text}};
+    s.arrangements = {Arrangement{QUuid::createUuid(), "Default", QList<QUuid>(steps, s.groups[0].id), {}}};
+    return s;
 }
 
 } // namespace
@@ -546,6 +561,59 @@ private slots:
         QCOMPARE(live.property("groupLabel").toString(), QStringLiteral("Chorus"));
         QCOMPARE(live.property("slideIndex").toInt(), 3);
         QCOMPARE(live.property("backgroundCleared").toBool(), true);
+    }
+
+    // #83: a song too big to expand leaves what's live alone and says why.
+    void anOversizedSongIsRefusedAndLiveStaysPut()
+    {
+        LiveState live;
+        QVERIFY(live.show(sample(), {}, 1));
+        QSignalSpy changed(&live, &LiveState::changed);
+        QSignalSpy refused(&live, &LiveState::refused);
+
+        QVERIFY(!live.show(repeated(500, 1000)));
+        QCOMPARE(refused.count(), 1);
+        QVERIFY(refused.at(0).at(0).toString().contains("too many slides to play"));
+        QCOMPARE(changed.count(), 0);
+        QCOMPARE(live.songTitle(), sample().title);
+        QCOMPARE(live.slideIndex(), 1);
+        QCOMPARE(live.slideCount(), 5);
+    }
+
+    void anOversizedRestoreIsRefusedAndLiveStaysPut()
+    {
+        LiveState live;
+        QVERIFY(live.show(sample(), {}, 2));
+        QSignalSpy changed(&live, &LiveState::changed);
+        QSignalSpy refused(&live, &LiveState::refused);
+        QVERIFY(!live.restore(repeated(10'000, 10'000), {}, 0, true, true, QUuid::createUuid(), QUuid::createUuid()));
+        QCOMPARE(refused.count(), 1);
+        QCOMPARE(changed.count(), 0);
+        QCOMPARE(live.songTitle(), sample().title);
+        QCOMPARE(live.slideIndex(), 2);
+        QVERIFY(!live.textCleared() && !live.backgroundCleared());
+        QVERIFY(live.serviceId().isNull());
+    }
+
+    void anOversizedServiceItemHasNoSlidesAndSaysWhy()
+    {
+        ServiceItem item;
+        item.id = QUuid::createUuid();
+        item.kind = ServiceItem::Kind::Song;
+        const LiveItem l = liveItem(item, repeated(500, 1000));
+        QVERIFY(l.slides.isEmpty());
+        QVERIFY(l.error.contains("too many slides to play"));
+    }
+
+    void anOversizedCustomSequenceIsRefusedBeforeMatching()
+    {
+        ServiceItem item;
+        item.id = QUuid::createUuid();
+        item.kind = ServiceItem::Kind::Song;
+        item.customSequence = QStringList(100'000, "Verse");
+        const LiveItem l = liveItem(item, repeated(1, 1));
+        QVERIFY(l.slides.isEmpty());
+        QCOMPARE(l.error, QStringLiteral("too many steps in the sequence: 100,000; the limit is 1,000"));
     }
 };
 

@@ -22,6 +22,20 @@ Song sample()
     return s;
 }
 
+
+// One group of `slides` slides, played `steps` times: structurally small, huge expanded.
+Song repeated(int slides, int steps)
+{
+    Song s;
+    s.title = "Huge";
+    QStringList text;
+    for (int i = 0; i < slides; ++i)
+        text << QString::number(i);
+    s.groups = {Group{QUuid::createUuid(), "Verse", "", text}};
+    s.arrangements = {Arrangement{QUuid::createUuid(), "Default", QList<QUuid>(steps, s.groups[0].id), {}}};
+    return s;
+}
+
 } // namespace
 
 // A "crash" here is a Recovery that never gets finish(): the next one finds its journal.
@@ -158,6 +172,24 @@ private slots:
         Recovery recovery;
         QVERIFY(!recovery.start(m_path, &live, nullptr));
         QVERIFY(!live.hasSlide());
+    }
+
+    // #83: journals are capped at 4 MiB, but what they expand to isn't.
+    void anOversizedJournalIsReportedNotRestored()
+    {
+        LiveSnapshot big;
+        big.song = repeated(500, 1000);
+        big.slideIndex = 3;
+        big.savedAt = QDateTime::currentDateTimeUtc();
+        QVERIFY(writeJournal(m_path, big));
+
+        LiveState live;
+        Recovery recovery;
+        recovery.start(m_path, &live, nullptr);
+        QVERIFY(!live.hasSlide());
+        QVERIFY(live.songTitle().isEmpty());
+        QVERIFY2(recovery.message().contains("wasn't restored") && recovery.message().contains("too many slides"),
+                 qPrintable(recovery.message()));
     }
 
     void aCorruptJournalIsIgnoredAndReplaced()

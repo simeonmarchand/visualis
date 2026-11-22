@@ -37,19 +37,29 @@ bool Recovery::start(const QString &journalPath, LiveState *live, VideoEngine *v
         if (ageSecs < 0 || ageSecs > kMaxAgeHours * 3600) {
             qCInfo(lcRecovery) << "journal from an earlier service, not restored; saved" << s.savedAt;
         } else {
+            // A journal holding a song too big to expand (#83) is refused, not allocated.
+            QString refusal;
+            const auto onRefused = connect(live, &LiveState::refused, this, [&refusal](const QString &r) { refusal = r; });
             if (s.song)
                 live->restore(*s.song, s.arrangement, s.slideIndex, s.textCleared, s.backgroundCleared, s.service, s.item);
             else if (s.backgroundCleared)
                 live->clearBackground();
+            disconnect(onRefused);
             if (video && !s.background.isEmpty())
                 video->setSource(QUrl(s.background));
             restored = true;
-            const QString where = s.song
-                ? QStringLiteral("\"%1\", slide %2 of %3").arg(s.song->title).arg(live->slideIndex() + 1).arg(live->slideCount())
-                : QStringLiteral("the background");
-            m_message = QStringLiteral("Visualis didn't quit normally last time. Back on %1 as of %2.")
-                            .arg(where, s.savedAt.toLocalTime().toString("h:mm:ss AP"));
-            qCInfo(lcRecovery).noquote() << "restored after a crash:" << where;
+            if (!refusal.isEmpty()) {
+                m_message = QStringLiteral("Visualis didn't quit normally last time, and what was live wasn't restored: %1")
+                                .arg(refusal);
+                qCWarning(lcRecovery).noquote() << "not restored:" << refusal;
+            } else {
+                const QString where = s.song
+                    ? QStringLiteral("\"%1\", slide %2 of %3").arg(s.song->title).arg(live->slideIndex() + 1).arg(live->slideCount())
+                    : QStringLiteral("the background");
+                m_message = QStringLiteral("Visualis didn't quit normally last time. Back on %1 as of %2.")
+                                .arg(where, s.savedAt.toLocalTime().toString("h:mm:ss AP"));
+                qCInfo(lcRecovery).noquote() << "restored after a crash:" << where;
+            }
             emit messageChanged();
         }
     }
