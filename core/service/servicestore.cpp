@@ -57,6 +57,16 @@ ServiceStore::ServiceStore(Library &library)
 
 ServiceStore::Result ServiceStore::save(Service &service)
 {
+    return save(service, false);
+}
+
+ServiceStore::Result ServiceStore::saveNewPlan(Service &service)
+{
+    return save(service, true);
+}
+
+ServiceStore::Result ServiceStore::save(Service &service, bool newPlan)
+{
     Service s = service;   // a failed save leaves the caller's service as it was
     if (s.title.trimmed().isEmpty())
         return {false, QStringLiteral("A service needs a title.")};
@@ -87,8 +97,26 @@ ServiceStore::Result ServiceStore::save(Service &service)
             return {false, QStringLiteral("\"%1\" uses an item that belongs to another service.").arg(s.title)};
     }
 
-    if (!db.transaction())
+    if (newPlan) {
+        // Take the write lock now, without waiting for it, so the duplicate check below
+        // holds until the commit.
+        QSqlQuery q(db);
+        q.exec("PRAGMA busy_timeout = 0");
+        const bool begun = q.exec("BEGIN IMMEDIATE");
+        const QSqlError error = q.lastError();
+        q.exec(QStringLiteral("PRAGMA busy_timeout = %1").arg(Library::kBusyTimeoutMs));
+        if (!begun) {
+            const bool busy = error.nativeErrorCode() == QLatin1String("5");   // SQLITE_BUSY
+            return {false, busy ? QStringLiteral("The library is in use by another program.") : error.text(), busy};
+        }
+        if (const auto existing = findByPcoPlan(s.pcoPlanId)) {
+            db.rollback();
+            return {false, QStringLiteral("This plan is already in the library as \"%1\".").arg(existing->title), false,
+                    existing->title};
+        }
+    } else if (!db.transaction()) {
         return {false, db.lastError().text()};
+    }
     auto fail = [&](const QString &error) {
         db.rollback();
         return Result{false, QStringLiteral("Couldn't save \"%1\": %2").arg(s.title, error)};

@@ -1,7 +1,10 @@
 #pragma once
 
 #include "pco/pcotypes.h"
+#include "pco/planimport.h"
+#include "pco/songlink.h"
 
+#include <QDeadlineTimer>
 #include <QObject>
 #include <QPointer>
 #include <QVariantList>
@@ -39,6 +42,10 @@ public:
     void setSongLibrary(SongLibrary *songs);
     // For tests: a client pointed at a fake Planning Center.
     void setClient(std::unique_ptr<PcoClient> client);
+    // While another program holds the library's write lock, a save is retried this often,
+    // for this long, before the import gives up (#76). Settable for tests.
+    static constexpr int kLockRetryMs = 250;
+    void setLockWaitLimit(int ms) { m_lockWaitLimitMs = ms; }
 
     QVariantList serviceTypes() const;
     QVariantList plans() const;
@@ -66,7 +73,12 @@ private:
     void end();
     void setStatus(const QString &status);
     void save(const visualis::PcoServiceType &type, const visualis::PcoPlan &plan,
-              const visualis::PcoPlanItems &items);
+              const visualis::PcoPlanItems &items, int library);
+    // One attempt at saving. `library` is m_libraryChanges when importPlan() was called: a
+    // library opened since isn't the one the operator imported into.
+    void trySave(visualis::PlanImport import, visualis::SongLinkReport links, QDeadlineTimer deadline,
+                 int library);
+    void gaveUpWaiting(const QString &title);
 
     QPointer<PlanningCenter> m_pco;
     QPointer<SongLibrary> m_songs;
@@ -76,4 +88,6 @@ private:
     int m_plansRequest = 0;      // only the latest loadPlans() answer is shown
     int m_pending = 0;
     QString m_status;
+    int m_lockWaitLimitMs = 10000;
+    int m_libraryChanges = 0;
 };

@@ -2,7 +2,6 @@
 
 #include "library/songlibrary.h"
 #include "pco/pcoclient.h"
-#include "pco/planimport.h"
 #include "pco/planningcenter.h"
 #include "pco/songlink.h"
 #include "service/servicestore.h"
@@ -10,6 +9,7 @@
 
 #include <QDate>
 #include <QDateTime>
+#include <QTimer>
 
 using namespace visualis;
 
@@ -27,7 +27,11 @@ void PlanImporter::setPlanningCenter(PlanningCenter *pco)
 
 void PlanImporter::setSongLibrary(SongLibrary *songs)
 {
+    if (m_songs)
+        disconnect(m_songs, nullptr, this, nullptr);
     m_songs = songs;
+    if (m_songs)
+        connect(m_songs, &SongLibrary::libraryChanged, this, [this] { ++m_libraryChanges; });
 }
 
 void PlanImporter::setClient(std::unique_ptr<PcoClient> client)
@@ -159,7 +163,8 @@ void PlanImporter::importPlan(const QString &serviceTypeId, const QString &planI
     setStatus(tr("Importing…"));
     // Both reads, then one save: a failure part way leaves the library untouched.
     QPointer<PlanImporter> self(this);
-    pco->plan(serviceTypeId, planId, [self, pco, type, serviceTypeId, planId](PcoResult<PcoPlan> plan) {
+    const int library = m_libraryChanges;
+    pco->plan(serviceTypeId, planId, [self, pco, type, serviceTypeId, planId, library](PcoResult<PcoPlan> plan) {
         if (!self)
             return;
         if (!plan.ok()) {
@@ -167,7 +172,7 @@ void PlanImporter::importPlan(const QString &serviceTypeId, const QString &planI
             self->setStatus(plan.error.message);
             return;
         }
-        pco->planItems(serviceTypeId, planId, [self, type, plan = plan.value](PcoResult<PcoPlanItems> items) {
+        pco->planItems(serviceTypeId, planId, [self, type, plan = plan.value, library](PcoResult<PcoPlanItems> items) {
             if (!self)
                 return;
             self->end();
@@ -175,23 +180,13 @@ void PlanImporter::importPlan(const QString &serviceTypeId, const QString &planI
                 self->setStatus(items.error.message);
                 return;
             }
-            self->save(type, plan, items.value);
+            self->save(type, plan, items.value, library);
         });
     });
 }
 
-void PlanImporter::save(const PcoServiceType &type, const PcoPlan &plan, const PcoPlanItems &items)
+void PlanImporter::save(const PcoServiceType &type, const PcoPlan &plan, const PcoPlanItems &items, int library)
 {
-    if (!m_songs || !m_songs->library()) {
-        setStatus(tr("The library isn't open, so there's nowhere to save the service."));
-        return;
-    }
-    ServiceStore store(*m_songs->library());
-    // Checked again: the same plan may have been imported while this one was reading.
-    if (const auto existing = store.findByPcoPlan(plan.id)) {
-        setStatus(tr("This plan is already in the library as \"%1\".").arg(existing->title));
-        return;
-    }
     PlanImport r = serviceFromPlan(type, plan, items, QDateTime::currentDateTimeUtc());
     if (r.service.items.isEmpty()) {
         // Nothing to run, and saving it would block a retry (a plan is imported once).
@@ -202,9 +197,51 @@ void PlanImporter::save(const PcoServiceType &type, const PcoPlan &plan, const P
         return;
     }
     // Songs the library is sure of become song items (#55); the rest wait for the operator.
-    SongStore songStore(*m_songs->library());
-    const SongLinkReport links = linkSongs(r.service, songStore);
-    const ServiceStore::Result saved = store.save(r.service);
+    // Reading songs never waits on another program's write lock (WAL), so it's done once,
+    // before the first attempt to save.
+    // trySave() reports a closed or switched library; link only into the one imported into.
+    SongLinkReport links;
+    if (library == m_libraryChanges && m_songs && m_songs->library()) {
+        SongStore songStore(*m_songs->library());
+        links = linkSongs(r.service, songStore);
+    }
+    begin();
+    trySave(std::move(r), std::move(links), QDeadlineTimer(m_lockWaitLimitMs), library);
+}
+
+void PlanImporter::trySave(PlanImport r, SongLinkReport links, QDeadlineTimer deadline, int library)
+{
+    if (library != m_libraryChanges) {
+        end();
+        setStatus(tr("\"%1\" wasn't imported: another library was opened while it was being imported. Import "
+                     "it again to put it in this one.").arg(r.service.title));
+        return;
+    }
+    if (!m_songs || !m_songs->library()) {
+        end();
+        setStatus(tr("The library isn't open, so there's nowhere to save the service."));
+        return;
+    }
+    // The duplicate-plan check is part of the save's transaction: the same plan may have
+    // been imported while this one was reading.
+    const ServiceStore::Result saved = ServiceStore(*m_songs->library()).saveNewPlan(r.service);
+    if (saved.busy) {
+        // Another program has the library locked. Try again shortly rather than wait here,
+        // which would hold up the operator window and the outputs; never past the deadline.
+        const qint64 left = deadline.remainingTime();
+        if (left <= 0)
+            return gaveUpWaiting(r.service.title);
+        setStatus(tr("Waiting for the library: another program is using it…"));
+        QTimer::singleShot(int(qMin<qint64>(kLockRetryMs, left)), this,
+                           [this, r = std::move(r), links = std::move(links), deadline, library]() mutable {
+                               if (deadline.hasExpired())
+                                   gaveUpWaiting(r.service.title);
+                               else
+                                   trySave(std::move(r), std::move(links), deadline, library);
+                           });
+        return;
+    }
+    end();
     if (!saved.ok) {
         setStatus(saved.error);
         return;
@@ -220,4 +257,11 @@ void PlanImporter::save(const PcoServiceType &type, const PcoPlan &plan, const P
         status += QLatin1Char(' ') + r.notes.join(QLatin1Char(' '));
     setStatus(status);
     emit imported(r.service.id.toString(QUuid::WithoutBraces), r.service.title);
+}
+
+void PlanImporter::gaveUpWaiting(const QString &title)
+{
+    end();
+    setStatus(tr("Couldn't save \"%1\": another program kept the library busy. Nothing was imported; try again.")
+                  .arg(title));
 }
