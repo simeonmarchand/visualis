@@ -286,7 +286,7 @@ private slots:
         QVERIFY(!store.findByHash(sha256("other")));
 
         MediaAsset again = a;
-        again.id = {};
+        again.id = QUuid();
         again.file = mediaFileFor(a.contentHash, "mov");
         const MediaStore::Result dup = store.save(again);
         QVERIFY(!dup.ok);
