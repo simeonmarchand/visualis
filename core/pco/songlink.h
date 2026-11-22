@@ -47,8 +47,10 @@ struct SongLinkReport {
     QString summary() const;
 };
 
-// Links every song placeholder in `service` that matchSong() is sure of, saving each
-// library song's Planning Center id. Doesn't save the service.
-SongLinkReport linkSongs(Service &service, SongStore &songs);
+// Links every song placeholder in `service` that matchSong() is sure of, and remembers each
+// library song's Planning Center id. Doesn't save the service. With `staged`, the songs to
+// update are put there for the caller to save with the service (#103 review, M6); without
+// it they're saved at once.
+SongLinkReport linkSongs(Service &service, SongStore &songs, QList<Song> *staged = nullptr);
 
 } // namespace visualis

@@ -744,6 +744,77 @@ private slots:
         QCOMPARE(*ServiceStore(*first).load(QUuid::fromString(id)), before);   // untouched
     }
 
+    // Review of #103 (H1): an item whose song record didn't come is left exactly as it was,
+    // and the dialog says what couldn't be read.
+    void anItemThatCouldntBeReadIsLeftAlone()
+    {
+        SongLibrary songs;
+        QVERIFY(songs.openLibrary(m_dir.filePath(QString::number(++m_n))));
+        FakePlanningCenter server;
+        serve(server);
+        PlanImporter importer;
+        importer.setSongLibrary(&songs);
+        importer.setClient(client(server.url()));
+        QSignalSpy imported(&importer, &PlanImporter::imported);
+        importer.importPlan("1001", "5001");
+        QVERIFY(idle(importer));
+        const QString id = imported[0][0].toString();
+        ServiceStore store(*songs.library());
+        Service mine = *store.load(QUuid::fromString(id));
+        ServiceItem *one = const_cast<ServiceItem *>(byPco(mine, "9003"));
+        one->kind = Kind::Text;   // the operator's choice
+        QVERIFY(store.save(mine).ok);
+        const ServiceItem before = *byPco(mine, "9003");
+
+        // Page 1 without its included records: 9003's song is a dangling link.
+        QFile f(QStringLiteral(FIXTURES_DIR "/pco/items_page1.json"));
+        QVERIFY(f.open(QIODevice::ReadOnly));
+        QJsonObject page = QJsonDocument::fromJson(f.readAll()).object();
+        page["included"] = QJsonArray{};
+        server.clear(kItems);
+        server.onBody(kItems, QJsonDocument(page).toJson());
+        server.on(kItems, {"items_page2.json"});
+        importer.reimport(id);
+        QVERIFY(idle(importer));
+        QVERIFY(changeKinds(importer).contains("unreadable"));
+        QVERIFY(!importer.reimportNotes().isEmpty());
+        QVERIFY(importer.applyReimport());
+        QVERIFY(idle(importer));
+        QCOMPARE(*byPco(*store.load(QUuid::fromString(id)), "9003"), before);
+    }
+
+    // Review of #103 (M5): nothing to show can still be something to save.
+    void anApplyWithNothingToShowStillSaves()
+    {
+        SongLibrary songs;
+        QVERIFY(songs.openLibrary(m_dir.filePath(QString::number(++m_n))));
+        FakePlanningCenter server;
+        serve(server);
+        PlanImporter importer;
+        importer.setSongLibrary(&songs);
+        importer.setClient(client(server.url()));
+        QSignalSpy imported(&importer, &PlanImporter::imported);
+        importer.importPlan("1001", "5001");
+        QVERIFY(idle(importer));
+        const QString id = imported[0][0].toString();
+        ServiceStore store(*songs.library());
+        Service mine = *store.load(QUuid::fromString(id));
+        mine.items.removeAt(0);   // 9001: remembered as deleted
+        QVERIFY(store.save(mine).ok);
+        QCOMPARE(store.load(QUuid::fromString(id))->removedPcoItems.size(), 1);
+
+        server.clear(kItems);   // and Planning Center takes it out too
+        server.onBody(kItems, fixtureWith("items_page1.json", [](QJsonArray &items) { items.removeAt(0); }));
+        server.on(kItems, {"items_page2.json"});
+        importer.reimport(id);
+        QVERIFY(idle(importer));
+        QVERIFY(importer.reimportChanges().isEmpty());
+        QVERIFY(importer.reimportNeedsSave());
+        QVERIFY(importer.applyReimport());
+        QVERIFY(idle(importer));
+        QVERIFY(store.load(QUuid::fromString(id))->removedPcoItems.isEmpty());
+    }
+
     void aCancelledReimportChangesNothing()
     {
         SongLibrary songs;

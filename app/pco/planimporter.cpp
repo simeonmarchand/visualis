@@ -200,16 +200,19 @@ void PlanImporter::save(const PcoServiceType &type, const PcoPlan &plan, const P
     // Reading songs never waits on another program's write lock (WAL), so it's done once,
     // before the first attempt to save.
     // trySave() reports a closed or switched library; link only into the one imported into.
+    // The songs' Planning Center links are saved after the service, never before it: a
+    // service that isn't saved leaves the library as it was.
     SongLinkReport links;
+    QList<Song> linked;
     if (library == m_libraryChanges && m_songs && m_songs->library()) {
         SongStore songStore(*m_songs->library());
-        links = linkSongs(r.service, songStore);
+        links = linkSongs(r.service, songStore, &linked);
     }
     begin();
-    trySave(std::move(r), std::move(links), QDeadlineTimer(m_lockWaitLimitMs), library);
+    trySave(std::move(r), std::move(links), std::move(linked), QDeadlineTimer(m_lockWaitLimitMs), library);
 }
 
-void PlanImporter::trySave(PlanImport r, SongLinkReport links, QDeadlineTimer deadline, int library)
+void PlanImporter::trySave(PlanImport r, SongLinkReport links, QList<Song> linked, QDeadlineTimer deadline, int library)
 {
     if (library != m_libraryChanges) {
         end();
@@ -233,11 +236,12 @@ void PlanImporter::trySave(PlanImport r, SongLinkReport links, QDeadlineTimer de
             return gaveUpWaiting(r.service.title);
         setStatus(tr("Waiting for the library: another program is using it…"));
         QTimer::singleShot(int(qMin<qint64>(kLockRetryMs, left)), this,
-                           [this, r = std::move(r), links = std::move(links), deadline, library]() mutable {
+                           [this, r = std::move(r), links = std::move(links), linked = std::move(linked), deadline,
+                            library]() mutable {
                                if (deadline.hasExpired())
                                    gaveUpWaiting(r.service.title);
                                else
-                                   trySave(std::move(r), std::move(links), deadline, library);
+                                   trySave(std::move(r), std::move(links), std::move(linked), deadline, library);
                            });
         return;
     }
@@ -246,6 +250,7 @@ void PlanImporter::trySave(PlanImport r, SongLinkReport links, QDeadlineTimer de
         setStatus(saved.error);
         return;
     }
+    const QString unlinked = saveLinkedSongs(linked);
     const qsizetype n = r.service.items.size();
     QString status = n == 1 ? tr("Imported \"%1\": 1 item.").arg(r.service.title)
                             : tr("Imported \"%1\": %2 items.").arg(r.service.title, QString::number(n));
@@ -255,6 +260,8 @@ void PlanImporter::trySave(PlanImport r, SongLinkReport links, QDeadlineTimer de
         status += QLatin1Char(' ') + tr("No group for %1.").arg(missing);
     if (!r.notes.isEmpty())
         status += QLatin1Char(' ') + r.notes.join(QLatin1Char(' '));
+    if (!unlinked.isEmpty())
+        status += QLatin1Char(' ') + unlinked;
     setStatus(status);
     emit imported(r.service.id.toString(QUuid::WithoutBraces), r.service.title);
 }
@@ -281,6 +288,7 @@ QString changeKindName(ReimportChange::Kind k)
     case K::KeptPosition: return QStringLiteral("keptPosition");
     case K::Relink: return QStringLiteral("relink");
     case K::ChangedButDeleted: return QStringLiteral("changedButDeleted");
+    case K::Unreadable: return QStringLiteral("unreadable");
     }
     return {};
 }
@@ -351,12 +359,21 @@ void PlanImporter::reimport(const QString &serviceId)
                                    "was changed."));
                 return;
             }
-            self->offerReimport(id, fresh.service, library);
+            self->offerReimport(id, fresh, library);
         });
     });
 }
 
-void PlanImporter::offerReimport(const QUuid &serviceId, const Service &fresh, int library)
+namespace {
+
+ReimportOptions optionsFor(const PlanImport &fresh, const QSet<QString> &addBack = {})
+{
+    return ReimportOptions{addBack, fresh.unreadable, fresh.unreadableWithoutId};
+}
+
+} // namespace
+
+void PlanImporter::offerReimport(const QUuid &serviceId, const PlanImport &fresh, int library)
 {
     const std::optional<Service> local = m_songs && m_songs->library()
                                              ? ServiceStore(*m_songs->library()).load(serviceId) : std::nullopt;
@@ -364,8 +381,8 @@ void PlanImporter::offerReimport(const QUuid &serviceId, const Service &fresh, i
         setStatus(tr("The service is gone from the library."));
         return;
     }
-    const ReimportResult r = mergeReimport(*local, fresh);
-    PendingReimport p{serviceId, fresh, {}, r.summary(), library};
+    const ReimportResult r = mergeReimport(*local, fresh.service, optionsFor(fresh));
+    PendingReimport p{serviceId, fresh, {}, r.summary(), r.needsSave, library};
     for (const ReimportChange &c : r.changes) {
         p.changes.append(QVariantMap{{"kind", changeKindName(c.kind)}, {"title", c.title}, {"field", c.field},
                                      {"detail", c.detail}, {"pcoItemId", c.pcoItemId}});
@@ -406,9 +423,10 @@ void PlanImporter::tryApply(const QSet<QString> &addBack, QDeadlineTimer deadlin
     const std::optional<Service> local = store.load(m_reimport->serviceId);
     if (!local)
         return stop(tr("The service is gone from the library."));
-    ReimportResult r = mergeReimport(*local, m_reimport->fresh, addBack);
+    ReimportResult r = mergeReimport(*local, m_reimport->fresh.service, optionsFor(m_reimport->fresh, addBack));
     SongStore songs(*m_songs->library());
-    const SongLinkReport links = linkSongs(r.service, songs);
+    QList<Song> linked;
+    const SongLinkReport links = linkSongs(r.service, songs, &linked);
     const ServiceStore::Result saved = store.saveWithoutWaiting(r.service);
     if (saved.busy) {
         const qint64 left = deadline.remainingTime();
@@ -432,8 +450,26 @@ void PlanImporter::tryApply(const QSet<QString> &addBack, QDeadlineTimer deadlin
         status += QLatin1Char(' ') + s;
     for (const QString &missing : links.unmatched)
         status += QLatin1Char(' ') + tr("No group for %1.").arg(missing);
+    if (const QString unlinked = saveLinkedSongs(linked); !unlinked.isEmpty())
+        status += QLatin1Char(' ') + unlinked;
     stop(status);
     emit reimported(r.service.id.toString(QUuid::WithoutBraces));
+}
+
+QString PlanImporter::saveLinkedSongs(const QList<Song> &linked)
+{
+    if (linked.isEmpty() || !m_songs || !m_songs->library())
+        return {};
+    // Not in the service's transaction yet (needs SongStore::updatePcoLink, #107): a song that
+    // isn't saved just matches by title again next time.
+    SongStore songs(*m_songs->library());
+    QStringList failed;
+    for (Song song : linked) {
+        if (!songs.save(song).ok)
+            failed << song.title;
+    }
+    return failed.isEmpty() ? QString()
+                            : tr("Couldn't remember the Planning Center link for %1.").arg(failed.join(QStringLiteral(", ")));
 }
 
 void PlanImporter::cancelReimport()

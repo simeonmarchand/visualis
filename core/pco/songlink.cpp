@@ -4,6 +4,8 @@
 #include "song/slidelist.h"
 #include "song/songstore.h"
 
+#include <algorithm>
+
 namespace visualis {
 
 ServiceItem linkedItem(ServiceItem item, const Song &song)
@@ -81,7 +83,7 @@ QString SongLinkReport::summary() const
     return parts.join(QStringLiteral(", ")) + QLatin1Char('.');
 }
 
-SongLinkReport linkSongs(Service &service, SongStore &songs)
+SongLinkReport linkSongs(Service &service, SongStore &songs, QList<Song> *staged)
 {
     SongLinkReport report;
     QList<SongCandidate> candidates = songs.matchCandidates();
@@ -97,11 +99,27 @@ SongLinkReport linkSongs(Service &service, SongStore &songs)
             continue;
         }
         std::optional<Song> song = m.kind == SongMatch::Kind::Linked ? songs.load(m.songId) : std::nullopt;
+        if (song && staged) {
+            for (const Song &s : std::as_const(*staged)) {
+                if (s.id == song->id)
+                    song = s;   // already updated for an earlier item, not saved yet
+            }
+        }
         if (!song) {
             ++report.placeholders;
             continue;
         }
-        if (rememberPcoSong(*song, *pco) && songs.save(*song).ok) {
+        const auto keep = [&](const Song &s) {
+            if (!staged)
+                return songs.save(*song).ok;
+            const auto at = std::find_if(staged->begin(), staged->end(), [&](const Song &x) { return x.id == s.id; });
+            if (at != staged->end())
+                *at = s;
+            else
+                *staged << s;
+            return true;
+        };
+        if (rememberPcoSong(*song, *pco) && keep(*song)) {
             for (SongCandidate &c : candidates) {
                 if (c.id == song->id)
                     c = SongCandidate{song->id, song->title, song->credits.ccliNumber, song->credits.authors, song->pcoSongId};

@@ -129,6 +129,22 @@ private slots:
         QCOMPARE(week2.items[0].ref, grace.id);
     }
 
+    // Review of #103 (M6): staged, nothing is written until the caller saves it with the service.
+    void stagedLinksWaitForTheCaller()
+    {
+        Song grace = libSong("Amazing Grace", {group("Verse 1", "Amazing grace")});
+        QVERIFY(m_songs->save(grace).ok);
+        Service s = imported({songItem("1", "Amazing Grace", 1, {"Verse 1"}, {}, "p-grace"),
+                              songItem("2", "Amazing Grace", 2, {"Verse 1"}, {}, "p-grace")});
+        QList<Song> staged;
+        const SongLinkReport r = linkSongs(s, *m_songs, &staged);
+        QCOMPARE(r.byTitle, 1);
+        QCOMPARE(r.linked, 1);   // the second by the id the first remembered, unsaved
+        QCOMPARE(staged.size(), 1);
+        QCOMPARE(staged[0].pcoSongId, QStringLiteral("p-grace"));
+        QVERIFY(m_songs->load(grace.id)->pcoSongId.isEmpty());   // not written
+    }
+
     void creditsTheSongHasAreKept()
     {
         Song s = libSong("Amazing Grace", {group("Verse 1", "Amazing grace")});

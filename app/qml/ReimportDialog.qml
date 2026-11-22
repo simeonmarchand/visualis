@@ -17,7 +17,7 @@ Dialog {
     width: 560
 
     readonly property bool ready: PlanImporter.reimportServiceId !== ""
-    readonly property bool upToDate: ready && PlanImporter.reimportChanges.length === 0
+    readonly property bool upToDate: ready && PlanImporter.reimportChanges.length === 0 && !PlanImporter.reimportNeedsSave
     property var addBack: ({})   // Planning Center item id -> true, for deleted items to add back
 
     onOpened: addBack = ({})
@@ -34,6 +34,7 @@ Dialog {
         case "keptPosition": return c.title + ": kept where you put it; Planning Center moved it"
         case "relink": return c.title + ": Planning Center has another song here, so it needs a song again"
         case "changedButDeleted": return c.title + ": " + c.detail
+        case "unreadable": return c.title !== "" ? c.title + ": " + c.detail : c.detail.charAt(0).toUpperCase() + c.detail.slice(1)
         }
         return c.title
     }
@@ -53,7 +54,7 @@ Dialog {
             Layout.fillWidth: true
             Layout.preferredHeight: Math.min(contentHeight, 320)
             clip: true
-            visible: dialog.ready && !dialog.upToDate
+            visible: dialog.ready && PlanImporter.reimportChanges.length > 0
             model: PlanImporter.reimportChanges
             delegate: RowLayout {
                 id: row
@@ -77,6 +78,16 @@ Dialog {
                     }
                 }
             }
+        }
+
+        // Partly read: what Planning Center sent that couldn't be used.
+        Label {
+            objectName: "reimportNotes"
+            Layout.fillWidth: true
+            visible: dialog.ready && PlanImporter.reimportNotes.length > 0
+            wrapMode: Text.Wrap
+            color: "#8b8f96"
+            text: PlanImporter.reimportNotes.join("\n")
         }
     }
 

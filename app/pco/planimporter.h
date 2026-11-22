@@ -3,6 +3,7 @@
 #include "pco/pcotypes.h"
 #include "pco/planimport.h"
 #include "pco/songlink.h"
+#include "song/song.h"
 #include "service/service.h"
 
 #include <QDeadlineTimer>
@@ -42,6 +43,10 @@ class PlanImporter : public QObject
     Q_PROPERTY(QString reimportServiceId READ reimportServiceId NOTIFY reimportChanged)
     Q_PROPERTY(QVariantList reimportChanges READ reimportChanges NOTIFY reimportChanged)
     Q_PROPERTY(QString reimportSummary READ reimportSummary NOTIFY reimportChanged)
+    // Whether Apply would change anything, shown or not (a refreshed record of the plan).
+    Q_PROPERTY(bool reimportNeedsSave READ reimportNeedsSave NOTIFY reimportChanged)
+    // What couldn't be read from Planning Center, for the operator.
+    Q_PROPERTY(QStringList reimportNotes READ reimportNotes NOTIFY reimportChanged)
 
 public:
     explicit PlanImporter(QObject *parent = nullptr);
@@ -64,6 +69,8 @@ public:
     QString reimportServiceId() const;
     QVariantList reimportChanges() const;
     QString reimportSummary() const;
+    bool reimportNeedsSave() const { return m_reimport && m_reimport->needsSave; }
+    QStringList reimportNotes() const { return m_reimport ? m_reimport->fresh.notes : QStringList(); }
 
     Q_INVOKABLE void loadServiceTypes();
     Q_INVOKABLE void loadPlans(const QString &serviceTypeId);
@@ -104,12 +111,16 @@ private:
               const visualis::PcoPlanItems &items, int library);
     // One attempt at saving. `library` is m_libraryChanges when importPlan() was called: a
     // library opened since isn't the one the operator imported into.
-    void trySave(visualis::PlanImport import, visualis::SongLinkReport links, QDeadlineTimer deadline,
+    void trySave(visualis::PlanImport import, visualis::SongLinkReport links, QList<visualis::Song> linked,
+                 QDeadlineTimer deadline,
                  int library);
     void gaveUpWaiting(const QString &title);
 
-    void offerReimport(const QUuid &serviceId, const visualis::Service &fresh, int library);
+    void offerReimport(const QUuid &serviceId, const visualis::PlanImport &fresh, int library);
     void tryApply(const QSet<QString> &addBack, QDeadlineTimer deadline, int request);
+    // After the service is saved: the library songs linkSongs() updated. Returns what to tell
+    // the operator if any couldn't be saved.
+    QString saveLinkedSongs(const QList<visualis::Song> &linked);
 
     QPointer<PlanningCenter> m_pco;
     QPointer<SongLibrary> m_songs;
@@ -123,9 +134,10 @@ private:
     int m_libraryChanges = 0;
     struct PendingReimport {
         QUuid serviceId;
-        visualis::Service fresh;   // the plan as read, as serviceFromPlan made it
+        visualis::PlanImport fresh;   // the plan as read, as serviceFromPlan made it
         QVariantList changes;
         QString summary;
+        bool needsSave = false;
         int library = 0;           // m_libraryChanges when read: only applied to that library
     };
     std::optional<PendingReimport> m_reimport;
