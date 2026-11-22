@@ -1,5 +1,6 @@
 #pragma once
 
+#include "output/platformdisplay.h"
 #include "video/framewatchdog.h"
 
 #include <QElapsedTimer>
@@ -26,7 +27,9 @@ Q_DECLARE_LOGGING_CATEGORY(lcVideoFrames)
 // sink. Frame copies share the GPU texture, so outputs always show the same frame and
 // nothing is copied. Slide changes never touch it (plan 5.6).
 //
-// A watchdog restarts the player if frames stop arriving and tells the operator.
+// A watchdog restarts the player if frames stop arriving and tells the operator. While
+// every display is asleep AVFoundation delivers no frames at all, so stalls then aren't
+// failures, and the player restarts the moment the displays wake (#61).
 class VideoEngine : public QObject
 {
     Q_OBJECT
@@ -52,6 +55,9 @@ public:
     QString alert() const { return m_alert; }
     int restartCount() const { return m_restartCount; }
 
+    // Follows DisplaySleepWatcher; public so tests can simulate sleep and wake.
+    void setDisplaysAsleep(bool asleep);
+
 signals:
     void sourceChanged();
     void statusChanged();
@@ -74,6 +80,8 @@ private:
     std::unique_ptr<QVideoSink> m_hub;
     QMediaPlayer *m_player = nullptr;   // a child, so tests can find it
     visualis::FrameWatchdog m_watchdog;
+    DisplaySleepWatcher m_sleepWatcher;
+    bool m_displaysAsleep = false;
     QUrl m_source;
     QString m_status;
     QString m_alert;

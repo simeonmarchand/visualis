@@ -25,6 +25,46 @@ bool DisplaySleepBlocker::setActive(bool active)
     return true;
 }
 
+DisplaySleepWatcher::DisplaySleepWatcher(QObject *parent)
+    : QObject(parent)
+{
+    // Asleep already if every online display is (the app started on a sleeping Mac).
+    constexpr uint32_t maxDisplays = 32;
+    CGDirectDisplayID ids[maxDisplays];
+    uint32_t count = 0;
+    if (CGGetOnlineDisplayList(maxDisplays, ids, &count) == kCGErrorSuccess && count > 0) {
+        m_asleep = true;
+        for (uint32_t i = 0; i < count; ++i)
+            m_asleep = m_asleep && CGDisplayIsAsleep(ids[i]);
+    }
+
+    NSNotificationCenter *center = NSWorkspace.sharedWorkspace.notificationCenter;
+    const auto observe = [&](NSNotificationName name, bool asleep) {
+        id observer = [center addObserverForName:name object:nil queue:NSOperationQueue.mainQueue
+                                      usingBlock:^(NSNotification *) { setAsleep(asleep); }];
+        m_observers.append([observer retain]);
+    };
+    observe(NSWorkspaceScreensDidSleepNotification, true);
+    observe(NSWorkspaceScreensDidWakeNotification, false);
+}
+
+DisplaySleepWatcher::~DisplaySleepWatcher()
+{
+    NSNotificationCenter *center = NSWorkspace.sharedWorkspace.notificationCenter;
+    for (void *observer : m_observers) {
+        [center removeObserver:static_cast<id>(observer)];
+        [static_cast<id>(observer) release];
+    }
+}
+
+void DisplaySleepWatcher::setAsleep(bool asleep)
+{
+    if (asleep == m_asleep)
+        return;
+    m_asleep = asleep;
+    emit displaysAsleepChanged(asleep);
+}
+
 QString displayKey(const QScreen *screen)
 {
     // QScreen geometry and CGDisplayBounds are both in global points with the origin at the
