@@ -24,6 +24,8 @@ struct ReimportChange {
         ChangedButDeleted,   // the operator deleted it, and Planning Center changed it since: not
                              // added back unless they ask (ReimportOptions::addBack)
         Unreadable,     // Planning Center's record couldn't be read: the item is left as it was
+        Linked,         // a song placeholder the library is sure of, linked by applying (made by
+                        // PlanImporter from ReimportResult::linkable, not by the merge)
     };
     Kind kind;
     QUuid itemId;       // the item in the merged service; null for a deleted item or the whole plan
@@ -48,6 +50,10 @@ struct ReimportResult {
     Service service;                  // the merged service, not yet saved
     QList<ReimportChange> changes;    // in the merged service's order
     QStringList movedByOperator;      // Planning Center item ids kept where the operator put them
+    // Items whose song placeholder came from Planning Center in this merge, so linking them
+    // to the library undoes nothing of the operator's: new items, Relink, and items they left
+    // as Planning Center had them. Nothing else may be linked automatically.
+    QSet<QUuid> linkable;
     // Whether saving changes anything, shown or not: a refreshed snapshot, a forgotten
     // deleted item. lastImportedAt alone doesn't count.
     bool needsSave = false;
@@ -77,7 +83,12 @@ struct ReimportResult {
 //
 // Order: items the operator didn't move follow Planning Center's new order; an item the
 // operator moved or added, that Planning Center removed, or that can't be compared, stays
-// right after the item that was before it in the operator's list.
+// right after the item that was before it in the operator's list. So does an item whose
+// place last time is unclear (an old snapshot with no `order`, tied with another). When a
+// reorder could be either side's (a b became b a), the operator's is assumed, so it stands.
+//
+// The result depends only on the inputs (new items get ids made from the service's and
+// Planning Center's), so a proposal can be computed again and compared.
 //
 // When the operator has several items with one Planning Center id (a copy), the one with
 // the lowest item id is the Planning Center item. That's arbitrary, but it doesn't change

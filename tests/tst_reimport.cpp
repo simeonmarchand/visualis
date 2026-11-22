@@ -4,6 +4,9 @@
 #include "library/library.h"
 
 #include <QJsonArray>
+#include <bit>
+#include <climits>
+#include <optional>
 #include <QRandomGenerator>
 #include <QSet>
 #include <QTemporaryDir>
@@ -109,6 +112,8 @@ struct Run {
     Service mine;             // after the operator's edits
     bool pcoReordered = false;
     int reorders = 0;         // the operator's moves of Planning Center items, and copies made
+    QSet<QUuid> movedItems;   // which items the operator moved
+    bool legacy = false;      // imported before snapshots had `order`
     QStringList log;          // what was done, for the failure message
 };
 
@@ -147,6 +152,13 @@ Run generate(quint32 seed)
     run.original.id = QUuid::createUuid();
     for (ServiceItem &it : run.original.items)
         it.id = QUuid::createUuid();
+    if (rng.bounded(4) == 0) {
+        // Imported by a version before `order`: tied numbers can't be told apart.
+        run.legacy = true;
+        for (ServiceItem &it : run.original.items)
+            it.importSnapshot.remove("order");
+        run.log << "old snapshots";
+    }
     run.mine = run.original;
 
     // The operator's edits.
@@ -229,8 +241,10 @@ Run generate(quint32 seed)
         default: {
             const qsizetype to = pick(items.size());
             run.log << QStringLiteral("move %1 to %2").arg(it.title).arg(to);
-            if (at != to && !it.pcoItemId.isEmpty())
+            if (at != to && !it.pcoItemId.isEmpty()) {
                 ++run.reorders;
+                run.movedItems << it.id;
+            }
             items.move(at, to);
             break;
         }
@@ -381,6 +395,17 @@ QString check(Run run, ServiceStore &store)
         return isOwner(it) && inAnswer.contains(it.pcoItemId) && !o.unreadable.contains(it.pcoItemId)
                && !it.importSnapshot.isEmpty();
     };
+    // Where an item was last time; items sharing one can't be ordered, so keep the operator's place.
+    const auto place = [](const ServiceItem &it) {
+        return std::pair{it.importSnapshot.value("position").toInt(), it.importSnapshot.value("order").toInt(INT_MAX)};
+    };
+    QHash<std::pair<int, int>, int> atPlace;
+    for (const ServiceItem &it : run.mine.items) {
+        if (comparable(it))
+            ++atPlace[place(it)];
+    }
+    const auto ordered = [&](const ServiceItem &it) { return comparable(it) && atPlace.value(place(it)) == 1; };
+    QSet<QUuid> expectLinkable;
     const auto changesOf = [&](const QUuid &id) {
         QList<ReimportChange> c;
         for (const ReimportChange &x : r.changes) {
@@ -459,6 +484,8 @@ QString check(Run run, ServiceStore &store)
         const bool chosen = !sameLink(mine, orig);
         const bool relink = chosen && mine.kind == Kind::Song && !mine.ref.isNull() && swapped;
         CHECK(sameLink(m, relink || !chosen ? now : mine), "what " + mine.title + " shows");
+        if (relink || !chosen)
+            expectLinkable << mine.id;   // Planning Center's placeholder: linking it undoes nothing
         CHECK(has(mine.id, CK::Relink) == relink, "Relink line for " + mine.title);
         CHECK(has(mine.id, CK::Changed, "kind") == (!chosen && !sameLink(orig, now)), "Changed kind line for " + mine.title);
         CHECK(has(mine.id, CK::KeptEdit, "kind") == (chosen && !relink && (swapped || !sameLink(orig, now)) && !sameLink(mine, now)),
@@ -521,6 +548,7 @@ QString check(Run run, ServiceStore &store)
         CHECK(m, "missing from the plan: " + f.title);
         if (!owner.contains(f.pcoItemId)) {
             ++added;
+            expectLinkable << m->id;
             CHECK(has(m->id, CK::Added), "no Added line for " + f.title);
             CHECK(sameLink(*m, f) && m->title == f.title, "added wrong: " + f.title);
         }
@@ -533,11 +561,78 @@ QString check(Run run, ServiceStore &store)
           }) == o.unreadableWithoutId,
           "the line saying part of the plan couldn't be read");
 
-    // Order. What keeps the operator's place stays right after the item before it in their list.
+    CHECK(r.linkable == expectLinkable, "which items may be linked to the library");
+
+    // Order. Who moved what, worked out here from the orders alone (review of #103, M7):
+    // every smallest set of items whose removal leaves the operator's order agreeing with
+    // last time's is an explanation of their moves.
+    QStringList localOrder;
+    for (const ServiceItem &it : run.mine.items) {
+        if (ordered(it))
+            localOrder << it.pcoItemId;
+    }
+    QHash<QString, std::pair<int, int>> baseRank;
+    for (const ServiceItem &it : run.mine.items) {
+        if (ordered(it))
+            baseRank[it.pcoItemId] = place(it);
+    }
+    const auto explanations = [&](const QStringList &order, const auto &rank) {
+        QList<QSet<QString>> best;
+        const int n = int(order.size());
+        for (int size = 0; size <= n && best.isEmpty(); ++size) {
+            for (quint32 mask = 0; mask < (1u << n); ++mask) {
+                if (std::popcount(mask) != size)
+                    continue;
+                bool agrees = true;
+                std::optional<std::pair<int, int>> last;
+                for (int i = 0; i < n && agrees; ++i) {
+                    if (mask & (1u << i))
+                        continue;
+                    agrees = !last || *last < rank(order[i]);
+                    last = rank(order[i]);
+                }
+                if (agrees) {
+                    QSet<QString> moved;
+                    for (int i = 0; i < n; ++i) {
+                        if (mask & (1u << i))
+                            moved << order[i];
+                    }
+                    best << moved;
+                }
+            }
+        }
+        return best;
+    };
+    const QList<QSet<QString>> operatorMoves = explanations(localOrder, [&](const QString &id) { return baseRank[id]; });
     const QSet<QString> moved(r.movedByOperator.cbegin(), r.movedByOperator.cend());
-    CHECK(r.movedByOperator.size() <= run.reorders, "more items taken as moved than the operator moved");
+    CHECK(operatorMoves.contains(moved), "what's taken as moved by the operator doesn't explain their order");
+    QSet<QString> generatorMoved;
+    for (const ServiceItem &it : run.mine.items) {
+        if (ordered(it) && run.movedItems.contains(it.id))
+            generatorMoved << it.pcoItemId;
+    }
+    if (operatorMoves.size() == 1)   // then it's the operator's actual moves whenever those are the smallest
+        CHECK(moved == operatorMoves[0] && (!operatorMoves.contains(generatorMoved) || moved == generatorMoved),
+              "the operator's moves, when only one explanation fits");
+    // When it's ambiguous, the explanation that leaves the operator's order standing against
+    // Planning Center's moves is taken, if Planning Center's are clear.
+    QStringList pcoNow;
+    QHash<QString, int> freshRank;
+    for (qsizetype i = 0; i < fresh.items.size(); ++i)
+        freshRank.insert(fresh.items[i].pcoItemId, int(i));
+    for (const QString &id : localOrder)
+        pcoNow << id;
+    std::sort(pcoNow.begin(), pcoNow.end(), [&](const QString &a, const QString &b) { return freshRank[a] < freshRank[b]; });
+    const QList<QSet<QString>> pcoMoves = explanations(pcoNow, [&](const QString &id) { return baseRank[id]; });
+    if (pcoMoves.size() == 1 && operatorMoves.size() > 1) {
+        qsizetype most = 0;
+        for (const QSet<QString> &e : operatorMoves)
+            most = std::max(most, QSet<QString>(e).intersect(pcoMoves[0]).size());
+        CHECK(QSet<QString>(moved).intersect(pcoMoves[0]).size() == most, "an ambiguous move went Planning Center's way");
+    }
+    // What keeps the operator's place stays right after the item before it in their list.
     for (const ServiceItem &mine : run.mine.items) {
-        if (!comparable(mine) || moved.contains(mine.pcoItemId))
+        if (!ordered(mine) || moved.contains(mine.pcoItemId))
             CHECK(before(out, mine.id) == before(run.mine.items, mine.id), "not kept after its neighbour: " + mine.title);
         CHECK(!has(mine.id, CK::KeptPosition) || moved.contains(mine.pcoItemId), "KeptPosition on an item not kept in place");
         CHECK(!has(mine.id, CK::Moved) || !moved.contains(mine.pcoItemId), "Moved on an item kept in place");
@@ -564,7 +659,7 @@ QString check(Run run, ServiceStore &store)
                 if (isOwner(it) && it.pcoItemId == f.pcoItemId)
                     mine = &it;
             }
-            if (mine && comparable(*mine))
+            if (mine && ordered(*mine))
                 pcoOrder << f.pcoItemId;
         }
         for (const ServiceItem &it : out) {
@@ -891,6 +986,39 @@ private slots:
         const ReimportResult twice = mergeReimport(once.service, fresh);
         QCOMPARE(titles(twice.service), (QStringList{"B", "A", "C"}));
         QVERIFY(twice.upToDate());
+    }
+
+    // Second review of #103 (H1): old snapshots have no `order`, so tied numbers don't say
+    // which came first; the operator's order of them stands.
+    void oldTiedSnapshotsKeepTheOperatorsOrder()
+    {
+        QList<PcoItem> plan = numbered({plain("1", "A"), plain("2", "B"), plain("3", "C")});
+        plan[1].position = plan[0].position;
+        PcoPlanItems items;
+        items.items = plan;
+        PcoPlan p;
+        p.id = "70001";
+        Service mine = serviceFromPlan({"900", "Sunday"}, p, items, QDateTime::currentDateTimeUtc()).service;
+        for (ServiceItem &it : mine.items) {
+            it.id = QUuid::createUuid();
+            it.importSnapshot.remove("order");   // imported before `order`
+        }
+        mine.items.move(1, 0);   // B before A
+        const Service fresh = serviceFromPlan({"900", "Sunday"}, p, items, QDateTime::currentDateTimeUtc()).service;
+        QCOMPARE(titles(mergeReimport(mine, fresh).service), (QStringList{"B", "A", "C"}));
+    }
+
+    // So a proposal can be worked out again and compared before it's applied.
+    void theSameInputsGiveTheSameResult()
+    {
+        Service mine = local({plain("1", "Welcome")});
+        const Service fresh = import({plain("1", "Welcome!"), song("2", "Amazing Grace")});
+        const ReimportResult a = mergeReimport(mine, fresh);
+        const ReimportResult b = mergeReimport(mine, fresh);
+        QCOMPARE(a.service, b.service);
+        QCOMPARE(a.changes, b.changes);
+        QCOMPARE(a.linkable, b.linkable);
+        QVERIFY(a.linkable.contains(byPco(a.service, "2")->id));
     }
 
     void aSummaryCountsEachKind()
