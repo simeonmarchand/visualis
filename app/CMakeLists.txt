@@ -20,6 +20,7 @@ qt_add_qml_module(visualis_ui
         qml/ServicePane.qml
         qml/NameDialog.qml
         qml/PasteSongDialog.qml
+        qml/ImportReportDialog.qml
         qml/SlideGrid.qml
         qml/SlideTile.qml
         qml/SongEditorWindow.qml

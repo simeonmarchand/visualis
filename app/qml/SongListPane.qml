@@ -10,7 +10,7 @@ ColumnLayout {
     id: pane
     spacing: 8
 
-    readonly property bool dialogOpen: pasteDialog.visible
+    readonly property bool dialogOpen: pasteDialog.visible || reportDialog.visible
 
     TextField {
         objectName: "songSearch"
@@ -72,13 +72,31 @@ ColumnLayout {
         }
     }
 
+    // A summary only: an import can report hundreds of lines, and the pane is narrow. The
+    // full report is behind Details.
     Label {
         objectName: "libraryReport"
         Layout.fillWidth: true
         visible: text !== ""
-        text: SongLibrary.importing ? SongLibrary.importProgress : SongLibrary.report
+        text: SongLibrary.importing ? SongLibrary.importProgress : SongLibrary.reportSummary
         wrapMode: Text.WordWrap
+        maximumLineCount: 10   // long lines wrap; this keeps even those bounded
+        elide: Text.ElideRight
         color: "#8b8f96"
+    }
+
+    Button {
+        objectName: "libraryReportDetails"
+        text: "Details…"
+        flat: true
+        focusPolicy: Qt.NoFocus
+        visible: !SongLibrary.importing && SongLibrary.report !== SongLibrary.reportSummary
+        onClicked: reportDialog.open()
+    }
+
+    ImportReportDialog {
+        id: reportDialog
+        objectName: "libraryReportDialog"
     }
 
     Menu {

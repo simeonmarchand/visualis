@@ -41,6 +41,8 @@ class SongLibrary : public QObject
     Q_PROPERTY(QVariantList selectedSlides READ selectedSlides NOTIFY selectionChanged)
     // What the last import or paste did, for the operator.
     Q_PROPERTY(QString report READ report NOTIFY reportChanged)
+    // The report cut to a few lines for the library pane; the full one is behind Details.
+    Q_PROPERTY(QString reportSummary READ reportSummary NOTIFY reportChanged)
     // An import is running or stopping (#69); "Importing 120 of 800 files…" says how far
     // it's got.
     Q_PROPERTY(bool importing READ importing NOTIFY importingChanged)
@@ -90,6 +92,7 @@ public:
     QString selectedTitle() const;
     QVariantList selectedSlides() const;
     QString report() const { return m_report; }
+    QString reportSummary() const { return summarizeReport(m_report, kReportSummaryLines); }
     bool importing() const { return m_import != nullptr; }
     QString importProgress() const;
 
@@ -119,6 +122,9 @@ public:
         int filesTotal = 0;
     };
     static QString importReport(const ImportSummary &summary);
+    // The first `maxLines - 1` lines and an "…and N more" line, or the report if it fits.
+    static QString summarizeReport(const QString &report, int maxLines);
+    static constexpr int kReportSummaryLines = 6;
 
 private:
     using ImportJob = std::function<ImportSummary(visualis::SongStore &, const visualis::ImportProgress &)>;
