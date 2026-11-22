@@ -3,6 +3,7 @@
 #include "service/service.h"
 
 #include <QList>
+#include <functional>
 #include <optional>
 
 namespace visualis {
@@ -37,10 +38,14 @@ public:
     // one from that plan (then `existing` names it). The check and the save are one
     // transaction. It never waits for the write lock: if another program holds it, it fails
     // at once with `busy` set, so the caller can try again later without blocking (#76).
-    Result saveNewPlan(Service &service);
+    // Writes the caller makes in the same transaction, after the service's: an error from it
+    // rolls back the lot. Planning Center links on library songs, so they're saved with the
+    // service that made them or not at all (#103 review, M6).
+    using AlsoWrite = std::function<QString()>;
+    Result saveNewPlan(Service &service, const AlsoWrite &also = {});
     // save(), but like saveNewPlan it never waits for the write lock: `busy` says to try
     // again later (a re-import's Apply, #56).
-    Result saveWithoutWaiting(Service &service);
+    Result saveWithoutWaiting(Service &service, const AlsoWrite &also = {});
     // A song item whose song is no longer in the library comes back as a placeholder with
     // its title, so a service never points at nothing.
     std::optional<Service> load(const QUuid &id) const;
@@ -52,7 +57,7 @@ public:
 
 private:
     enum class Mode { Wait, NoWait, NewPlan };
-    Result save(Service &service, Mode mode);
+    Result save(Service &service, Mode mode, const AlsoWrite &also);
 
     Library &m_library;
 };

@@ -57,20 +57,20 @@ ServiceStore::ServiceStore(Library &library)
 
 ServiceStore::Result ServiceStore::save(Service &service)
 {
-    return save(service, Mode::Wait);
+    return save(service, Mode::Wait, {});
 }
 
-ServiceStore::Result ServiceStore::saveNewPlan(Service &service)
+ServiceStore::Result ServiceStore::saveNewPlan(Service &service, const AlsoWrite &also)
 {
-    return save(service, Mode::NewPlan);
+    return save(service, Mode::NewPlan, also);
 }
 
-ServiceStore::Result ServiceStore::saveWithoutWaiting(Service &service)
+ServiceStore::Result ServiceStore::saveWithoutWaiting(Service &service, const AlsoWrite &also)
 {
-    return save(service, Mode::NoWait);
+    return save(service, Mode::NoWait, also);
 }
 
-ServiceStore::Result ServiceStore::save(Service &service, Mode mode)
+ServiceStore::Result ServiceStore::save(Service &service, Mode mode, const AlsoWrite &also)
 {
     Service s = service;   // a failed save leaves the caller's service as it was
     if (s.title.trimmed().isEmpty())
@@ -190,6 +190,11 @@ ServiceStore::Result ServiceStore::save(Service &service, Mode mode)
         if (!(err = run(db, "INSERT OR REPLACE INTO service_removed_pco_item (service_id, pco_item_id, import_snapshot) "
                             "VALUES (?, ?, ?)", {serviceId, r.pcoItemId, json(r.importSnapshot)})).isEmpty())
             return fail(err);
+    }
+
+    if (also) {
+        if (const QString alsoError = also(); !alsoError.isEmpty())
+            return fail(alsoError);
     }
 
     if (!db.commit())

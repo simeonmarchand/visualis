@@ -227,7 +227,9 @@ void PlanImporter::trySave(PlanImport r, SongLinkReport links, QList<Song> linke
     }
     // The duplicate-plan check is part of the save's transaction: the same plan may have
     // been imported while this one was reading.
-    const ServiceStore::Result saved = ServiceStore(*m_songs->library()).saveNewPlan(r.service);
+    QStringList unlinkedSongs;
+    const ServiceStore::Result saved =
+        ServiceStore(*m_songs->library()).saveNewPlan(r.service, linkWrites(linked, &unlinkedSongs));
     if (saved.busy) {
         // Another program has the library locked. Try again shortly rather than wait here,
         // which would hold up the operator window and the outputs; never past the deadline.
@@ -250,7 +252,8 @@ void PlanImporter::trySave(PlanImport r, SongLinkReport links, QList<Song> linke
         setStatus(saved.error);
         return;
     }
-    const QString unlinked = saveLinkedSongs(linked);
+    const QString unlinked = unlinkedSongs.isEmpty() ? QString()
+        : tr("Couldn't remember the Planning Center link for %1.").arg(unlinkedSongs.join(QStringLiteral(", ")));
     const qsizetype n = r.service.items.size();
     QString status = n == 1 ? tr("Imported \"%1\": 1 item.").arg(r.service.title)
                             : tr("Imported \"%1\": %2 items.").arg(r.service.title, QString::number(n));
@@ -427,7 +430,8 @@ void PlanImporter::tryApply(const QSet<QString> &addBack, QDeadlineTimer deadlin
     SongStore songs(*m_songs->library());
     QList<Song> linked;
     const SongLinkReport links = linkSongs(r.service, songs, &linked);
-    const ServiceStore::Result saved = store.saveWithoutWaiting(r.service);
+    QStringList unlinkedSongs;
+    const ServiceStore::Result saved = store.saveWithoutWaiting(r.service, linkWrites(linked, &unlinkedSongs));
     if (saved.busy) {
         const qint64 left = deadline.remainingTime();
         if (left <= 0)
@@ -450,26 +454,28 @@ void PlanImporter::tryApply(const QSet<QString> &addBack, QDeadlineTimer deadlin
         status += QLatin1Char(' ') + s;
     for (const QString &missing : links.unmatched)
         status += QLatin1Char(' ') + tr("No group for %1.").arg(missing);
-    if (const QString unlinked = saveLinkedSongs(linked); !unlinked.isEmpty())
-        status += QLatin1Char(' ') + unlinked;
+    if (!unlinkedSongs.isEmpty())
+        status += QLatin1Char(' ')
+                  + tr("Couldn't remember the Planning Center link for %1.").arg(unlinkedSongs.join(QStringLiteral(", ")));
     stop(status);
     emit reimported(r.service.id.toString(QUuid::WithoutBraces));
 }
 
-QString PlanImporter::saveLinkedSongs(const QList<Song> &linked)
+std::function<QString()> PlanImporter::linkWrites(const QList<Song> &linked, QStringList *failed)
 {
     if (linked.isEmpty() || !m_songs || !m_songs->library())
         return {};
-    // Not in the service's transaction yet (needs SongStore::updatePcoLink, #107): a song that
-    // isn't saved just matches by title again next time.
-    SongStore songs(*m_songs->library());
-    QStringList failed;
-    for (Song song : linked) {
-        if (!songs.save(song).ok)
-            failed << song.title;
-    }
-    return failed.isEmpty() ? QString()
-                            : tr("Couldn't remember the Planning Center link for %1.").arg(failed.join(QStringLiteral(", ")));
+    Library *library = m_songs->library();
+    return [library, linked, failed] {
+        SongStore songs(*library);
+        for (const Song &song : linked) {
+            // A song deleted meanwhile is skipped, not a reason to lose the service: the link
+            // only saves matching it again next time.
+            if (!songs.updatePcoLink(song).ok && failed)
+                *failed << song.title;
+        }
+        return QString();
+    };
 }
 
 void PlanImporter::cancelReimport()

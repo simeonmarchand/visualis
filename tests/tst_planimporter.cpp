@@ -4,6 +4,7 @@
 #include "pco/pcoclient.h"
 #include "pco/planimporter.h"
 #include "service/servicestore.h"
+#include "song/songstore.h"
 
 #include <QFile>
 #include <QJsonArray>
@@ -813,6 +814,26 @@ private slots:
         QVERIFY(importer.applyReimport());
         QVERIFY(idle(importer));
         QVERIFY(store.load(QUuid::fromString(id))->removedPcoItems.isEmpty());
+    }
+
+    // Review of #103 (M6): the songs' Planning Center links are saved, with the service.
+    void importingRemembersEachSongsPlanningCenterLink()
+    {
+        SongLibrary songs;
+        QVERIFY(songs.openLibrary(m_dir.filePath(QString::number(++m_n))));
+        QVERIFY(songs.createFromPaste("Example Song One", "[Verse 1]\nSynthetic words"));
+        const QUuid one = QUuid::fromString(songs.selectedId());
+        FakePlanningCenter server;
+        serve(server);
+        PlanImporter importer;
+        importer.setSongLibrary(&songs);
+        importer.setClient(client(server.url()));
+        QSignalSpy imported(&importer, &PlanImporter::imported);
+        importer.importPlan("1001", "5001");
+        QVERIFY(idle(importer));
+        QCOMPARE(imported.size(), 1);
+        QCOMPARE(SongStore(*songs.library()).load(one)->pcoSongId, QStringLiteral("7001"));
+        QVERIFY(importer.status().contains("1 by title"));
     }
 
     void aCancelledReimportChangesNothing()

@@ -13,6 +13,7 @@
 #include <QVariantList>
 #include <QtQml/qqmlregistration.h>
 
+#include <functional>
 #include <memory>
 #include <optional>
 
@@ -118,9 +119,9 @@ private:
 
     void offerReimport(const QUuid &serviceId, const visualis::PlanImport &fresh, int library);
     void tryApply(const QSet<QString> &addBack, QDeadlineTimer deadline, int request);
-    // After the service is saved: the library songs linkSongs() updated. Returns what to tell
-    // the operator if any couldn't be saved.
-    QString saveLinkedSongs(const QList<visualis::Song> &linked);
+    // The library songs linkSongs() updated, to write in the service's transaction. Titles of
+    // any that couldn't be written (deleted meanwhile) go to `failed`.
+    std::function<QString()> linkWrites(const QList<visualis::Song> &linked, QStringList *failed);
 
     QPointer<PlanningCenter> m_pco;
     QPointer<SongLibrary> m_songs;

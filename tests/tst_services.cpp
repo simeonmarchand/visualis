@@ -298,6 +298,43 @@ private slots:
         QCOMPARE(m_services->load(s.id)->items[0].title, QStringLiteral("Praise"));
     }
 
+    // Review of #103 (M6): a song's Planning Center link is saved with the service, or not at all.
+    void writesInTheSameTransactionLandOrRollBackWithTheService()
+    {
+        Song song = *m_songs->load(m_songId);
+        song.pcoSongId = "p-77";
+        Service s;
+        s.title = "Imported";
+        s.pcoPlanId = "70077";
+        s.items = {item(Kind::Song, "Amazing Grace")};
+        s.items[0].ref = m_songId;
+        const ServiceStore::AlsoWrite link = [&] {
+            const SongStore::Result r = m_songs->updatePcoLink(song);
+            return r.ok ? QString() : r.error;
+        };
+
+        const ServiceStore::AlsoWrite failing = [&] { return link().isEmpty() ? QStringLiteral("refused") : QString(); };
+        Service first = s;
+        QVERIFY(!m_services->saveNewPlan(first, failing).ok);
+        QVERIFY(m_songs->load(m_songId)->pcoSongId.isEmpty());   // rolled back with it
+        QVERIFY(m_services->list().isEmpty());
+
+        QVERIFY(m_services->saveNewPlan(s, link).ok);
+        QCOMPARE(m_songs->load(m_songId)->pcoSongId, QStringLiteral("p-77"));
+        QCOMPARE(m_services->load(s.id)->items.size(), 1);
+
+        // Busy: neither is written.
+        auto other = Library::open(m_library->folder()).library;
+        QSqlQuery lock(other->database());
+        QVERIFY(lock.exec("BEGIN IMMEDIATE"));
+        song.pcoSongId = "p-78";
+        s.title = "Imported again";
+        QVERIFY(m_services->saveWithoutWaiting(s, link).busy);
+        QVERIFY(QSqlQuery(other->database()).exec("ROLLBACK"));
+        QCOMPARE(m_songs->load(m_songId)->pcoSongId, QStringLiteral("p-77"));
+        QCOMPARE(m_services->load(s.id)->title, QStringLiteral("Imported"));
+    }
+
     void aVersion3LibraryGainsThePlanLink()
     {
         const QString folder = m_dir.filePath("v3");
