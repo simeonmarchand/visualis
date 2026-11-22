@@ -516,6 +516,42 @@ private slots:
         QCOMPARE(live.itemIndex(), 4);
     }
 
+    // #55: an imported sequence plays with forgiving labels and blank lyric-less steps, and
+    // the journal (which keeps the live song) rebuilds exactly the same slides.
+    void anImportedSequencePlaysForgivingly()
+    {
+        Song song;
+        song.id = QUuid::createUuid();
+        song.title = "Example";
+        song.groups = {Group{QUuid::createUuid(), "Verse 1", "#0078cc", {"v1"}},
+                       Group{QUuid::createUuid(), "PreChorus", "", {"pc"}},
+                       Group{QUuid::createUuid(), "Chorus 1", "", {"c1", "c2"}}};
+        ServiceItem item = songItem(song);
+        item.customSequence = {"Intro", "Verse 1", "Pre Chorus 1", "Chorus", "Turnaround", "Bridge 2", "Chorus", "Ending"};
+        const LiveItem live = liveItem(item, song);
+        QStringList texts;
+        QStringList labels;
+        for (const SongSlide &s : live.slides) {
+            texts << s.text;
+            labels << s.groupLabel;
+        }
+        QCOMPARE(texts, (QStringList{"", "v1", "pc", "c1", "c2", "", "c1", "c2", ""}));
+        QCOMPARE(labels, (QStringList{"Intro", "Verse 1", "PreChorus", "Chorus 1", "Chorus 1", "Turnaround", "Chorus 1",
+                                      "Chorus 1", "Ending"}));
+        QCOMPARE(songSlides(live.song, live.arrangement), live.slides);   // what recovery does
+        QCOMPARE(liveItem(item, song), live);                              // same ids every load
+        QCOMPARE(live.song.groups.size(), 6);                              // three blanks added to the live copy
+        QCOMPARE(song.groups.size(), 3);                                   // never to the library's song
+
+        // A repeated lyric-less label reuses its one blank group.
+        item.customSequence = {"Intro", "Verse 1", "Intro"};
+        QCOMPARE(liveItem(item, song).song.groups.size(), 4);
+
+        // Only lyric-less labels: nothing names the song's own groups, so its arrangement stands.
+        item.customSequence = {"Intro", "Ending"};
+        QCOMPARE(liveItem(item, song).song.groups.size(), 3);
+    }
+
     void liveItemsForEachKind()
     {
         Song song = arranged();
@@ -528,13 +564,15 @@ private slots:
         item.arrangement = song.arrangements[1].id;
         QCOMPARE(liveItem(item, song).slides.size(), 1);
 
-        // Planning Center's order for the day, by label; a label naming no group is left out.
-        item.customSequence = {"chorus", "Verse 2", "Outro", "Chorus"};
+        // Planning Center's order for the day, by label. A lyric-less label with no group
+        // ("Outro") is a blank slide (#55); another label naming no group is left out.
+        item.customSequence = {"chorus", "Verse 2", "Outro", "Vamp", "Chorus"};
         const LiveItem custom = liveItem(item, song);
         QStringList labels;
         for (const SongSlide &s : custom.slides)
             labels << s.groupLabel;
-        QCOMPARE(labels, (QStringList{"Chorus", "Verse 2", "Chorus"}));
+        QCOMPARE(labels, (QStringList{"Chorus", "Verse 2", "Outro", "Chorus"}));
+        QVERIFY(custom.slides[2].isBlank());
         QCOMPARE(custom.arrangement, item.id);
         QCOMPARE(songSlides(custom.song, custom.arrangement), custom.slides);   // the journal can rebuild it
 

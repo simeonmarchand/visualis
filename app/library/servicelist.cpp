@@ -3,8 +3,11 @@
 #include "library/library.h"
 #include "library/songlibrary.h"
 #include "live/livestate.h"
+#include "pco/songlink.h"
 #include "service/servicejson.h"
 #include "service/servicestore.h"
+#include "song/songmatch.h"
+#include "song/songstore.h"
 
 #include <QDir>
 #include <QFile>
@@ -180,6 +183,67 @@ bool ServiceList::addText(const QString &title, const QString &body)
     return insert(item);
 }
 
+bool ServiceList::linkSong(int index, const QString &songId)
+{
+    if (!m_open || !m_songs || index < 0 || index >= m_open->items.size())
+        return false;
+    // A copy: saving replaces the service's item list, so no reference into it survives save().
+    const ServiceItem before = m_open->items[index];
+    if (before.kind != ServiceItem::Kind::Placeholder && before.kind != ServiceItem::Kind::Song)
+        return false;
+    std::optional<Song> song = m_songs->loadSong(QUuid::fromString(songId));
+    if (!song)
+        return false;
+    if (const std::optional<PcoSong> pco = snapshotSong(before.importSnapshot)) {
+        // The Planning Center id moves to the chosen song, so a wrong link (by title, last
+        // week) doesn't stick, and next week matches this one at once.
+        QString error;
+        for (const SongCandidate &c : SongStore(*m_songs->library()).matchCandidates()) {
+            if (c.id == song->id || c.pcoSongId != pco->id)
+                continue;
+            if (std::optional<Song> holder = m_songs->loadSong(c.id); holder && releasePcoSong(*holder, pco->id))
+                m_songs->saveSong(*holder, &error);
+        }
+        if (takePcoSong(*song, *pco))
+            m_songs->saveSong(*song, &error);
+        if (!error.isEmpty())
+            setReport(error);   // still linked for this service; it just won't match by id next week
+    }
+    ServiceItem linked = linkedItem(before, *song);
+    linked.title = song->title;
+    const QStringList missing = unmatchedLabels(linked, *song);
+    m_open->items[index] = linked;
+    if (!save()) {
+        m_open->items[index] = before;
+        return false;
+    }
+    if (!missing.isEmpty())
+        setReport(tr("No group for %1 in \"%2\".").arg(missing.join(QStringLiteral(", ")), song->title));
+    refresh();
+    select(index);
+    return true;
+}
+
+bool ServiceList::leaveBlank(int index)
+{
+    if (!m_open || index < 0 || index >= m_open->items.size())
+        return false;
+    const ServiceItem before = m_open->items[index];
+    ServiceItem blank = before;
+    blank.kind = ServiceItem::Kind::Text;   // an empty text item is one blank slide
+    blank.ref = QUuid();
+    blank.arrangement = QUuid();
+    blank.body.clear();
+    m_open->items[index] = blank;
+    if (!save()) {
+        m_open->items[index] = before;
+        return false;
+    }
+    refresh();
+    select(index);
+    return true;
+}
+
 bool ServiceList::insert(ServiceItem item)
 {
     if (!m_open)
@@ -262,10 +326,31 @@ bool ServiceList::save()
 void ServiceList::refresh()
 {
     m_liveItems.clear();
+    m_suggestions.clear();
     if (m_open) {
+        QList<SongCandidate> candidates;
+        bool haveCandidates = false;
         for (const ServiceItem &item : std::as_const(m_open->items)) {
             const bool isSong = item.kind == ServiceItem::Kind::Song;
             m_liveItems << liveItem(item, isSong && m_songs ? m_songs->loadSong(item.ref) : std::nullopt);
+            // What an unlinked imported song may be, for the operator to pick (#55).
+            QVariantList suggestions;
+            const std::optional<PcoSong> pco = snapshotSong(item.importSnapshot);
+            if (item.kind == ServiceItem::Kind::Placeholder && pco && m_songs && m_songs->library()) {
+                if (!haveCandidates) {
+                    candidates = SongStore(*m_songs->library()).matchCandidates();
+                    haveCandidates = true;
+                }
+                const SongMatch m = matchSong(*pco, candidates);
+                QList<QUuid> ids = m.kind == SongMatch::Kind::Linked ? QList<QUuid>{m.songId} : m.candidates;
+                for (const QUuid &id : ids) {
+                    for (const SongCandidate &c : std::as_const(candidates)) {
+                        if (c.id == id)
+                            suggestions << QVariantMap{{"id", braceless(c.id)}, {"title", c.title}};
+                    }
+                }
+            }
+            m_suggestions << suggestions;
         }
     }
     if (m_live)
@@ -344,8 +429,10 @@ QVariantList ServiceList::items() const
         return list;
     for (int i = 0; i < m_open->items.size(); ++i) {
         const ServiceItem &it = m_open->items[i];
+        const bool songPlaceholder = it.kind == ServiceItem::Kind::Placeholder && snapshotSong(it.importSnapshot);
         list.append(QVariantMap{{"id", braceless(it.id)}, {"kind", kindName(it.kind)}, {"title", it.title},
-                                {"hasSlides", !m_liveItems.value(i).slides.isEmpty()}});
+                                {"hasSlides", !m_liveItems.value(i).slides.isEmpty()},
+                                {"songPlaceholder", songPlaceholder}, {"suggestions", m_suggestions.value(i)}});
     }
     return list;
 }

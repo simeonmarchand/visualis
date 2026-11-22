@@ -16,12 +16,20 @@ Dialog {
     height: 600
     standardButtons: Dialog.Ok | Dialog.Cancel
 
+    // The title to start with, e.g. a Planning Center song's (#55).
+    property string initialTitle: ""
+    // The new song, now selected in the library.
+    signal created(string songId)
+
     onOpened: {
-        titleField.text = ""
+        titleField.text = initialTitle
         lyricsArea.text = ""
         titleField.forceActiveFocus()
     }
-    onAccepted: SongLibrary.createFromPaste(titleField.text, lyricsArea.text)
+    onAccepted: {
+        if (SongLibrary.createFromPaste(titleField.text, lyricsArea.text))
+            created(SongLibrary.selectedId)
+    }
 
     ColumnLayout {
         anchors.fill: parent

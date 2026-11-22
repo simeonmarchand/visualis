@@ -1,6 +1,9 @@
 #include "library/servicelist.h"
 #include "library/songlibrary.h"
 #include "library/library.h"
+#include "pco/planimport.h"
+#include "pco/songlink.h"
+#include "service/servicestore.h"
 #include "service/servicejson.h"
 #include "song/songjson.h"
 #include "song/songstore.h"
@@ -575,6 +578,127 @@ private slots:
         m_songs = nullptr;
         QVERIFY2(took.elapsed() < 3500, qPrintable(QString("quitting took %1 ms").arg(took.elapsed())));
         QTest::qWait(50);   // nothing from the stopped worker arrives at a deleted object
+    }
+
+    // #55: an imported service whose songs the library doesn't have yet. Returns its id.
+    QString openImportedService(const QStringList &songTitles, bool autoLink = false)
+    {
+        PcoPlanItems plan;
+        for (int i = 0; i < songTitles.size(); ++i) {
+            PcoItem it;
+            it.id = QString::number(i + 1);
+            it.type = PcoItemType::Song;
+            it.title = songTitles[i];
+            it.position = i + 1;
+            it.song = PcoSong{"p" + it.id, songTitles[i], {}, "Traditional", "Public Domain"};
+            it.arrangement = PcoArrangement{"a" + it.id, "Default", {"Intro", "Verse 1", "Chorus", "Bridge 2"}, 0, {}, 0};
+            plan.items << it;
+        }
+        PcoPlan p;
+        p.id = "70001";
+        Service s = serviceFromPlan({"900", "Sunday"}, p, plan, QDateTime::currentDateTimeUtc()).service;
+        if (autoLink) {
+            SongStore songs(*m_songs->library());
+            linkSongs(s, songs);   // as PlanImporter does
+        }
+        if (!ServiceStore(*m_songs->library()).save(s).ok)
+            qFatal("couldn't save the imported service");
+        const QString id = s.id.toString(QUuid::WithoutBraces);
+        m_services->openAdded(id);
+        return id;
+    }
+
+    QVariantMap item(int index) const { return m_services->items().value(index).toMap(); }
+
+    void anImportedSongIsResolvedByASuggestion()
+    {
+        QVERIFY(m_songs->createFromPaste("Amazing Grace", kLyrics));
+        QVERIFY(m_songs->createFromPaste("Amazing Grace", kLyrics));   // two: never picked for the operator
+        openImportedService({"Amazing Grace"});
+        QCOMPARE(item(0)["kind"].toString(), QStringLiteral("placeholder"));
+        QVERIFY(item(0)["songPlaceholder"].toBool());
+        const QVariantList suggestions = item(0)["suggestions"].toList();
+        QCOMPARE(suggestions.size(), 2);
+
+        const QString chosen = suggestions[1].toMap()["id"].toString();
+        QVERIFY(m_services->linkSong(0, chosen));
+        QCOMPARE(item(0)["kind"].toString(), QStringLiteral("song"));
+        QVERIFY(!item(0)["songPlaceholder"].toBool());
+        QVERIFY(item(0)["hasSlides"].toBool());
+        QCOMPARE(m_songs->loadSong(QUuid::fromString(chosen))->pcoSongId, QStringLiteral("p1"));   // next week: at once
+        QVERIFY(m_services->report().contains("Bridge 2"));   // the gap in the song is pointed out
+        QCOMPARE(m_services->selectedIndex(), 0);
+    }
+
+    // Review of #85: a wrong link by title doesn't stick. Relinking moves the Planning
+    // Center id, so next week links the right song by id instead of asking again.
+    void relinkingMovesThePlanningCenterId()
+    {
+        QVERIFY(m_songs->createFromPaste("Amazing Grace", kLyrics));
+        const QUuid wrong = QUuid::fromString(m_songs->selectedId());
+        QVERIFY(m_songs->createFromPaste("Amazing Grace Hymn", kLyrics));
+        const QUuid right = QUuid::fromString(m_songs->selectedId());
+
+        openImportedService({"Amazing Grace"}, true);   // links to "Amazing Grace" by title
+        QCOMPARE(item(0)["kind"].toString(), QStringLiteral("song"));
+        QCOMPARE(m_songs->loadSong(wrong)->pcoSongId, QStringLiteral("p1"));
+
+        QVERIFY(m_services->linkSong(0, right.toString(QUuid::WithoutBraces)));
+        QVERIFY(m_songs->loadSong(wrong)->pcoSongId.isEmpty());
+        QCOMPARE(m_songs->loadSong(right)->pcoSongId, QStringLiteral("p1"));
+
+        openImportedService({"Amazing Grace"}, true);   // next week's plan
+        QCOMPARE(item(0)["kind"].toString(), QStringLiteral("song"));
+        m_services->select(0);
+        QCOMPARE(m_services->selectedSongId(), right.toString(QUuid::WithoutBraces));   // by id, not "confirm"
+    }
+
+    void anImportedSongIsLinkedToTheLibrarysSelectedSong()
+    {
+        QVERIFY(m_songs->createFromPaste("Grace Hymn", kLyrics));
+        const QString id = m_songs->selectedId();
+        openImportedService({"Something Else Entirely"});
+        QVERIFY(item(0)["suggestions"].toList().isEmpty());
+        QVERIFY(m_services->linkSong(0, id));
+        QCOMPARE(item(0)["title"].toString(), QStringLiteral("Grace Hymn"));
+        // The link survives reopening the service.
+        m_services->openService(m_services->openId());
+        QCOMPARE(item(0)["kind"].toString(), QStringLiteral("song"));
+    }
+
+    void anImportedSongCanBeLeftBlank()
+    {
+        openImportedService({"Not In The Library", "Another"});
+        QVERIFY(m_services->leaveBlank(1));
+        QCOMPARE(item(1)["kind"].toString(), QStringLiteral("text"));
+        QVERIFY(item(1)["hasSlides"].toBool());   // one blank slide to land on
+        QVERIFY(!item(1)["songPlaceholder"].toBool());
+        QCOMPARE(item(0)["kind"].toString(), QStringLiteral("placeholder"));
+        QVERIFY(!m_services->linkSong(0, QUuid::createUuid().toString()));   // no such song
+        QVERIFY(!m_services->linkSong(5, m_songs->selectedId()));
+    }
+
+    void aSongAddedAfterTheImportIsSuggested()
+    {
+        openImportedService({"Amazing Grace"});
+        QVERIFY(item(0)["suggestions"].toList().isEmpty());
+        QVERIFY(m_songs->createFromPaste("Amazing Grace", kLyrics));   // pasted in from the library pane
+        QTRY_COMPARE(item(0)["suggestions"].toList().size(), 1);
+        QVERIFY(m_services->linkSong(0, m_songs->selectedId()));
+    }
+
+    void theResolveButtonShowsForAnUnlinkedSong()
+    {
+        QQuickWindow *window = loadOperatorWindow();
+        openImportedService({"Not In The Library"});
+        m_services->addHeader("Worship");   // after the song, selected
+        auto *resolve = findItem(window->contentItem(), "resolvePlaceholder");
+        QVERIFY(resolve);
+        QVERIFY(!resolve->isVisible());
+        m_services->select(0);
+        QTRY_VERIFY(resolve->isVisible());
+        m_services->leaveBlank(0);
+        QTRY_VERIFY(!resolve->isVisible());
     }
 
     void importReportNamesSkippedFilesByReason()

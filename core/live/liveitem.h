@@ -11,7 +11,9 @@ namespace visualis {
 // A service item as LiveState steps through it. Everything that shows becomes a song, so
 // the outputs, the journal, and recovery handle one shape:
 //  - a song item is its song, with this service's arrangement, or its custom sequence
-//    (Planning Center's order for the day) added as an arrangement of its own;
+//    (Planning Center's order for the day, matched to groups by label) added as an
+//    arrangement of its own, with a blank group for each lyric-less step the song has no
+//    group for (Intro, Ending);
 //  - a text item is a one-slide song titled as the item (an empty body is a blank slide);
 //  - headers, placeholders, and kinds that can't show yet have no slides, and Next and
 //    Previous skip them;

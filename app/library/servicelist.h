@@ -33,7 +33,9 @@ class ServiceList : public QObject
     Q_PROPERTY(QVariantList services READ services NOTIFY servicesChanged)
     Q_PROPERTY(QString openId READ openId NOTIFY serviceChanged)
     Q_PROPERTY(QString openTitle READ openTitle NOTIFY serviceChanged)
-    // {id, kind, title, hasSlides} per item of the open service, in order.
+    // {id, kind, title, hasSlides, songPlaceholder, suggestions} per item of the open
+    // service, in order. `songPlaceholder`: an imported song not linked to the library yet;
+    // `suggestions`: [{id, title}] of library songs it may be (#55).
     Q_PROPERTY(QVariantList items READ items NOTIFY serviceChanged)
     Q_PROPERTY(int selectedIndex READ selectedIndex NOTIFY selectionChanged)
     Q_PROPERTY(QString selectedTitle READ selectedTitle NOTIFY selectionChanged)
@@ -66,6 +68,11 @@ public:
     // A text item; an empty body is a blank slide.
     Q_INVOKABLE bool addText(const QString &title, const QString &body);
     Q_INVOKABLE bool removeItem(int index);
+    // Resolving a placeholder (#55). Linking an imported song remembers its Planning Center
+    // id on the library song, so it matches at once next time.
+    Q_INVOKABLE bool linkSong(int index, const QString &songId);
+    // Keeps the item's place as one blank slide.
+    Q_INVOKABLE bool leaveBlank(int index);
     // Moves the item at `from` to `to` (both indexes before the move); the moved item stays
     // selected if it was.
     Q_INVOKABLE bool moveItem(int from, int to);
@@ -112,6 +119,7 @@ private:
     std::unique_ptr<visualis::ServiceStore> m_store;
     std::optional<visualis::Service> m_open;
     QList<visualis::LiveItem> m_liveItems;   // one per item of m_open
+    QList<QVariantList> m_suggestions;       // one per item of m_open
     int m_selected = -1;
     bool m_inGrid = false;
     QUuid m_lastLiveItem;

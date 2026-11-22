@@ -7,6 +7,7 @@ qt_add_library(visualis_core STATIC
     song/lyricspaste.h song/lyricspaste.cpp
     song/slidelist.h song/slidelist.cpp
     song/songlimits.h song/songlimits.cpp
+    song/songmatch.h song/songmatch.cpp
     song/songjson.h song/songjson.cpp
     song/songtext.h song/songtext.cpp
     import/protobuf.h import/protobuf.cpp
@@ -24,6 +25,7 @@ qt_add_library(visualis_core STATIC
     pco/pcotypes.h
     pco/pcojson.h pco/pcojson.cpp
     pco/planimport.h pco/planimport.cpp
+    pco/songlink.h pco/songlink.cpp
     scripture/reference.h scripture/reference.cpp
     output/displayplacement.h output/displayplacement.cpp
     output/displaysettle.h output/displaysettle.cpp

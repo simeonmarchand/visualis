@@ -11,7 +11,13 @@ ColumnLayout {
     id: pane
     spacing: 8
 
-    readonly property bool dialogOpen: nameDialog.visible || deleteDialog.visible
+    readonly property bool dialogOpen: nameDialog.visible || deleteDialog.visible || pasteDialog.visible
+    // The selected item, if it's an imported song not linked to the library yet (#55).
+    readonly property var selectedPlaceholder: {
+        const items = ServiceList.items
+        const i = ServiceList.selectedIndex
+        return i >= 0 && i < items.length && items[i].songPlaceholder ? items[i] : null
+    }
     readonly property int rowHeight: 34
     property int dragFrom: -1
     property int dropAt: -1
@@ -83,8 +89,10 @@ ColumnLayout {
                 anchors.rightMargin: 8
                 verticalAlignment: Text.AlignVCenter
                 elide: Text.ElideRight
-                text: row.modelData.kind === "placeholder" ? row.modelData.title + " (song not in library)"
-                                                           : row.modelData.title
+                text: !row.modelData.songPlaceholder ? row.modelData.title
+                      : row.modelData.suggestions.length > 0
+                        ? row.modelData.title + " (confirm: " + row.modelData.suggestions[0].title + "?)"
+                        : row.modelData.title + " (song not in library)"
                 font.bold: row.isHeader
                 font.capitalization: row.isHeader ? Font.AllUppercase : Font.MixedCase
                 color: row.isHeader ? "#8b8f96" : (row.modelData.hasSlides ? "#d0d3d8" : "#6b6f76")
@@ -115,7 +123,7 @@ ColumnLayout {
                     } else {
                         ServiceList.select(row.index)
                         if (mouse.button === Qt.RightButton)
-                            itemMenu.popup()
+                            (row.modelData.songPlaceholder ? resolveMenu : itemMenu).popup()
                     }
                 }
                 onCanceled: {
@@ -157,6 +165,14 @@ ColumnLayout {
             onClicked: ServiceList.addSong(SongLibrary.selectedId)
         }
         Button {
+            id: resolveButton
+            objectName: "resolvePlaceholder"
+            text: "Resolve…"
+            focusPolicy: Qt.NoFocus
+            visible: pane.selectedPlaceholder !== null
+            onClicked: resolveMenu.popup(resolveButton, 0, resolveButton.height)
+        }
+        Button {
             id: addButton
             text: "Add…"
             focusPolicy: Qt.NoFocus
@@ -195,6 +211,45 @@ ColumnLayout {
     Menu {
         id: itemMenu
         MenuItem { text: "Remove from service"; onTriggered: ServiceList.removeItem(ServiceList.selectedIndex) }
+    }
+
+    // An imported song with no library song yet: confirm a suggestion, link the song picked
+    // in the library (search there first), make it from pasted lyrics, or leave a blank slide.
+    Menu {
+        id: resolveMenu
+        Instantiator {
+            model: pane.selectedPlaceholder ? pane.selectedPlaceholder.suggestions : []
+            delegate: MenuItem {
+                required property var modelData
+                text: "Use \u201c" + modelData.title + "\u201d"
+                onTriggered: ServiceList.linkSong(ServiceList.selectedIndex, modelData.id)
+            }
+            onObjectAdded: (index, object) => resolveMenu.insertItem(index, object)
+            onObjectRemoved: (index, object) => resolveMenu.removeItem(object)
+        }
+        MenuItem {
+            text: SongLibrary.selectedTitle !== "" ? "Use library song \u201c" + SongLibrary.selectedTitle + "\u201d"
+                                                   : "Use library song (pick one in the library first)"
+            enabled: SongLibrary.selectedId !== ""
+            onTriggered: ServiceList.linkSong(ServiceList.selectedIndex, SongLibrary.selectedId)
+        }
+        MenuItem {
+            text: "New song from pasted lyrics…"
+            onTriggered: {
+                pasteDialog.forIndex = ServiceList.selectedIndex
+                pasteDialog.initialTitle = pane.selectedPlaceholder ? pane.selectedPlaceholder.title : ""
+                pasteDialog.open()
+            }
+        }
+        MenuItem { text: "Leave as a blank slide"; onTriggered: ServiceList.leaveBlank(ServiceList.selectedIndex) }
+        MenuSeparator {}
+        MenuItem { text: "Remove from service"; onTriggered: ServiceList.removeItem(ServiceList.selectedIndex) }
+    }
+
+    PasteSongDialog {
+        id: pasteDialog
+        property int forIndex: -1
+        onCreated: songId => ServiceList.linkSong(forIndex, songId)
     }
 
     property var pendingChoice: null
