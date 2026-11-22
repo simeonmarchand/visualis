@@ -35,7 +35,7 @@ public:
 
     // Saves the song, its groups, and its arrangements. Gives new songs, groups, and
     // arrangements ids, and sets the timestamps. Rejects arrangements that use another
-    // song's groups or a group that doesn't exist.
+    // song's groups or a group that doesn't exist, and songs over the limits in songlimits.h.
     Result save(Song &song);
     std::optional<Song> load(const QUuid &id) const;
     // Deletes the song with its groups and arrangements. False if there was no such song.

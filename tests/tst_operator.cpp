@@ -8,6 +8,8 @@
 #include "song/songjson.h"
 #include "song/songstore.h"
 #include "live/livestate.h"
+#include "propresenterbytes.h"
+#include "song/songlimits.h"
 
 #include <QQmlApplicationEngine>
 #include <QSqlDatabase>
@@ -624,6 +626,64 @@ private slots:
         QCOMPARE(report.count("Couldn't read "), 4 - kept.size());
         QVERIFY(m_songs->createFromPaste("After the Failure", kLyrics));
         QVERIFY(titles(m_songs->songs()).contains("After the Failure"));
+    }
+
+    // #83: a paste past a limit is refused, and the pane says why.
+    void aPastePastALimitIsRefusedWithTheReason()
+    {
+        const QString line(songlimits::kCharactersPerSlide + 1, QChar('a'));
+        QVERIFY(!m_songs->createFromPaste("Too Long", QStringLiteral("Verse 1\n") + line));
+        QVERIFY2(m_songs->report().contains(
+                     "too many characters in a slide of \"Verse 1\": 10,001; the limit is 10,000"),
+                 qPrintable(m_songs->report()));
+        QVERIFY(m_songs->songs().isEmpty());
+
+        // In the window, the dialog stays open with the reason and what was typed.
+        QQuickWindow *window = loadOperatorWindow();
+        auto *dialog = window->findChild<QObject *>("libraryPasteDialog");
+        QVERIFY(dialog);
+        QVERIFY(QMetaObject::invokeMethod(dialog, "open"));
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        dialog->findChild<QObject *>("pasteTitle")->setProperty("text", "Too Long");
+        dialog->findChild<QObject *>("pasteLyrics")->setProperty("text", QStringLiteral("Verse 1\n") + line);
+        QVERIFY(QMetaObject::invokeMethod(dialog, "accept"));
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        QVERIFY(dialog->findChild<QObject *>("pasteProblem")->property("text").toString().contains("too many characters"));
+        QCOMPARE(dialog->findChild<QObject *>("pasteLyrics")->property("text").toString().size(), line.size() + 8);
+        QVERIFY(m_songs->songs().isEmpty());
+        QVERIFY(QMetaObject::invokeMethod(dialog, "reject"));   // Cancel closes it for good
+        QTRY_VERIFY(!dialog->property("visible").toBool());
+        QTest::qWait(300);
+        QVERIFY(!dialog->property("visible").toBool());
+    }
+
+    // #83: an oversized file in a GUI import is skipped by the worker with its reason and
+    // warnings; the valid one beside it imports.
+    void anOversizedFileInAnImportIsSkippedAndTheRestImports()
+    {
+        const QString folder = m_dir.filePath(QStringLiteral("pro-%1").arg(++m_folders));
+        QDir().mkpath(folder);
+        QByteArray huge = pb::bytes(11, pb::arrangement("a", "A", {"g0", "missing-group"}));   // a warning
+        for (int i = 0; i <= songlimits::kGroups; ++i) {
+            huge += pb::bytes(12, pb::cueGroup(QString("g%1").arg(i), "Verse", {}, {QString("c%1").arg(i)}));
+            huge += pb::bytes(13, pb::cue(QString("c%1").arg(i), "Sing"));
+        }
+        QByteArray valid = pb::bytes(12, pb::cueGroup("g", "Chorus", {}, {"c"}));
+        valid += pb::bytes(13, pb::cue("c", "Sing"));
+        for (const auto &[name, bytes] : {std::pair{"Huge.pro", huge}, std::pair{"Valid.pro", valid}}) {
+            QFile f(QDir(folder).filePath(name));
+            QVERIFY(f.open(QIODevice::WriteOnly));
+            f.write(bytes);
+        }
+
+        QVERIFY(m_songs->importProPresenter(QUrl::fromLocalFile(folder)));
+        QVERIFY(waitForImport());
+        const QString report = m_songs->report();
+        QVERIFY2(report.startsWith("Imported 1 songs from ProPresenter.\n"
+                                   "Skipped 1: too many groups: 501; the limit is 500:\n  Huge.pro\n"),
+                 qPrintable(report));
+        QVERIFY2(report.contains("\nHuge.pro: "), qPrintable(report));   // the parser's warning
+        QCOMPARE(titles(m_songs->songs()), QStringList{"Valid"});
     }
 
     void openingAnotherLibraryStopsAnImportWithoutWaitingForIt()
