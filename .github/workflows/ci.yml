@@ -5,7 +5,7 @@ on:
   push:
     branches: [main]
 
-# A newer push to the same branch cancels the older run, to save macOS minutes
+# A newer push to the same branch cancels the older run, to save CI minutes
 # (private repos count them 10x).
 concurrency:
   group: ci-${{ github.ref }}
@@ -43,3 +43,64 @@ jobs:
 
       - name: Lint QML
         run: cmake --build --preset ci --target all_qmllint
+
+  # Compile-only (plan §4, D1: macOS first, keep the code portable). Nothing runs: outputs,
+  # AVFoundation, and display identity are macOS-only for now.
+  linux:
+    name: Build only (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.12.0"
+          host: linux
+          target: desktop
+          arch: linux_gcc_64
+          modules: qtmultimedia
+          cache: true
+
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y ninja-build libgl-dev libxkbcommon-dev
+
+      - name: Configure
+        run: cmake --preset ci
+
+      - name: Build
+        run: cmake --build --preset ci
+
+  # Qt from MSYS2 (MinGW), not install-qt-action: Qt 6.12's Windows repository moved to
+  # per-architecture folders that aqtinstall 3.3 can't read yet, and the official installer
+  # needs a Qt account. Compiling is what this job checks, so the compiler doesn't matter.
+  windows:
+    name: Build only (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Qt and build tools (MSYS2)
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-qt6-base
+            mingw-w64-ucrt-x86_64-qt6-declarative
+            mingw-w64-ucrt-x86_64-qt6-multimedia
+            mingw-w64-ucrt-x86_64-qt6-shadertools
+
+      - name: Configure
+        run: cmake --preset ci
+
+      - name: Build
+        run: cmake --build --preset ci

@@ -176,7 +176,7 @@ private slots:
         Song s = sampleSong();
         SAVE_OK(store, s);
         s.arrangements.removeLast();   // the default
-        s.defaultArrangement = {};
+        s.defaultArrangement = QUuid();
         SAVE_OK(store, s);
         QVERIFY(store.load(s.id)->defaultArrangement.isNull());
     }
@@ -201,7 +201,7 @@ private slots:
         Song b = sampleSong();
         b.groups[0].id = a.groups[0].id;   // copy-paste gone wrong
         b.arrangements = {};
-        b.defaultArrangement = {};
+        b.defaultArrangement = QUuid();
         QVERIFY(!store.save(b).ok);
         QCOMPARE(store.load(a.id)->groups.size(), 4);   // song A is unharmed
     }
@@ -254,7 +254,7 @@ private slots:
         // Explicit arrangement, then the default, then the first, then groups in order.
         QCOMPARE(s.playOrder(s.arrangements[0].id), (QList<QUuid>{g[0].id, g[1].id, g[2].id, g[2].id}));
         QCOMPARE(s.playOrder(), (QList<QUuid>{g[1].id, g[2].id}));
-        s.defaultArrangement = {};
+        s.defaultArrangement = QUuid();
         QCOMPARE(s.playOrder(), s.arrangements[0].sequence);
         QCOMPARE(s.playOrder(QUuid::createUuid()), s.arrangements[0].sequence);   // unknown id
         s.arrangements.clear();
