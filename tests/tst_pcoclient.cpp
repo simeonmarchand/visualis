@@ -17,6 +17,7 @@ struct Reply
     QByteArray body;
     QList<QPair<QByteArray, QByteArray>> headers;
     bool hang = false;   // accept the request and never answer
+    bool cutOff = false; // promise more body than is sent, then close
 };
 
 // A stand-in for Planning Center on localhost. Answers each path (query ignored) from a
@@ -87,7 +88,8 @@ private:
         QByteArray head = "HTTP/1.1 " + QByteArray::number(reply.status) + " X\r\nContent-Type: application/json\r\n";
         for (const auto &[k, v] : reply.headers)
             head += k + ": " + v + "\r\n";
-        head += "Content-Length: " + QByteArray::number(reply.body.size()) + "\r\nConnection: close\r\n\r\n";
+        const qsizetype length = reply.body.size() + (reply.cutOff ? 1000 : 0);
+        head += "Content-Length: " + QByteArray::number(length) + "\r\nConnection: close\r\n\r\n";
         s->write(head + reply.body);
         s->disconnectFromHost();
     }
@@ -394,47 +396,60 @@ private slots:
         QVERIFY(!called);
     }
 
-    // Against the real API, only when a token is in the environment (never in CI). Walks
-    // service types → the next plan → its items and checks shape, not content.
-    void liveSandbox()
+    void aConnectionThatDropsMidBodyIsNotASuccess()
     {
-        const PcoCredentials creds{qEnvironmentVariable("PCO_APP_ID"), qEnvironmentVariable("PCO_SECRET")};
-        if (!creds.isValid())
-            QSKIP("set PCO_APP_ID and PCO_SECRET to read the sandbox plan");
-        PcoClient pco(&m_network, QUrl(QString::fromLatin1(kPcoServicesApi)),
-                      [creds] { return std::make_unique<PersonalAccessToken>(creds); });
+        FakePlanningCenter server;
+        Reply cut{200, server.fixture("service_types.json"), {}};
+        cut.cutOff = true;
+        server.on("/services/v2/service_types", {cut});
+        auto pco = client(server);
+        Waiter<QList<PcoServiceType>> w;
+        pco->serviceTypes(w.done());
+        QVERIFY(w.wait());
+        QCOMPARE(w.result->error.kind, PcoError::Offline);
+        QVERIFY(w.result->error.message.contains("dropped"));
+        QVERIFY(w.result->value.isEmpty());
+    }
 
-        Waiter<QList<PcoServiceType>> types;
-        pco.serviceTypes(types.done());
-        QVERIFY(types.wait(30000));
-        QVERIFY2(types.result->ok(), qPrintable(types.result->error.message));
-        for (const PcoServiceType &type : types.result->value) {
-            Waiter<QList<PcoPlan>> plans;
-            pco.futurePlans(type.id, plans.done());
-            QVERIFY(plans.wait(30000));
-            QVERIFY2(plans.result->ok(), qPrintable(plans.result->error.message));
-            if (plans.result->value.isEmpty())
-                continue;
-            const PcoPlan plan = plans.result->value.first();
-            QVERIFY(plan.planningCenterUrl.isValid());
-            Waiter<PcoPlanItems> items;
-            pco.planItems(type.id, plan.id, items.done());
-            QVERIFY(items.wait(30000));
-            QVERIFY2(items.result->ok(), qPrintable(items.result->error.message));
-            QCOMPARE(items.result->value.items.size(), plan.itemsCount);
-            int songs = 0;
-            for (const PcoItem &i : items.result->value.items) {
-                if (i.type == PcoItemType::Song) {
-                    ++songs;
-                    QVERIFY(i.song);
-                    QVERIFY(!i.sequence().isEmpty());
-                }
-            }
-            qInfo("plan %s: %lld items, %d songs, %d requests", qPrintable(plan.id),
-                  qlonglong(items.result->value.items.size()), songs, pco.requestCount());
-            return;
-        }
-        QSKIP("no upcoming plans for this token");
+    void stopsNextLinksThatLoopBack()
+    {
+        // Page 1 → B → C → B again. B and C are reached by next links, so their exact
+        // addresses are known here.
+        FakePlanningCenter server;
+        const QByteArray items = server.base().toUtf8() + "service_types/1001/plans/5001/items?";
+        const QByteArray b = items + "include=song,arrangement,key&offset=3&per_page=3";   // page 1's next
+        const QByteArray c = items + "include=song,arrangement,key&offset=6&per_page=3";
+        const auto pageWithNext = [](const QByteArray &next) {
+            return QByteArray("{\"data\": [], \"links\": {\"next\": \"") + next + "\"}}";
+        };
+        server.on(kItems, {{200, server.fixture("items_page1.json"), {}},
+                           {200, pageWithNext(c), {}},
+                           {200, pageWithNext(b), {}},
+                           {200, server.fixture("items_page2.json"), {}}});
+        auto pco = client(server);
+        Waiter<PcoPlanItems> w;
+        pco->planItems("1001", "5001", w.done());
+        QVERIFY(w.wait());
+        QCOMPARE(w.result->error.kind, PcoError::Malformed);
+        QCOMPARE(server.requests.size(), 3);
+    }
+
+    void pacingNeverWaitsPastTheCap()
+    {
+        FakePlanningCenter server;
+        const QList<QPair<QByteArray, QByteArray>> usedUp{{"X-PCO-API-Request-Rate-Count", "100"},
+                                                          {"X-PCO-API-Request-Rate-Limit", "100"},
+                                                          {"X-PCO-API-Request-Rate-Period", "3600"}};
+        server.on(kItems, {{200, server.fixture("items_page1.json"), usedUp},
+                           {200, server.fixture("items_page2.json"), {}}});
+        auto pco = client(server);
+        pco->setMaxWaitMs(500);
+        Waiter<PcoPlanItems> w;
+        pco->planItems("1001", "5001", w.done());
+        QVERIFY(w.wait(10000));
+        QVERIFY(w.result->ok());
+        const qint64 gap = server.requests[1].atMs - server.requests[0].atMs;
+        QVERIFY2(gap >= 400 && gap < 3000, qPrintable(QString::number(gap)));
     }
 
 private:

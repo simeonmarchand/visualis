@@ -27,7 +27,8 @@ struct PcoDocument
 PcoError pcoErrorForStatus(int httpStatus);
 PcoError pcoMalformedError();
 
-// Parses one page. Not JSON, or JSON that isn't a JSON:API document, is Malformed.
+// Parses one page. Not JSON, JSON that isn't a JSON:API document, or `included` or
+// `links.next` of the wrong shape, is Malformed.
 PcoResult<PcoDocument> parsePcoDocument(const QByteArray &body);
 
 QList<PcoServiceType> serviceTypesFrom(const PcoDocument &doc);
@@ -48,9 +49,10 @@ PcoRateLimit pcoRateLimitFrom(const PcoHeaders &headers);
 
 // How long to wait before retrying a 429, from Retry-After, else the reported period.
 // nullopt when the answer gives no way to know (then the caller gives up rather than guess).
-std::optional<int> pcoRetryDelayMs(const PcoHeaders &headers);
+std::optional<qint64> pcoRetryDelayMs(const PcoHeaders &headers);
 // How long to wait before the next request so as not to cause a 429: the reported period
-// once the limit is used up, otherwise no wait.
-int pcoPacingDelayMs(const PcoRateLimit &rate);
+// once the limit is used up, otherwise no wait. Both clamp absurd values to a day; the
+// client caps what it will actually wait (PcoClient::kMaxRetryWaitMs).
+qint64 pcoPacingDelayMs(const PcoRateLimit &rate);
 
 } // namespace visualis

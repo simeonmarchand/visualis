@@ -92,26 +92,27 @@ bool PcoClient::sameApi(const QUrl &url) const
 
 void PcoClient::getAll(const QUrl &url, Fetched done)
 {
-    getPages(url, std::make_shared<PcoDocument>(), 1, std::move(done));
+    getPages(url, std::make_shared<Pages>(), std::move(done));
 }
 
-void PcoClient::getPages(const QUrl &url, std::shared_ptr<PcoDocument> merged, int pageNumber, Fetched done)
+void PcoClient::getPages(const QUrl &url, std::shared_ptr<Pages> pages, Fetched done)
 {
-    getDocument(url, [this, url, merged, pageNumber, done](PcoResult<PcoDocument> page) {
+    pages->visited.insert(url);
+    getDocument(url, [this, url, pages, done](PcoResult<PcoDocument> page) {
         if (!page.ok())
             return done(page);
         for (const QJsonValue &v : page.value.data)
-            merged->data.append(v);
+            pages->merged.data.append(v);
         for (const QJsonValue &v : page.value.included)
-            merged->included.append(v);
+            pages->merged.included.append(v);
         if (page.value.next.isEmpty())
-            return done(PcoResult<PcoDocument>{*merged, {}});
+            return done(PcoResult<PcoDocument>{pages->merged, {}});
         const QUrl next = url.resolved(page.value.next);
-        if (!sameApi(next) || next == url || pageNumber >= kMaxPages) {
+        if (!sameApi(next) || pages->visited.contains(next) || pages->visited.size() >= kMaxPages) {
             qCWarning(lcPcoClient) << "stopped paging: unexpected next link";
             return done(failed<PcoDocument>(pcoMalformedError()));
         }
-        getPages(next, merged, pageNumber + 1, done);
+        getPages(next, pages, done);
     });
 }
 
@@ -123,6 +124,9 @@ void PcoClient::getDocument(const QUrl &url, Fetched done)
                 {PcoError::NotSignedIn, 0, QStringLiteral("Not signed in to Planning Center.")}));
         if (const PcoError e = pcoErrorForStatus(response.status))
             return done(failed<PcoDocument>(e));
+        if (response.cutOff)
+            return done(failed<PcoDocument>({PcoError::Offline, response.status,
+                QStringLiteral("The connection to Planning Center dropped. Check the internet connection.")}));
         done(parsePcoDocument(response.body));
     });
 }
@@ -155,21 +159,26 @@ void PcoClient::send(const QUrl &url, int attempt, std::function<void(Response)>
             r.body = reply->readAll();
             for (const auto &pair : reply->rawHeaderPairs())
                 r.headers.append(pair);
+            // An HTTP error status also sets a reply error; that's reported by status. A
+            // transport error with a success status means the body didn't arrive whole.
+            r.cutOff = reply->error() != QNetworkReply::NoError && r.status >= 200 && r.status < 300;
 
-            const PcoRateLimit rate = pcoRateLimitFrom(r.headers);
-            if (const int pace = pcoPacingDelayMs(rate); pace > 0)
+            // Waits as the headers say, but never so long that the operator is left hanging;
+            // past the cap, Planning Center answers 429 and that's reported as busy.
+            if (const qint64 pace = std::min<qint64>(pcoPacingDelayMs(pcoRateLimitFrom(r.headers)), m_maxWaitMs);
+                pace > 0)
                 m_notBeforeMs = std::max(m_notBeforeMs, m_clock.elapsed() + pace);
 
             if (r.status == 429) {
-                const std::optional<int> delay = pcoRetryDelayMs(r.headers);
-                if (delay && *delay <= kMaxRetryWaitMs && attempt < kMaxRateLimitRetries) {
+                const std::optional<qint64> delay = pcoRetryDelayMs(r.headers);
+                if (delay && *delay <= m_maxWaitMs && attempt < kMaxRateLimitRetries) {
                     qCInfo(lcPcoClient) << "rate limited; retrying in" << *delay << "ms";
                     m_notBeforeMs = std::max(m_notBeforeMs, m_clock.elapsed() + *delay);
                     send(url, attempt + 1, done);
                     return;
                 }
             }
-            if (r.status != 200)
+            if (r.status != 200 || r.cutOff)
                 qCInfo(lcPcoClient) << "HTTP" << r.status << reply->error() << url.path();   // never the token
             done(r);
         });

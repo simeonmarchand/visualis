@@ -171,6 +171,11 @@ private slots:
         QTest::newRow("array root") << QByteArray("[1,2]");
         QTest::newRow("no data") << QByteArray(R"({"errors":[]})");
         QTest::newRow("data is a string") << QByteArray(R"({"data":"x"})");
+        QTest::newRow("next is a number") << QByteArray(R"({"data":[],"links":{"next":3}})");
+        QTest::newRow("next is an object") << QByteArray(R"({"data":[],"links":{"next":{"href":"x"}}})");
+        QTest::newRow("links is a string") << QByteArray(R"({"data":[],"links":"next"})");
+        QTest::newRow("included is an object") << QByteArray(R"({"data":[],"included":{"type":"Song"}})");
+        QTest::newRow("included holds a string") << QByteArray(R"({"data":[],"included":["Song"]})");
     }
     void malformedDocuments()
     {
@@ -178,6 +183,17 @@ private slots:
         const PcoResult<PcoDocument> r = parsePcoDocument(body);
         QCOMPARE(r.error.kind, PcoError::Malformed);
         QVERIFY(!r.error.message.isEmpty());
+    }
+
+    void absentOrNullLinksAndIncludedAreFine()
+    {
+        for (const QByteArray body : {QByteArray(R"({"data":[]})"),
+                                      QByteArray(R"({"data":[],"links":{"next":null},"included":null})"),
+                                      QByteArray(R"({"data":[],"links":null})")}) {
+            const PcoResult<PcoDocument> r = parsePcoDocument(body);
+            QVERIFY2(r.ok(), body.constData());
+            QVERIFY(r.value.next.isEmpty());
+        }
     }
 
     void wrongRecordTypesAreIgnored()
@@ -225,13 +241,25 @@ private slots:
 
     void retryDelay()
     {
-        QCOMPARE(pcoRetryDelayMs({{"Retry-After", "7"}}), std::optional<int>(7000));
-        QCOMPARE(pcoRetryDelayMs({{"Retry-After", "0"}}), std::optional<int>(0));
+        QCOMPARE(pcoRetryDelayMs({{"Retry-After", "7"}}), std::optional<qint64>(7000));
+        QCOMPARE(pcoRetryDelayMs({{"Retry-After", "0"}}), std::optional<qint64>(0));
         // No Retry-After: the reported period.
-        QCOMPARE(pcoRetryDelayMs({{"X-PCO-API-Request-Rate-Period", "20"}}), std::optional<int>(20000));
+        QCOMPARE(pcoRetryDelayMs({{"X-PCO-API-Request-Rate-Period", "20"}}), std::optional<qint64>(20000));
         // Nothing to go on, or a date instead of seconds: don't guess.
         QCOMPARE(pcoRetryDelayMs({}), std::nullopt);
         QCOMPARE(pcoRetryDelayMs({{"Retry-After", "Wed, 21 Oct 2026 07:28:00 GMT"}}), std::nullopt);
+        QCOMPARE(pcoRetryDelayMs({{"Retry-After", "-5"}}), std::nullopt);
+    }
+
+    void hugeHeaderValuesDontOverflow()
+    {
+        constexpr qint64 kDayMs = 24LL * 60 * 60 * 1000;
+        // Over INT_MAX seconds, and over INT_MAX milliseconds once multiplied.
+        QCOMPARE(pcoRetryDelayMs({{"Retry-After", "99999999999"}}), std::optional<qint64>(kDayMs));
+        QCOMPARE(pcoRetryDelayMs({{"Retry-After", "3000000"}}), std::optional<qint64>(kDayMs));
+        QCOMPARE(pcoRetryDelayMs({{"X-PCO-API-Request-Rate-Period", "3000000"}}), std::optional<qint64>(kDayMs));
+        QCOMPARE(pcoPacingDelayMs({100, 100, 3'000'000}), kDayMs);
+        QCOMPARE(pcoPacingDelayMs({100, 100, 3600}), 3'600'000LL);
     }
 };
 

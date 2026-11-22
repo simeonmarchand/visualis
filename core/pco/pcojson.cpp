@@ -142,8 +142,29 @@ PcoResult<PcoDocument> parsePcoDocument(const QByteArray &body)
         doc.data.append(data);
     else
         return {{}, pcoMalformedError()};
-    doc.included = root.value("included").toArray();
-    doc.next = QUrl(root.value("links").toObject().value("next").toString());
+    // A missing `included` or `next` is normal; one of the wrong shape isn't, and reading it
+    // as "nothing more" would quietly drop records or pages.
+    const QJsonValue included = root.value("included");
+    if (!included.isUndefined() && !included.isNull()) {
+        if (!included.isArray())
+            return {{}, pcoMalformedError()};
+        for (const QJsonValue &v : included.toArray()) {
+            if (!v.isObject())
+                return {{}, pcoMalformedError()};
+        }
+        doc.included = included.toArray();
+    }
+    const QJsonValue links = root.value("links");
+    if (!links.isUndefined() && !links.isNull() && !links.isObject())
+        return {{}, pcoMalformedError()};
+    const QJsonValue next = links.toObject().value("next");
+    if (next.isString()) {
+        doc.next = QUrl(next.toString(), QUrl::StrictMode);
+        if (!next.toString().isEmpty() && !doc.next.isValid())
+            return {{}, pcoMalformedError()};
+    } else if (!next.isUndefined() && !next.isNull()) {
+        return {{}, pcoMalformedError()};
+    }
     return {doc, {}};
 }
 
@@ -250,21 +271,33 @@ PcoRateLimit pcoRateLimitFrom(const PcoHeaders &headers)
             header(headers, "X-PCO-API-Request-Rate-Period").toInt()};
 }
 
-std::optional<int> pcoRetryDelayMs(const PcoHeaders &headers)
+namespace {
+// Header seconds as milliseconds, 64-bit and clamped, so a huge value can't overflow. Any
+// clamped value is far over what the client accepts anyway.
+std::optional<qint64> secondsToMs(const QByteArray &value)
 {
     bool ok = false;
-    const int retryAfter = header(headers, "Retry-After").toInt(&ok);
-    if (ok && retryAfter >= 0)
-        return retryAfter * 1000;
-    if (const int period = pcoRateLimitFrom(headers).periodSeconds; period > 0)
-        return period * 1000;
+    const qint64 seconds = value.toLongLong(&ok);
+    if (!ok || seconds < 0)
+        return std::nullopt;
+    constexpr qint64 kOneDay = 24 * 60 * 60;
+    return std::min(seconds, kOneDay) * 1000;
+}
+} // namespace
+
+std::optional<qint64> pcoRetryDelayMs(const PcoHeaders &headers)
+{
+    if (const auto retryAfter = secondsToMs(header(headers, "Retry-After")))
+        return retryAfter;
+    if (const auto period = secondsToMs(header(headers, "X-PCO-API-Request-Rate-Period")); period && *period > 0)
+        return period;
     return std::nullopt;
 }
 
-int pcoPacingDelayMs(const PcoRateLimit &rate)
+qint64 pcoPacingDelayMs(const PcoRateLimit &rate)
 {
     if (rate.limit > 0 && rate.count >= rate.limit && rate.periodSeconds > 0)
-        return rate.periodSeconds * 1000;
+        return std::min<qint64>(rate.periodSeconds, 24 * 60 * 60) * 1000;
     return 0;
 }
 
