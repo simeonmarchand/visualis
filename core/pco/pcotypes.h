@@ -101,6 +101,11 @@ struct PcoPlanItems
 {
     QList<PcoItem> items;
     QStringList skipped;        // records left out or only partly read; also in PcoResult::skipped
+    // For re-import (#56): the ids of items left out or only partly read, so a merge can
+    // leave the operator's copies alone, and whether a record was left out without an id
+    // (then any item missing from `items` may only have been unreadable).
+    QStringList unreadableIds;
+    bool skippedWithoutId = false;
 };
 
 // Why a read failed. The message is written for the operator.

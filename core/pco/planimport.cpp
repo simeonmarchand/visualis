@@ -116,8 +116,15 @@ PlanImport serviceFromPlan(const PcoServiceType &type, const PcoPlan &plan, cons
     std::stable_sort(ordered.begin(), ordered.end(),
                      [](const PcoItem &a, const PcoItem &b) { return a.position < b.position; });
 
-    for (const PcoItem &p : std::as_const(ordered))
-        s.items << importedItem(p.id, importSnapshot(p));
+    for (qsizetype i = 0; i < ordered.size(); ++i) {
+        // Its place among the plan's items: Planning Center's `sequence` numbers can tie, and a
+        // re-import needs the plan's order exactly (#56).
+        QJsonObject snapshot = importSnapshot(ordered[i]);
+        snapshot["order"] = int(i);
+        s.items << importedItem(ordered[i].id, snapshot);
+    }
+    r.unreadable = QSet<QString>(items.unreadableIds.cbegin(), items.unreadableIds.cend());
+    r.unreadableWithoutId = items.skippedWithoutId;
     for (const QString &skipped : items.skipped)
         r.notes << QStringLiteral("Skipped from Planning Center: %1").arg(skipped);
     return r;

@@ -5,6 +5,7 @@
 
 #include <QDateTime>
 #include <QList>
+#include <QSet>
 #include <QStringList>
 
 namespace visualis {
@@ -20,11 +21,15 @@ namespace visualis {
 //  - A plain item whose title holds a scripture reference ("Scripture Reading: Acts 2:38")
 //    becomes a scripture item with the reference as its body, for Phase 4 to fill.
 //  - Other plain items (Welcome, Sermon) are placeholders with their title.
-//  - Every item keeps its `pcoItemId` and a snapshot of what Planning Center said, for
-//    re-import (#56).
+//  - Every item keeps its `pcoItemId` and a snapshot of what Planning Center said, with its
+//    place in the plan as `order`, for re-import (#56).
 struct PlanImport {
     Service service;
     QStringList notes;     // what the operator should know: records that couldn't be read
+    // From PcoPlanItems, for re-import: items left out or only partly read, by Planning
+    // Center id, and whether a record was left out without one.
+    QSet<QString> unreadable;
+    bool unreadableWithoutId = false;
 };
 
 PlanImport serviceFromPlan(const PcoServiceType &type, const PcoPlan &plan, const PcoPlanItems &items,

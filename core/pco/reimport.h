@@ -18,14 +18,15 @@ struct ReimportChange {
         Restored,       // flagged before, back in the plan now
         Moved,          // Planning Center reordered it
         Changed,        // Planning Center changed `field`
-        KeptEdit,       // Planning Center changed `field`, but so did the operator: theirs is kept
+        KeptEdit,       // Planning Center has something else for `field`, but the operator's is kept
         KeptPosition,   // Planning Center moved it, but so did the operator: theirs is kept
         Relink,         // Planning Center put another song here: the item needs a song again
         ChangedButDeleted,   // the operator deleted it, and Planning Center changed it since: not
-                             // added back unless they ask (mergeReimport's `addBack`)
+                             // added back unless they ask (ReimportOptions::addBack)
+        Unreadable,     // Planning Center's record couldn't be read: the item is left as it was
     };
     Kind kind;
-    QUuid itemId;       // the item in the merged service
+    QUuid itemId;       // the item in the merged service; null for a deleted item or the whole plan
     QString title;      // the item's title after the merge
     QString field;      // Changed and KeptEdit: "title", "sequence", "service position", "reference", "kind"
     QString detail;     // "Amazing Grace → Amazing Grace (Live)"
@@ -34,12 +35,24 @@ struct ReimportChange {
     bool operator==(const ReimportChange &) const = default;
 };
 
+struct ReimportOptions {
+    // Planning Center ids of items the operator deleted and wants back (ChangedButDeleted).
+    QSet<QString> addBack;
+    // From PlanImport: items Planning Center listed but that couldn't be read whole, and
+    // whether a record couldn't be read at all, so nothing missing can be taken as removed.
+    QSet<QString> unreadable;
+    bool unreadableWithoutId = false;
+};
+
 struct ReimportResult {
     Service service;                  // the merged service, not yet saved
     QList<ReimportChange> changes;    // in the merged service's order
     QStringList movedByOperator;      // Planning Center item ids kept where the operator put them
+    // Whether saving changes anything, shown or not: a refreshed snapshot, a forgotten
+    // deleted item. lastImportedAt alone doesn't count.
+    bool needsSave = false;
 
-    bool upToDate() const { return changes.isEmpty(); }
+    bool upToDate() const { return changes.isEmpty() && !needsSave; }
     // "1 added, 1 removed, 2 moved, 1 changed. Kept 2 of your edits." or "Up to date with
     // Planning Center."
     QString summary() const;
@@ -51,21 +64,32 @@ struct ReimportResult {
 // Each item's importSnapshot is what Planning Center said last time. A field Planning
 // Center changed since then takes its new value only if the operator left it alone;
 // otherwise the operator's edit is kept and listed. What the operator added is never
-// touched: slide splits, backgrounds and other overrides, a filled placeholder's song,
-// items they added. The one exception is a placeholder filled with a song when Planning
-// Center put a different song in its place: it's a placeholder again (Relink), with its
-// overrides kept.
+// touched: slide splits, backgrounds and other overrides, what a filled placeholder shows,
+// items they added. The one exception is a placeholder the operator linked to a library
+// song when Planning Center put a different song in its place: it's a placeholder again
+// (Relink), with its overrides kept. Any other choice of theirs is kept, and listed if
+// Planning Center now has something else.
+//
+// What can't be compared is left alone: an item with no snapshot (imported before
+// snapshots, or from a file) keeps its values, link and place, and differences are listed;
+// an item Planning Center's answer had but couldn't be read is left exactly as it was; and
+// if a record couldn't be read at all, nothing is taken as removed.
 //
 // Order: items the operator didn't move follow Planning Center's new order; an item the
-// operator moved, added, or that Planning Center removed stays right after the item that
-// was before it in the operator's list.
+// operator moved or added, that Planning Center removed, or that can't be compared, stays
+// right after the item that was before it in the operator's list.
+//
+// When the operator has several items with one Planning Center id (a copy), the one with
+// the lowest item id is the Planning Center item. That's arbitrary, but it doesn't change
+// when they're reordered; the others are the operator's own.
 //
 // An imported item the operator deleted (Service::removedPcoItems) stays deleted. If
 // Planning Center changed it since, the diff says so (ChangedButDeleted), and it comes back
 // only if its Planning Center id is in `addBack`. Once Planning Center removes it too, its
 // record goes.
 //
-// Every snapshot becomes the fresh one, so merging the same plan again changes nothing.
-ReimportResult mergeReimport(const Service &local, const Service &fresh, const QSet<QString> &addBack = {});
+// Every snapshot that could be read becomes the fresh one, so merging the same plan again
+// changes nothing.
+ReimportResult mergeReimport(const Service &local, const Service &fresh, const ReimportOptions &options = {});
 
 } // namespace visualis
