@@ -4,6 +4,7 @@
 #include <QElapsedTimer>
 #include <QGuiApplication>
 #include <QMediaPlayer>
+#include <QPointer>
 #include <QProcess>
 #include <QStandardPaths>
 #include <QTemporaryDir>
@@ -84,16 +85,20 @@ private slots:
         engine.setSource(QUrl::fromLocalFile(m_clip));
         QTRY_COMPARE_WITH_TIMEOUT(engine.status(), QStringLiteral("Playing"), 10000);
 
-        auto *player = engine.findChild<QMediaPlayer *>();
-        QVERIFY(player);
-        player->pause();
+        // A QPointer, not a raw pointer: the replacement is often allocated at the address the
+        // stalled player was freed from, so comparing addresses could see "the same player"
+        // (#87). The guard clears when that player is destroyed.
+        QPointer<QMediaPlayer> stalled = engine.findChild<QMediaPlayer *>();
+        QVERIFY(stalled);
+        stalled->pause();
         QTRY_COMPARE_WITH_TIMEOUT(engine.restartCount(), 1, 3000);
         QVERIFY(!engine.alert().isEmpty());
 
         QTRY_COMPARE_WITH_TIMEOUT(engine.status(), QStringLiteral("Playing"), 10000);
         const int before = *frames;
         QTRY_VERIFY(*frames > before + 10);
-        QVERIFY(engine.findChild<QMediaPlayer *>() != player);
+        QVERIFY(stalled.isNull());                     // the stalled player was destroyed...
+        QVERIFY(engine.findChild<QMediaPlayer *>());   // ...and a new one is playing
     }
 
     // #61: AVFoundation delivers nothing while every display sleeps (pausing stands in for
