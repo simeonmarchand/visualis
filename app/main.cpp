@@ -73,7 +73,10 @@ int main(int argc, char *argv[])
 
     if (auto *importer = engine.singletonInstance<PlanImporter *>("Visualis.Ui", "PlanImporter")) {
         importer->setPlanningCenter(engine.singletonInstance<PlanningCenter *>("Visualis.Ui", "PlanningCenter"));
-        importer->setSongLibrary(engine.singletonInstance<SongLibrary *>("Visualis.Ui", "SongLibrary"));
+        importer->setSongLibrary(songs);
+        if (services)
+            QObject::connect(importer, &PlanImporter::imported, services,
+                             [services](const QString &id) { services->openAdded(id); });
     }
 
     // Back to what was live if the last run crashed (#25), then journal every change.

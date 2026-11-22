@@ -1,3 +1,4 @@
+#include "library/servicelist.h"
 #include "library/songlibrary.h"
 #include "pco/pcoclient.h"
 #include "pco/planimporter.h"
@@ -173,6 +174,30 @@ private slots:
         QCOMPARE(titles, (QStringList{"Pre-service countdown", "Worship", "Example Song One", "Acts 2:38", "Example Song Two"}));
         QCOMPARE(kinds, (QList<Kind>{Kind::Media, Kind::Header, Kind::Placeholder, Kind::Scripture, Kind::Placeholder}));
         QVERIFY(!s->items[2].customSequence.isEmpty());
+    }
+
+    // As main.cpp wires it: the imported service shows in the service list, open.
+    void theImportedServiceOpensInTheServiceList()
+    {
+        SongLibrary songs;
+        QVERIFY(songs.openLibrary(m_dir.filePath(QString::number(++m_n))));
+        ServiceList services(&songs, nullptr);
+        QVERIFY(services.services().isEmpty());
+        FakePlanningCenter server;
+        serve(server);
+        PlanImporter importer;
+        importer.setSongLibrary(&songs);
+        importer.setClient(client(server.url()));
+        connect(&importer, &PlanImporter::imported, &services, [&](const QString &id) { services.openAdded(id); });
+        QSignalSpy listed(&services, &ServiceList::servicesChanged);
+
+        importer.importPlan("1001", "5001");
+        QVERIFY(idle(importer));
+        QVERIFY(listed.size() >= 1);
+        QCOMPARE(services.services().size(), 1);
+        QCOMPARE(services.openTitle(), QStringLiteral("January 10, 2027"));   // no service types read: the date
+        QCOMPARE(services.items().size(), 5);
+        QCOMPARE(services.items()[3].toMap()["kind"].toString(), QStringLiteral("scripture"));
     }
 
     void aPlanIsNotImportedTwice()
