@@ -16,6 +16,8 @@ qt_add_qml_module(visualis_ui
         qml/OutputSettings.qml
         qml/PlanningCenterDialog.qml
         qml/SongListPane.qml
+        qml/ServicePane.qml
+        qml/NameDialog.qml
         qml/PasteSongDialog.qml
         qml/SlideGrid.qml
         qml/SlideTile.qml
@@ -32,6 +34,7 @@ qt_add_qml_module(visualis_ui
         pco/planningcenter.h pco/planningcenter.cpp
         library/songlibrary.h library/songlibrary.cpp
         library/songeditor.h library/songeditor.cpp
+        library/servicelist.h library/servicelist.cpp
 )
 # The generated QML type registrations include headers by file name alone.
 target_include_directories(visualis_ui PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/output

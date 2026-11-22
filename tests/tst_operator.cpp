@@ -1,4 +1,6 @@
+#include "library/servicelist.h"
 #include "library/songlibrary.h"
+#include "service/servicejson.h"
 #include "live/livestate.h"
 
 #include <QQmlApplicationEngine>
@@ -19,10 +21,10 @@ const char *kLyrics =
     "I once was lost but now am found\nWas blind but now I see\n\n"
     "Chorus\nMy chains are gone\nI've been set free\n";
 
-QStringList titles(const QVariantList &songs)
+QStringList titles(const QVariantList &list)
 {
     QStringList out;
-    for (const QVariant &s : songs)
+    for (const QVariant &s : list)
         out << s.toMap().value("title").toString();
     return out;
 }
@@ -40,7 +42,8 @@ private slots:
         m_engine = std::make_unique<QQmlApplicationEngine>();
         m_songs = m_engine->singletonInstance<SongLibrary *>("Visualis.Ui", "SongLibrary");
         m_live = m_engine->singletonInstance<LiveState *>("Visualis.Ui", "LiveState");
-        QVERIFY(m_songs && m_live);
+        m_services = m_engine->singletonInstance<ServiceList *>("Visualis.Ui", "ServiceList");
+        QVERIFY(m_songs && m_live && m_services);
         QVERIFY(m_songs->openLibrary(m_dir.filePath(QString::number(++m_libraries))));
     }
 
@@ -220,7 +223,226 @@ private slots:
         QCOMPARE(m_live->slideIndex(), 2);
     }
 
+    // #51: services.
+    void servicesAreCreatedRenamedAndDeleted()
+    {
+        QVERIFY(m_services->services().isEmpty());
+        QVERIFY(m_services->openId().isEmpty());
+        QVERIFY(!m_services->createService("  "));
+        QVERIFY(m_services->createService("Sunday AM"));
+        QCOMPARE(m_services->openTitle(), QStringLiteral("Sunday AM"));
+        QCOMPARE(m_live->serviceIdString(), m_services->openId());
+        QVERIFY(m_services->createService("Christmas Eve"));
+        QVERIFY(m_services->renameService("Christmas Eve 2026"));
+        QCOMPARE(titles(m_services->services()), (QStringList{"Christmas Eve 2026", "Sunday AM"}));
+
+        const QString christmas = m_services->openId();
+        QVERIFY(m_services->openService(m_services->services()[1].toMap().value("id").toString()));
+        QCOMPARE(m_services->openTitle(), QStringLiteral("Sunday AM"));
+        QVERIFY(m_services->removeService(christmas));
+        QCOMPARE(titles(m_services->services()), QStringList{"Sunday AM"});
+        QCOMPARE(m_services->openTitle(), QStringLiteral("Sunday AM"));   // another service: still open
+        QVERIFY(m_services->removeService(m_services->openId()));
+        QVERIFY(m_services->openId().isEmpty());
+        QVERIFY(m_live->serviceIdString().isEmpty());
+    }
+
+    void itemsGoAfterTheSelectionAndSaveAsTheyChange()
+    {
+        const QStringList songs = makeSongs({"Amazing Grace", "Holy Spirit"});
+        QVERIFY(m_services->createService("Sunday"));
+        QVERIFY(m_services->addSong(songs[0]));
+        QVERIFY(m_services->addSong(songs[1]));
+        m_services->select(0);
+        QVERIFY(m_services->addHeader("Welcome"));   // after Amazing Grace, and selected
+        QCOMPARE(m_services->selectedIndex(), 1);
+        QVERIFY(m_services->addText("", ""));
+        QVERIFY(!m_services->addHeader(" "));
+        QVERIFY(!m_services->addSong("not-a-song"));
+        QCOMPARE(titles(m_services->items()), (QStringList{"Amazing Grace", "Welcome", "Blank", "Holy Spirit"}));
+
+        QVERIFY(m_services->moveItem(3, 0));
+        QCOMPARE(m_services->selectedIndex(), 3);   // Blank, pushed down by the move
+        QVERIFY(m_services->moveItem(3, 1));
+        QCOMPARE(m_services->selectedIndex(), 1);   // the moved item stays selected
+        QVERIFY(!m_services->moveItem(0, 4));
+        QVERIFY(m_services->removeItem(2));         // Amazing Grace
+        QCOMPARE(titles(m_services->items()), (QStringList{"Holy Spirit", "Blank", "Welcome"}));
+
+        // Saved as it went, and the open service comes back with the library.
+        QVERIFY(m_songs->openLibrary(m_dir.filePath(QString::number(m_libraries))));
+        QCOMPARE(m_services->openTitle(), QStringLiteral("Sunday"));
+        QCOMPARE(titles(m_services->items()), (QStringList{"Holy Spirit", "Blank", "Welcome"}));
+        const QVariantList items = m_services->items();
+        QCOMPARE(items[0].toMap().value("kind").toString(), QStringLiteral("song"));
+        QVERIFY(items[1].toMap().value("hasSlides").toBool());
+        QVERIFY(!items[2].toMap().value("hasSlides").toBool());   // a header
+    }
+
+    void selectingAnItemShowsItsSlidesInTheGrid()
+    {
+        const QStringList songs = makeSongs({"Amazing Grace"});
+        QVERIFY(m_services->createService("Sunday"));
+        QVERIFY(m_services->addSong(songs[0]));
+        QVERIFY(m_services->addText("Notices", "Coffee after the service"));
+        QQuickWindow *window = loadOperatorWindow();
+        auto *grid = window->findChild<QQuickItem *>("slideGrid");
+        QTRY_COMPARE(grid->property("count").toInt(), 1);   // the text item, selected last
+        click(window, item(window, "serviceItem0"));
+        QCOMPARE(m_services->selectedIndex(), 0);
+        QTRY_COMPARE(grid->property("count").toInt(), 3);
+        QCOMPARE(m_services->selectedSongId(), songs[0]);
+    }
+
+    // The issue's "done when": a hand-built service of 4 songs, run start to finish from the
+    // keyboard. Each song has 3 slides; a header sits between the second and third.
+    void aServiceOfFourSongsRunsFromTheKeyboard()
+    {
+        QQuickWindow *window = serviceOperatorWindow();
+        QTest::keyClick(window, Qt::Key_Return);   // the selected item: the first song
+        QCOMPARE(m_live->itemIndex(), 0);
+        QCOMPARE(m_live->slideIndex(), 0);
+        QList<std::pair<int, int>> seen{{0, 0}};
+        for (int i = 0; i < 11; ++i) {
+            QTest::keyClick(window, i % 2 ? Qt::Key_Space : Qt::Key_Right);
+            seen << std::pair{m_live->itemIndex(), m_live->slideIndex()};
+        }
+        const QList<std::pair<int, int>> expected{{0, 0}, {0, 1}, {0, 2}, {1, 0}, {1, 1}, {1, 2},
+                                                  {3, 0}, {3, 1}, {3, 2}, {4, 0}, {4, 1}, {4, 2}};
+        QCOMPARE(seen, expected);   // the header (item 2) skipped
+        QCOMPARE(m_live->songTitle(), QStringLiteral("Song 4"));
+        QTest::keyClick(window, Qt::Key_Right);   // the end of the service: stays
+        QCOMPARE(m_live->itemIndex(), 4);
+        QCOMPARE(m_live->slideIndex(), 2);
+        // The grid followed the live item.
+        QCOMPARE(m_services->selectedIndex(), 4);
+        QTRY_VERIFY(tile(window, 2)->property("isCurrent").toBool());
+
+        for (int i = 0; i < 3; ++i)
+            QTest::keyClick(window, Qt::Key_Left);
+        QCOMPARE(m_live->itemIndex(), 3);
+        QCOMPARE(m_live->slideIndex(), 2);   // Previous lands on the song before's last slide
+
+        if (const QString dir = qEnvironmentVariable("VISUALIS_SNAPSHOT_DIR"); !dir.isEmpty()) {
+            QTest::qWait(300);
+            window->grabWindow().save(dir + "/operator-service.png");
+        }
+    }
+
+    void tileClicksOnAServiceItemAreCommands()
+    {
+        QQuickWindow *window = serviceOperatorWindow();
+        click(window, item(window, "serviceItem1"));
+        click(window, tile(window, 2));
+        QCOMPARE(m_live->itemIndex(), 1);
+        QCOMPARE(m_live->slideIndex(), 2);
+        QTRY_VERIFY(tile(window, 2)->property("isCurrent").toBool());
+        click(window, tile(window, 0));   // the live item: goto_slide
+        QCOMPARE(m_live->slideIndex(), 0);
+        QCOMPARE(m_live->itemIndex(), 1);
+        QTest::keyClick(window, Qt::Key_Left);
+        QCOMPARE(m_live->itemIndex(), 0);
+    }
+
+    void itemsReorderByKeysAndByDrag()
+    {
+        QQuickWindow *window = serviceOperatorWindow();
+        click(window, item(window, "serviceItem0"));
+        QTest::keyClick(window, Qt::Key_Down, Qt::AltModifier);
+        QCOMPARE(titles(m_services->items()), (QStringList{"Song 2", "Song 1", "Offering", "Song 3", "Song 4"}));
+        QCOMPARE(m_services->selectedIndex(), 1);
+        QTest::keyClick(window, Qt::Key_Up, Qt::AltModifier);
+        QTest::keyClick(window, Qt::Key_Up, Qt::AltModifier);   // already first
+        QCOMPARE(titles(m_services->items()), (QStringList{"Song 1", "Song 2", "Offering", "Song 3", "Song 4"}));
+        QCOMPARE(m_live->itemIndex(), -1);   // nothing went live
+
+        // Drag Song 4 up onto Song 2's row.
+        QQuickItem *from = item(window, "serviceItem4");
+        QQuickItem *onto = item(window, "serviceItem1");
+        const QPoint start = from->mapToScene(QPointF(from->width() / 2, from->height() / 2)).toPoint();
+        const QPoint end = onto->mapToScene(QPointF(onto->width() / 2, onto->height() / 2)).toPoint();
+        QTest::mousePress(window, Qt::LeftButton, {}, start);
+        for (int step = 1; step <= 10; ++step)
+            QTest::mouseMove(window, start + (end - start) * step / 10);
+        QTest::mouseRelease(window, Qt::LeftButton, {}, end);
+        QCOMPARE(titles(m_services->items()), (QStringList{"Song 1", "Song 4", "Song 2", "Offering", "Song 3"}));
+    }
+
+    void importsServiceExportsAndOpensThem()
+    {
+        m_songs->importSongs(QUrl::fromLocalFile(FIXTURES_DIR "/songs"));
+        const QVariantList songs = m_songs->songs();
+        Service s;
+        s.id = QUuid::createUuid();
+        s.title = "Imported";
+        s.items = {ServiceItem{QUuid::createUuid(), ServiceItem::Kind::Song, "Amazing Grace",
+                               QUuid::fromString(songs[0].toMap().value("id").toString()), {}, {}, {}, {}, {}, {}, {}},
+                   ServiceItem{QUuid::createUuid(), ServiceItem::Kind::Song, "Gone", QUuid::createUuid(), {}, {}, {}, {}, {}, {}, {}}};
+        QDir folder(m_dir.filePath("exports"));
+        QVERIFY(folder.mkpath("."));
+        QFile f(folder.filePath("Imported.visualis-service.json"));
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        f.write(serviceToJson(s));
+        f.close();
+        QFile bad(folder.filePath("Broken.visualis-service.json"));
+        QVERIFY(bad.open(QIODevice::WriteOnly));
+        bad.write("{");
+        bad.close();
+
+        m_services->importServices(QUrl::fromLocalFile(folder.path()));
+        QVERIFY(m_services->report().startsWith("Imported 1 services."));
+        QVERIFY(m_services->report().contains("Broken"));
+        QCOMPARE(m_services->openTitle(), QStringLiteral("Imported"));
+        const QVariantList items = m_services->items();
+        QCOMPARE(items[0].toMap().value("kind").toString(), QStringLiteral("song"));
+        QCOMPARE(items[1].toMap().value("kind").toString(), QStringLiteral("placeholder"));   // not in this library
+        m_services->importServices(QUrl::fromLocalFile(folder.path()));
+        QVERIFY(m_services->report().contains("already in the library"));
+        QCOMPARE(m_services->services().size(), 1);
+    }
+
 private:
+    QStringList makeSongs(const QStringList &names)
+    {
+        QStringList ids;
+        for (const QString &name : names) {
+            if (!m_songs->createFromPaste(name, kLyrics))
+                qFatal("couldn't create a test song");
+            ids << m_songs->selectedId();
+        }
+        return ids;
+    }
+
+    // Song 1, Song 2, an Offering header, Song 3, Song 4 (3 slides each), the first song
+    // selected, nothing live, the window active.
+    QQuickWindow *serviceOperatorWindow()
+    {
+        const QStringList songs = makeSongs({"Song 1", "Song 2", "Song 3", "Song 4"});
+        if (!m_services->createService("Sunday"))
+            qFatal("couldn't create the test service");
+        for (int i = 0; i < 4; ++i) {
+            m_services->addSong(songs[i]);
+            if (i == 1)
+                m_services->addHeader("Offering");
+        }
+        m_services->select(0);
+        QQuickWindow *window = loadOperatorWindow();
+        window->requestActivate();
+        if (!QTest::qWaitForWindowActive(window))
+            qFatal("operator window didn't activate");
+        return window;
+    }
+
+    static QQuickItem *item(QQuickWindow *window, const QString &name)
+    {
+        for (int waited = 0; waited < 2000; waited += 20) {
+            if (QQuickItem *found = findItem(window->contentItem(), name))
+                return found;
+            QTest::qWait(20);
+        }
+        qFatal("no item %s", qPrintable(name));
+    }
+
     // The operator window with the 3-slide song live at its first slide, focus on nothing.
     QQuickWindow *liveOperatorWindow()
     {
@@ -278,6 +500,7 @@ private:
     std::unique_ptr<QQmlApplicationEngine> m_engine;
     SongLibrary *m_songs = nullptr;
     LiveState *m_live = nullptr;
+    ServiceList *m_services = nullptr;
 };
 
 QTEST_MAIN(OperatorTest)

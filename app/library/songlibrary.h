@@ -64,6 +64,9 @@ public:
     std::optional<visualis::Song> loadSong(const QUuid &id) const;
     bool saveSong(visualis::Song &song, QString *error);
 
+    // The open library, or null; for ServiceList, which keeps services in it.
+    visualis::Library *library() const { return m_library.get(); }
+
     QString folder() const;
     QString error() const { return m_error; }
     QString search() const { return m_search; }

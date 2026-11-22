@@ -28,6 +28,10 @@ QByteArray snapshotToJson(const LiveSnapshot &s)
         o["song"] = QJsonDocument::fromJson(songToJson(*s.song)).object();
         o["arrangement"] = s.arrangement.toString(QUuid::WithoutBraces);
     }
+    if (!s.service.isNull())
+        o["service"] = s.service.toString(QUuid::WithoutBraces);
+    if (!s.item.isNull())
+        o["item"] = s.item.toString(QUuid::WithoutBraces);
     return QJsonDocument(o).toJson(QJsonDocument::Compact);
 }
 
@@ -55,6 +59,8 @@ SnapshotResult snapshotFromJson(const QByteArray &json)
     s.textCleared = o.value("textCleared").toBool();
     s.backgroundCleared = o.value("backgroundCleared").toBool();
     s.background = o.value("background").toString();
+    s.service = QUuid::fromString(o.value("service").toString());
+    s.item = QUuid::fromString(o.value("item").toString());
     s.savedAt = QDateTime::fromString(o.value("savedAt").toString(), Qt::ISODateWithMs);
     return {s, {}};
 }

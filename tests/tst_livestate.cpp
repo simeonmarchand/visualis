@@ -43,6 +43,35 @@ Song arranged()
     return s;
 }
 
+ServiceItem songItem(const Song &song)
+{
+    return ServiceItem{QUuid::createUuid(), ServiceItem::Kind::Song, song.title, song.id, {}, {}, {}, {}, {}, {}, {}};
+}
+
+ServiceItem header(const QString &title)
+{
+    return ServiceItem{QUuid::createUuid(), ServiceItem::Kind::Header, title, {}, {}, {}, {}, {}, {}, {}, {}};
+}
+
+ServiceItem textItem(const QString &title, const QString &body)
+{
+    return ServiceItem{QUuid::createUuid(), ServiceItem::Kind::Text, title, {}, {}, {}, body, {}, {}, {}, {}};
+}
+
+// A header, sample() (5 slides), a placeholder, arranged() (7 slides), a text slide:
+// service items 0..4, with slides only at 1, 3, and 4.
+QList<LiveItem> service()
+{
+    Song a = sample();
+    a.id = QUuid::createUuid();
+    Song b = arranged();
+    b.id = QUuid::createUuid();
+    ServiceItem missing = songItem(b);
+    missing.kind = ServiceItem::Kind::Placeholder;
+    return {liveItem(header("Worship"), std::nullopt), liveItem(songItem(a), a), liveItem(missing, std::nullopt),
+            liveItem(songItem(b), b), liveItem(textItem("Welcome", "Welcome!"), std::nullopt)};
+}
+
 } // namespace
 
 class LiveStateTest : public QObject
@@ -167,7 +196,7 @@ private slots:
         QVERIFY(!runCommand(live, "goto_slide", "x"));
         QVERIFY(!runCommand(live, "launch_rockets"));
         QCOMPARE(live.slideIndex(), 6);
-        QCOMPARE(commandNames().size(), 8);
+        QCOMPARE(commandNames().size(), 9);
     }
 
     void songIdNamesTheLiveSong()
@@ -342,6 +371,169 @@ private slots:
         QVERIFY(live.show(s, s.arrangements[1].id));
         QCOMPARE(live.slideCount(), 1);
         QCOMPARE(live.groupLabel(), QStringLiteral("Chorus"));
+    }
+
+    // #51: a service, run from Next and Previous.
+    void nextStartsTheServiceAndCrossesItemsSkippingThoseWithoutSlides()
+    {
+        LiveState live;
+        const QUuid id = QUuid::createUuid();
+        live.setService(id, service());
+        QVERIFY(!live.hasSlide());
+        QVERIFY(live.next());   // nothing live: the first item with slides (past the header)
+        QCOMPARE(live.itemIndex(), 1);
+        QCOMPARE(live.slideIndex(), 0);
+        QCOMPARE(live.serviceIdString(), id.toString(QUuid::WithoutBraces));
+        QVERIFY(live.goToSlide(4));
+        QVERIFY(live.next());   // past the placeholder
+        QCOMPARE(live.itemIndex(), 3);
+        QCOMPARE(live.slideIndex(), 0);
+        QCOMPARE(live.songTitle(), QStringLiteral("Arranged"));
+        QVERIFY(live.goToSlide(6));
+        QVERIFY(live.next());
+        QCOMPARE(live.itemIndex(), 4);
+        QCOMPARE(live.currentText(), QStringLiteral("Welcome!"));
+        QVERIFY(!live.next());   // the end of the service
+        QCOMPARE(live.itemIndex(), 4);
+    }
+
+    void previousGoesToThePreviousItemsLastSlide()
+    {
+        LiveState live;
+        live.setService(QUuid::createUuid(), service());
+        QVERIFY(live.goToItem(3));
+        live.clearText();
+        QVERIFY(live.previous());
+        QCOMPARE(live.itemIndex(), 1);
+        QCOMPARE(live.slideIndex(), 4);
+        QVERIFY(!live.textCleared());
+        QVERIFY(live.goToSlide(0));
+        QVERIFY(!live.previous());   // only a header before it
+        QCOMPARE(live.itemIndex(), 1);
+    }
+
+    void goToItemTakesAnItemLiveAtASlide()
+    {
+        LiveState live;
+        live.setService(QUuid::createUuid(), service());
+        QVERIFY(live.goToItem(3, 2));
+        QCOMPARE(live.slideIndex(), 2);
+        QVERIFY(live.goToItem(1, -1));
+        QCOMPARE(live.slideIndex(), 4);
+        QVERIFY(!live.goToItem(0));      // a header
+        QVERIFY(!live.goToItem(2));      // a placeholder
+        QVERIFY(!live.goToItem(3, 7));
+        QVERIFY(!live.goToItem(5));
+        QCOMPARE(live.itemIndex(), 1);
+        QCOMPARE(live.slideIndex(), 4);
+    }
+
+    void gotoItemCommand()
+    {
+        LiveState live;
+        live.setService(QUuid::createUuid(), service());
+        QVERIFY(runCommand(live, "goto_item", 3));
+        QCOMPARE(live.itemIndex(), 3);
+        QVERIFY(runCommand(live, "goto_item", QVariantList{1, 2}));
+        QCOMPARE(live.itemIndex(), 1);
+        QCOMPARE(live.slideIndex(), 2);
+        QVERIFY(runCommand(live, "goto_item", "4"));   // as --command goto_item=4 passes it
+        QCOMPARE(live.itemIndex(), 4);
+        QVERIFY(!runCommand(live, "goto_item"));
+        QVERIFY(!runCommand(live, "goto_item", "x"));
+        QVERIFY(!runCommand(live, "goto_item", QVariantList{1, "x"}));
+        QVERIFY(!runCommand(live, "goto_item", 0));
+        QCOMPARE(live.itemIndex(), 4);
+    }
+
+    void aSongFromTheLibraryIsNotAServiceItem()
+    {
+        LiveState live;
+        live.setService(QUuid::createUuid(), service());
+        QVERIFY(live.goToItem(1));
+        live.show(arranged(), {}, 6);
+        QCOMPARE(live.itemIndex(), -1);
+        QVERIFY(live.itemIdString().isEmpty());
+        QVERIFY(!live.next());   // stops at the song's end
+        QVERIFY(live.goToSlide(0));
+        QVERIFY(!live.previous());
+    }
+
+    void aChangedServiceCarriesOnFromTheLiveItem()
+    {
+        LiveState live;
+        const QUuid id = QUuid::createUuid();
+        QList<LiveItem> items = service();
+        live.setService(id, items);
+        QVERIFY(live.goToItem(1, 4));
+        items.move(1, 4);   // the live song moved to the end
+        QSignalSpy spy(&live, &LiveState::changed);
+        live.setService(id, items);
+        QCOMPARE(spy.count(), 1);
+        QCOMPARE(live.itemIndex(), 4);
+        QCOMPARE(live.slideIndex(), 4);   // what's showing doesn't move
+        QVERIFY(!live.next());
+        QVERIFY(live.goToSlide(0));
+        QVERIFY(live.previous());
+        QCOMPARE(live.itemIndex(), 3);   // Welcome, now before it
+
+        items.removeAt(3);   // the live item taken out: it keeps showing, and Next stays in it
+        live.setService(id, items);
+        QCOMPARE(live.itemIndex(), -1);
+        QCOMPARE(live.currentText(), QStringLiteral("Welcome!"));
+        QVERIFY(!live.next());
+        QVERIFY(!live.previous());
+    }
+
+    void restoreThenSetServicePicksTheServiceBackUp()
+    {
+        const QList<LiveItem> items = service();
+        const QUuid id = QUuid::createUuid();
+        LiveState live;
+        live.restore(items[3].song, items[3].arrangement, 6, true, false, id, items[3].id);
+        QCOMPARE(live.itemIndex(), -1);   // the service isn't loaded yet
+        QCOMPARE(live.itemIdString(), items[3].id.toString(QUuid::WithoutBraces));
+        QVERIFY(!live.next());
+        live.setService(id, items);
+        QCOMPARE(live.itemIndex(), 3);
+        QVERIFY(live.textCleared());
+        QVERIFY(live.next());
+        QCOMPARE(live.itemIndex(), 4);
+    }
+
+    void liveItemsForEachKind()
+    {
+        Song song = arranged();
+        song.id = QUuid::createUuid();
+        ServiceItem item = songItem(song);
+        QCOMPARE(liveItem(item, song).slides.size(), 7);
+        QVERIFY(liveItem(item, std::nullopt).slides.isEmpty());   // the song couldn't load
+
+        song.arrangements << Arrangement{QUuid::createUuid(), "Short", {song.groups[3].id}, {}};
+        item.arrangement = song.arrangements[1].id;
+        QCOMPARE(liveItem(item, song).slides.size(), 1);
+
+        // Planning Center's order for the day, by label; a label naming no group is left out.
+        item.customSequence = {"chorus", "Verse 2", "Outro", "Chorus"};
+        const LiveItem custom = liveItem(item, song);
+        QStringList labels;
+        for (const SongSlide &s : custom.slides)
+            labels << s.groupLabel;
+        QCOMPARE(labels, (QStringList{"Chorus", "Verse 2", "Chorus"}));
+        QCOMPARE(custom.arrangement, item.id);
+        QCOMPARE(songSlides(custom.song, custom.arrangement), custom.slides);   // the journal can rebuild it
+
+        item.customSequence = {"Outro"};   // nothing matches: the arrangement stands
+        QCOMPARE(liveItem(item, song).slides.size(), 1);
+
+        const LiveItem text = liveItem(textItem("Welcome", "Welcome!\nSit anywhere"), std::nullopt);
+        QCOMPARE(text.slides.size(), 1);
+        QCOMPARE(text.slides[0].text, QStringLiteral("Welcome!\nSit anywhere"));
+        QCOMPARE(text.song.title, QStringLiteral("Welcome"));
+        const LiveItem blank = liveItem(textItem("Blank", ""), std::nullopt);
+        QCOMPARE(blank.slides.size(), 1);
+        QVERIFY(blank.slides[0].isBlank());
+        QVERIFY(liveItem(header("Worship"), std::nullopt).slides.isEmpty());
     }
 
     // Outputs bind to properties by name (QML); check they're readable through the meta-object.

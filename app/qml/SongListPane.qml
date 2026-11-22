@@ -37,6 +37,7 @@ ColumnLayout {
             onClicked: {
                 pane.forceActiveFocus()   // out of the search field, so keys drive slides again
                 SongLibrary.select(modelData.id)
+                ServiceList.showLibrarySong()
             }
         }
 

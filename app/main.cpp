@@ -1,3 +1,4 @@
+#include "library/servicelist.h"
 #include "library/songlibrary.h"
 #include "live/commandsqml.h"
 #include "live/livestate.h"
@@ -41,7 +42,9 @@ int main(int argc, char *argv[])
         "Keep the crash-recovery journal in this file instead of Application Support.", "file");
     const QCommandLineOption commandOpt("command",
         "Run an operator command after startup, e.g. next_slide or goto_slide=2. Repeatable.", "name[=arg]");
-    parser.addOptions({settingsDirOpt, assignOpt, backgroundOpt, libraryOpt, journalOpt, commandOpt});
+    const QCommandLineOption importOpt("import",
+        "Import the Visualis song and service exports in this folder, and open the last service.", "dir");
+    parser.addOptions({settingsDirOpt, assignOpt, backgroundOpt, libraryOpt, journalOpt, commandOpt, importOpt});
     parser.process(app);
 
     if (parser.isSet(settingsDirOpt)) {
@@ -56,17 +59,29 @@ int main(int argc, char *argv[])
     engine.loadFromModule("Visualis.Ui", "Main");
 
     // After the window is up, so a library that can't be opened shows its error there.
-    if (auto *songs = engine.singletonInstance<SongLibrary *>("Visualis.Ui", "SongLibrary"))
+    auto *songs = engine.singletonInstance<SongLibrary *>("Visualis.Ui", "SongLibrary");
+    auto *services = engine.singletonInstance<ServiceList *>("Visualis.Ui", "ServiceList");
+    if (songs)
         songs->openLibrary(parser.isSet(libraryOpt) ? parser.value(libraryOpt) : SongLibrary::defaultFolder());
+    if (parser.isSet(importOpt) && songs && services) {
+        const QUrl folder = QUrl::fromLocalFile(QFileInfo(parser.value(importOpt)).absoluteFilePath());
+        songs->importSongs(folder);   // first, so the services' songs are there
+        services->importServices(folder);
+    }
 
     // Back to what was live if the last run crashed (#25), then journal every change.
     auto *live = engine.singletonInstance<visualis::LiveState *>("Visualis.Ui", "LiveState");
     auto *video = engine.singletonInstance<VideoEngine *>("Visualis.Ui", "VideoEngine");
     if (auto *recovery = engine.singletonInstance<Recovery *>("Visualis.Ui", "Recovery"); recovery && live) {
         const QString journal = parser.isSet(journalOpt) ? parser.value(journalOpt) : Recovery::defaultJournalPath();
-        if (recovery->start(journal, live, video) && !live->songId().isEmpty()) {
-            if (auto *songs = engine.singletonInstance<SongLibrary *>("Visualis.Ui", "SongLibrary"))
-                songs->select(live->songId());   // the operator sees its slides (if it's in the library)
+        if (recovery->start(journal, live, video)) {
+            // The operator sees its slides: the service item it was, else the library's song.
+            if (!live->serviceIdString().isEmpty() && services && services->openId() != live->serviceIdString())
+                services->openService(live->serviceIdString());
+            if (services && live->itemIndex() >= 0)
+                services->select(live->itemIndex());
+            else if (songs && !live->songId().isEmpty())
+                songs->select(live->songId());
         }
     }
 

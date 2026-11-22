@@ -1,5 +1,6 @@
 #pragma once
 
+#include "live/liveitem.h"
 #include "song/slidelist.h"
 
 #include <QObject>
@@ -27,6 +28,11 @@ class LiveState : public QObject
     Q_PROPERTY(QString groupColor READ groupColor NOTIFY changed)
     Q_PROPERTY(bool textCleared READ textCleared NOTIFY changed)
     Q_PROPERTY(bool backgroundCleared READ backgroundCleared NOTIFY changed)
+    // The live service and, when what's live came from it, the item (#51). Ids without
+    // braces, empty when none; itemIndex is -1 when the live item isn't in the service.
+    Q_PROPERTY(QString serviceId READ serviceIdString NOTIFY changed)
+    Q_PROPERTY(QString itemId READ itemIdString NOTIFY changed)
+    Q_PROPERTY(int itemIndex READ itemIndex NOTIFY changed)
 
 public:
     explicit LiveState(QObject *parent = nullptr);
@@ -34,15 +40,34 @@ public:
     // Takes the song live at the given slide of the arrangement (Song::playOrder picks
     // it). Shows the text again if it was cleared. Returns false, with no slide showing,
     // when the index is out of range or the arrangement has no slides; the song is still
-    // live so the operator can pick another slide.
+    // live so the operator can pick another slide. A song shown this way isn't a service
+    // item, so Next stops at its last slide.
     bool show(const Song &song, const QUuid &arrangement = {}, int index = 0);
 
     // Puts back a state saved earlier (crash recovery, #25): the song at that slide with its
-    // clears. An index that no longer fits leaves the song live with no slide, as show() does.
-    void restore(const Song &song, const QUuid &arrangement, int index, bool textCleared, bool backgroundCleared);
+    // clears, and the service and item it came from, if any. An index that no longer fits
+    // leaves the song live with no slide, as show() does. setService() with the same service
+    // afterwards picks the service back up at that item.
+    void restore(const Song &song, const QUuid &arrangement, int index, bool textCleared, bool backgroundCleared,
+                 const QUuid &service = {}, const QUuid &item = {});
 
-    // Step through the slides, crossing groups. At either end nothing changes and they
-    // return false. A step shows the text again if it was cleared.
+    // The service being run, one LiveItem per service item in order (#51). Doesn't change
+    // what's showing: when the live item is among `items` the service carries on from it
+    // (after a reorder, an edit, or a recovery); otherwise Next and Previous stay in what's
+    // live until an item is taken live. Call again after every change to the service.
+    void setService(const QUuid &id, const QList<LiveItem> &items);
+    void clearService() { setService({}, {}); }
+    const QList<LiveItem> &serviceItems() const { return m_items; }
+
+    // Takes item n of the service live at slide `slide` (-1: its last slide). False, with
+    // nothing changed, when there's no such item or slide; headers have no slides.
+    bool goToItem(int n, int slide = 0);
+
+    // Step through the slides, crossing groups. In a service, Next at an item's last slide
+    // goes to the first slide of the next item that has slides, and Previous at an item's
+    // first slide to the last slide of the one before; with nothing live, Next starts the
+    // service. At either end nothing changes and they return false. A step shows the text
+    // again if it was cleared.
     Q_INVOKABLE bool next();
     Q_INVOKABLE bool previous();
     // Also brings back cleared text when n is the current slide.
@@ -78,12 +103,19 @@ public:
     QString groupColor() const;
     bool textCleared() const { return m_textCleared; }
     bool backgroundCleared() const { return m_backgroundCleared; }
+    QUuid serviceId() const { return m_serviceId; }
+    QUuid itemId() const { return m_itemId; }
+    QString serviceIdString() const { return braceless(m_serviceId); }
+    QString itemIdString() const { return braceless(m_itemId); }
+    int itemIndex() const;
 
 signals:
     void changed();
 
 private:
     bool moveTo(int n);
+    void showItem(int n, int slide);
+    static QString braceless(const QUuid &id) { return id.isNull() ? QString() : id.toString(QUuid::WithoutBraces); }
 
     Song m_song;
     QUuid m_arrangement;
@@ -91,6 +123,9 @@ private:
     int m_index = -1;
     bool m_textCleared = false;
     bool m_backgroundCleared = false;
+    QUuid m_serviceId;
+    QList<LiveItem> m_items;
+    QUuid m_itemId;   // the live song's service item; null when it didn't come from one
 };
 
 } // namespace visualis

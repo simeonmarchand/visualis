@@ -55,6 +55,20 @@ private slots:
         QVERIFY(!r.snapshot->backgroundCleared);
         QCOMPARE(r.snapshot->background, s.background);
         QCOMPARE(r.snapshot->savedAt.toMSecsSinceEpoch(), s.savedAt.toMSecsSinceEpoch());
+        QVERIFY(r.snapshot->service.isNull() && r.snapshot->item.isNull());
+    }
+
+    void keepsTheServiceAndItem()
+    {
+        LiveSnapshot s;
+        s.song = sample();
+        s.slideIndex = 1;
+        s.service = QUuid::createUuid();
+        s.item = QUuid::createUuid();
+        const SnapshotResult r = snapshotFromJson(snapshotToJson(s));
+        QVERIFY2(r.snapshot, qPrintable(r.error));
+        QCOMPARE(r.snapshot->service, s.service);
+        QCOMPARE(r.snapshot->item, s.item);
     }
 
     void aBackgroundAloneIsKept()

@@ -38,7 +38,7 @@ bool Recovery::start(const QString &journalPath, LiveState *live, VideoEngine *v
             qCInfo(lcRecovery) << "journal from an earlier service, not restored; saved" << s.savedAt;
         } else {
             if (s.song)
-                live->restore(*s.song, s.arrangement, s.slideIndex, s.textCleared, s.backgroundCleared);
+                live->restore(*s.song, s.arrangement, s.slideIndex, s.textCleared, s.backgroundCleared, s.service, s.item);
             else if (s.backgroundCleared)
                 live->clearBackground();
             if (video && !s.background.isEmpty())
@@ -74,6 +74,8 @@ void Recovery::write()
     s.textCleared = m_live->textCleared();
     s.backgroundCleared = m_live->backgroundCleared();
     s.background = m_video ? m_video->source().toString() : QString();
+    s.service = m_live->serviceId();
+    s.item = m_live->itemId();
     s.savedAt = QDateTime::currentDateTimeUtc();
 
     if (s.isEmpty() && !s.backgroundCleared) {
