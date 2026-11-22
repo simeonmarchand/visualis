@@ -44,7 +44,7 @@ public:
     static OpenResult open(const QString &folder, const std::vector<Migration> &migrations);
 
     static const std::vector<Migration> &migrations();
-    // Why `migrations` isn't versions 1, 2, …, N in order, or empty when it is. open() refuses
+    // Why `migrations` isn't versions 1, 2, …, N in order (N ≥ 1), or empty when it is. open() refuses
     // such a list: a library is migrated past every version at or below its own, so a gap
     // filled in later would be skipped on it forever.
     static QString migrationOrderError(const std::vector<Migration> &migrations);

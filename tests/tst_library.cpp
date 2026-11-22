@@ -150,6 +150,9 @@ private slots:
         QTest::newRow("duplicate") << QList<int>{1, 2, 2} << "step 3 is version 2, expected 3";
         QTest::newRow("swapped") << QList<int>{2, 1} << "step 1 is version 2, expected 1";
         QTest::newRow("not from 1") << QList<int>{2} << "step 1 is version 2, expected 1";
+        QTest::newRow("zero") << QList<int>{0, 1} << "step 1 is version 0, expected 1";
+        QTest::newRow("negative") << QList<int>{-1} << "step 1 is version -1, expected 1";
+        QTest::newRow("empty") << QList<int>{} << "there are none";
     }
     void refusesAMigrationListOutOfOrder()
     {
@@ -170,6 +173,12 @@ private slots:
         auto again = Library::open(tmp.path(), v1);   // untouched: no step ran, no copy was made
         QCOMPARE(again.library->schemaVersion(), 1);
         QVERIFY(QDir(tmp.path()).entryList({"library.sqlite.before-*"}, QDir::Files).isEmpty());
+
+        // A folder that doesn't exist yet isn't created, nor its media/.
+        const QString fresh = tmp.filePath("new library");
+        QTest::ignoreMessage(QtCriticalMsg, qPrintable("schema migrations out of order: " + error));
+        QCOMPARE(Library::open(fresh, list).error, E::MigrationFailed);
+        QVERIFY(!QFileInfo::exists(fresh));
     }
 
     void refusesANewerLibrary()
