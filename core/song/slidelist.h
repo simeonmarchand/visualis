@@ -37,7 +37,7 @@ QList<SongSlide> songSlides(const Song &song, const QUuid &arrangement = {});
 // lists them for the operator (#55).
 QList<SongSlide> songSlides(const Song &song, const QStringList &sequence);
 
-// Whether a label names a section that has no lyrics: Intro, Interlude, Ending...
+// Whether a label names a section that has no lyrics: Intro, Interlude, Ending, Blank...
 bool isLyricless(const QString &label);
 
 } // namespace visualis

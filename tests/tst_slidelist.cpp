@@ -140,6 +140,16 @@ private slots:
         QCOMPARE(slides[7].groupLabel, QStringLiteral("Ending"));
     }
 
+    // A "Blank" step (a deliberate pause) gives a blank slide, not nothing.
+    void aBlankStepGivesABlankSlide()
+    {
+        Song s = sample();
+        const QList<SongSlide> slides = songSlides(s, {"Chorus", "Blank", "Chorus"});
+        QCOMPARE(texts(slides), (QStringList{"And heaven and nature sing", "", "And heaven and nature sing"}));
+        QCOMPARE(slides[1].groupLabel, QStringLiteral("Blank"));
+        QCOMPARE(slides[1].step, 1);
+    }
+
     void aLyriclessLabelUsesTheSongsGroupWhenItHasOne()
     {
         const Song s = sample();
@@ -151,7 +161,7 @@ private slots:
 
     void lyriclessLabels()
     {
-        for (const char *label : {"Intro", "Turnaround", "Interlude", "Ending", "Instrumental", "Outro", "Interlude 2"})
+        for (const char *label : {"Intro", "Turnaround", "Interlude", "Ending", "Instrumental", "Outro", "Interlude 2", "Blank"})
             QVERIFY2(isLyricless(label), label);
         for (const char *label : {"Verse 1", "Chorus", "Tag", "Pre Chorus 1", "Bridge", ""})
             QVERIFY2(!isLyricless(label), label);

@@ -21,7 +21,7 @@ QList<SongSlide> songSlides(const Song &song, const QUuid &arrangement)
 
 bool isLyricless(const QString &label)
 {
-    static const QStringList kinds{"intro", "outro", "ending", "interlude", "instrumental", "turnaround"};
+    static const QStringList kinds{"intro", "outro", "ending", "interlude", "instrumental", "turnaround", "blank"};
     const SectionLabel parsed = parseLabel(label);
     return parsed.known && kinds.contains(parsed.kind);
 }
