@@ -185,6 +185,26 @@ private slots:
         verifyLossless(s);
     }
 
+    // #67: blank slides (from ProPresenter, or lyric-less sequence entries) used to be
+    // dropped from the text, so any edit deleted them.
+    void blankSlidesSurviveAnEditElsewhere()
+    {
+        const Song s = withGroups({
+            Group{QUuid::createUuid(), "Verse 1", "#0078cc", {"", "First", "", "Last", ""}},
+            Group{QUuid::createUuid(), "Chorus", "#cc004f", {"My chains are gone"}},
+            Group{QUuid::createUuid(), "Blank", "", {"", ""}},
+        });
+        QVERIFY(lyricsText(s).startsWith("[Verse 1]\n(blank)\n\nFirst\n\n(blank)\n\nLast\n\n(blank)\n\n[Chorus]"));
+        verifyLossless(s);
+
+        QString text = lyricsText(s);
+        text.replace("are gone", "are gone!");
+        const LyricsEdit e = applyLyricsText(s, text);
+        QCOMPARE(e.song.groups[0].slides, (QStringList{"", "First", "", "Last", ""}));
+        QCOMPARE(e.song.groups[2].slides, (QStringList{"", ""}));
+        QCOMPARE(e.song.groups[1].slides, QStringList{"My chains are gone!"});
+    }
+
     void aGroupWithoutLyricsStaysABlankSlide()
     {
         const Song s = sample();

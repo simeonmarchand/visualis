@@ -2,6 +2,8 @@
 
 #include "song/lyricspaste.h"
 
+#include <algorithm>
+
 namespace visualis {
 
 QString lyricsText(const Song &song)
@@ -9,13 +11,15 @@ QString lyricsText(const Song &song)
     QStringList blocks;
     for (const Group &g : song.groups) {
         QStringList lines{QStringLiteral("[%1]").arg(g.label)};
-        QStringList slides;
-        for (const QString &s : g.slides) {
-            if (!s.trimmed().isEmpty())
-                slides << s;
-        }
-        if (!slides.isEmpty())
+        const bool onlyBlank = std::all_of(g.slides.cbegin(), g.slides.cend(),
+                                           [](const QString &s) { return s.trimmed().isEmpty(); });
+        // One blank slide is how a header with no lyrics reads back (an Intro).
+        if (!onlyBlank || g.slides.size() > 1) {
+            QStringList slides;
+            for (const QString &s : g.slides)
+                slides << (s.trimmed().isEmpty() ? blankSlideLine() : s);
             lines << slides.join(QStringLiteral("\n\n"));
+        }
         blocks << lines.join('\n');
     }
     return blocks.join(QStringLiteral("\n\n"));

@@ -19,6 +19,8 @@ std::optional<Header> header(const QString &line, bool editorText)
     QString s = line.trimmed();
     if (editorText && s.startsWith('[') && s.endsWith(']'))
         return Header{s.mid(1, s.size() - 2).trimmed()};
+    if (editorText && s.compare(blankSlideLine(), Qt::CaseInsensitive) == 0)
+        return std::nullopt;   // not the "Blank" label: a blank slide
     if (s.isEmpty() || s.size() > 40)
         return std::nullopt;
     if ((s.startsWith('[') && s.endsWith(']')) || (s.startsWith('(') && s.endsWith(')')))
@@ -135,8 +137,14 @@ PastedLyrics parsePastedLyrics(const QString &text, const PasteOptions &options)
     bool sawHeader = false;
 
     auto finish = [&] {
-        const QStringList slides = slidesOf(body, options.maxLinesPerSlide);
+        QStringList slides = slidesOf(body, options.maxLinesPerSlide);
         body.clear();
+        if (options.editorText) {
+            for (QString &s : slides) {
+                if (s.compare(blankSlideLine(), Qt::CaseInsensitive) == 0)
+                    s.clear();
+            }
+        }
         if (!current && slides.isEmpty())
             return;
         const QString label = current ? current->label : QString();

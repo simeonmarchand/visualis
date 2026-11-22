@@ -114,7 +114,7 @@ Window {
             ColumnLayout {
                 Layout.preferredWidth: 420
                 Layout.fillHeight: true
-                Label { text: "Lyrics: [Verse 1] starts a group, a blank line starts a slide"; color: "#8b8f96" }
+                Label { text: "Lyrics: [Verse 1] starts a group, a blank line starts a slide, (blank) is an empty slide"; color: "#8b8f96" }
                 ScrollView {
                     Layout.fillWidth: true
                     Layout.fillHeight: true

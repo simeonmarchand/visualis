@@ -21,6 +21,9 @@ struct PasteOptions {
     bool editorText = false;
 };
 
+// In editorText, a slide that is only this line is a blank slide (#67).
+inline QString blankSlideLine() { return QStringLiteral("(blank)"); }
+
 struct PastedLyrics {
     QList<Group> groups;        // new ids, default colors by kind
     QList<QUuid> sequence;      // the order as pasted, with repeats
