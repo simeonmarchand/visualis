@@ -305,6 +305,31 @@ private slots:
         QCOMPARE(store.list().size(), 1);
     }
 
+    // #77: a batch whose commit fails moves its songs from imported to failed.
+    void importWriterReportsARolledBackBatchAsFailed()
+    {
+        QTemporaryDir lib;
+        auto library = Library::open(lib.path()).library;
+        SongStore store(*library);
+        ImportWriter writer(store, ImportWriter::Duplicates::SkipSameTitle);
+        writer.add({"first.json", fixture("Amazing Grace"), {}, {}, {}});
+        const Song second = fixture("Holy Holy Holy");
+        {
+            SongStore::Batch batch(store);
+            writer.mark();
+            writer.add({"second.json", second, {}, {}, {"a warning"}});
+            writer.add({"notes.json", {}, "not a song", {}, {}});
+        }   // the commit never happened: rolled back
+        writer.batchFailed("disk full");
+        QCOMPARE(store.list().size(), 1);
+        QCOMPARE(writer.report().imported, QStringList{"Amazing Grace"});
+        QCOMPARE(writer.report().failed, (QList<std::pair<QString, QString>>{{"second.json", "disk full"}}));
+        QCOMPARE(writer.report().skipped.size(), 1);
+        QVERIFY(writer.report().warnings.isEmpty());
+        writer.add({"again.json", second, {}, {}, {}});   // its title is free again
+        QCOMPARE(writer.report().imported.size(), 2);
+    }
+
     // #69
     void importSkipsFilesTooLargeToBeSongsAndReportsProgress()
     {

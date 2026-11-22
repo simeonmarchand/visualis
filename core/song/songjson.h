@@ -7,6 +7,7 @@
 #include <QStringList>
 #include <optional>
 
+#include "songimport.h"
 #include "songstore.h"
 
 namespace visualis {
@@ -46,17 +47,14 @@ struct SongExportReport {
 // Writes every song in the library to `folder`, one file each. Titles that collide get " (2)".
 SongExportReport exportSongs(SongStore &store, const QString &folder);
 
-struct SongImportReport {
-    QStringList imported;                        // titles
-    QList<std::pair<QString, QString>> skipped;  // file name, reason
-    QList<std::pair<QString, QString>> failed;   // file name, error
-    QStringList warnings;
-};
 // Imports every *.visualis-song.json in `folder`. Never overwrites: a song whose id is already
 // in the library is skipped. A title already in the library under another id is imported with
 // a warning, since it may be a different song.
 // Files over kMaxSongFileBytes are skipped unread: a song is a few KB.
 constexpr qint64 kMaxSongFileBytes = 4 * 1024 * 1024;
+// The two steps of importSongs, for an import split across threads (see songimport.h).
+QFileInfoList songFiles(const QString &folder);
+ImportFile readSongFile(const QFileInfo &file);
 SongImportReport importSongs(const QString &folder, SongStore &store, const ImportProgress &progress = {});
 
 } // namespace visualis

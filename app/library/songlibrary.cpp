@@ -9,7 +9,10 @@
 #include "song/songstore.h"
 
 #include <QDir>
+#include <QElapsedTimer>
+#include <QMutex>
 #include <QThread>
+#include <QWaitCondition>
 #include <QLoggingCategory>
 #include <QQmlEngine>
 #include <QStandardPaths>
@@ -18,29 +21,36 @@ using namespace visualis;
 
 Q_LOGGING_CATEGORY(lcLibrary, "visualis.library")
 
-// What the worker shares with the GUI thread. The worker writes `summary` before it ends;
-// the GUI reads it only after QThread::finished.
+namespace {
+// Files read but not yet saved; the worker waits when this many are queued.
+constexpr int kMaxQueued = 200;
+} // namespace
+
+// What the worker shares with the GUI thread: files it has read, waiting to be saved here.
+// The worker never touches the library or SongLibrary.
 struct ImportState {
     std::atomic_bool stop = false;
-    std::atomic_int done = 0;
     std::atomic_int total = 0;
-    SongLibrary::ImportSummary summary;
+    QMutex mutex;
+    QWaitCondition roomFree;
+    QList<ImportFile> ready;
 };
 
 struct SongLibrary::ImportRun {
     QThread *thread = nullptr;
     std::shared_ptr<ImportState> state;
-    // The library an import was stopped to switch away from: closed once the worker is done,
-    // so closing it never waits on the worker's connection.
-    std::unique_ptr<SongStore> retiredStore;
-    std::unique_ptr<Library> retiredLibrary;
+    QString source;
+    std::unique_ptr<ImportWriter> writer;   // null once stopped
+    int handled = 0;                        // files saved or reported
+    bool readAll = false;                   // the worker has finished
+    std::optional<ImportSummary> stopped;   // the report as it stood when stopped
 };
 
 SongLibrary::SongLibrary(QObject *parent)
     : QObject(parent)
 {
-    m_importPoll.setInterval(100);
-    connect(&m_importPoll, &QTimer::timeout, this, &SongLibrary::importProgressChanged);
+    m_importSave.setInterval(10);
+    connect(&m_importSave, &QTimer::timeout, this, &SongLibrary::saveImported);
 }
 
 SongLibrary::~SongLibrary()
@@ -49,7 +59,7 @@ SongLibrary::~SongLibrary()
         return;
     // Quitting mid-import: give the file in hand a moment, then leave the worker to the
     // process exit. It holds nothing of this object's.
-    m_import->state->stop = true;
+    stopImport();
     disconnect(m_import->thread, nullptr, this, nullptr);
     if (m_import->thread->wait(3000))
         delete m_import->thread;
@@ -64,15 +74,9 @@ QString SongLibrary::defaultFolder()
 
 bool SongLibrary::openLibrary(const QString &folder)
 {
-    if (m_import) {
-        // Stop it without waiting; the old library closes when the worker is done.
-        m_import->state->stop = true;
-        if (!m_import->retiredLibrary) {
-            m_import->retiredStore = std::move(m_store);
-            m_import->retiredLibrary = std::move(m_library);
-        }
-        emit importProgressChanged();
-    }
+    // An import into the old library stops without waiting for the worker; its report says
+    // what got in.
+    stopImport();
     m_store.reset();
     m_library.reset();
     m_selected.reset();
@@ -165,73 +169,137 @@ bool SongLibrary::goLive(int index)
 bool SongLibrary::importProPresenter(const QUrl &folder)
 {
     const QString path = folder.toLocalFile();
-    return startImport([path](SongStore &store, const ImportProgress &progress) {
-        const propresenter::ImportReport r = propresenter::importFolder(path, store, progress);
-        return ImportSummary{QStringLiteral("from ProPresenter"), r.imported, r.skipped, r.failed, r.warnings};
-    });
+    return startImport({QStringLiteral("from ProPresenter"), [path] { return propresenter::presentationFiles(path); },
+                        propresenter::readForImport, ImportWriter::Duplicates::SkipSameTitle});
 }
 
 bool SongLibrary::importSongs(const QUrl &folder)
 {
     const QString path = folder.toLocalFile();
-    return startImport([path](SongStore &store, const ImportProgress &progress) {
-        const SongImportReport r = visualis::importSongs(path, store, progress);
-        return ImportSummary{{}, r.imported, r.skipped, r.failed, r.warnings};
-    });
+    return startImport({{}, [path] { return songFiles(path); }, readSongFile,
+                        ImportWriter::Duplicates::SkipSameIdWarnSameTitle});
 }
 
 bool SongLibrary::startImport(const ImportJob &job)
 {
-    if (!m_library || m_import)
+    if (!m_store || m_import)
         return false;
     auto state = std::make_shared<ImportState>();
-    const QString libraryFolder = m_library->folder();
-    // The worker opens the library again: a SQLite connection belongs to the thread that
-    // made it. WAL and the busy timeout let both write. It closes its library before it
-    // ends, so the GUI never waits on that.
-    QThread *thread = QThread::create([state, libraryFolder, job] {
-        const ImportProgress progress = [state](int done, int total) {
-            state->done = done;
-            state->total = total;
-            return !state->stop;
-        };
-        ImportSummary summary;
-        {
-            Library::OpenResult opened = Library::open(libraryFolder);
-            if (opened.library) {
-                SongStore store(*opened.library);
-                summary = job(store, progress);
-            } else {
-                summary.failed << std::pair{QStringLiteral("the library"), opened.message};
-            }
+    QThread *thread = QThread::create([state, job] {
+        const QFileInfoList files = job.list();
+        state->total = int(files.size());
+        for (const QFileInfo &file : files) {
+            if (state->stop)
+                return;
+            ImportFile read = job.read(file);
+            QMutexLocker lock(&state->mutex);
+            while (state->ready.size() >= kMaxQueued && !state->stop)
+                state->roomFree.wait(&state->mutex);
+            if (state->stop)
+                return;
+            state->ready.append(std::move(read));
         }
-        summary.filesDone = state->done;
-        summary.filesTotal = state->total;
-        summary.stopped = state->stop && state->done < state->total;
-        state->summary = summary;
     });
     m_import = std::make_unique<ImportRun>();
     m_import->thread = thread;
     m_import->state = state;
-    connect(thread, &QThread::finished, this, &SongLibrary::finishImport);
+    m_import->source = job.source;
+    m_import->writer = std::make_unique<ImportWriter>(*m_store, job.duplicates);
+    connect(thread, &QThread::finished, this, [this] {
+        if (!m_import)
+            return;
+        m_import->readAll = true;
+        saveImported();   // the rest, or finish
+    });
     thread->start();
-    m_importPoll.start();
+    m_importSave.start();
     emit importingChanged();
     emit importProgressChanged();
     return true;
 }
 
+void SongLibrary::saveImported()
+{
+    if (!m_import)
+        return;
+    ImportRun &run = *m_import;
+    ImportState &state = *run.state;
+    if (run.writer) {
+        QElapsedTimer budget;
+        budget.start();
+        SongStore::Batch batch(*m_store);
+        run.writer->mark();
+        int saved = 0;
+        while (budget.elapsed() < kSaveBudgetMs) {
+            std::optional<ImportFile> next;
+            {
+                QMutexLocker lock(&state.mutex);
+                if (!state.ready.isEmpty()) {
+                    next = state.ready.takeFirst();
+                    state.roomFree.wakeOne();
+                }
+            }
+            if (!next)
+                break;
+            run.writer->add(std::move(*next));
+            ++run.handled;
+            ++saved;
+        }
+        if (saved > 0) {
+            if (const SongStore::Result committed = batch.commit(); !committed.ok)
+                run.writer->batchFailed(committed.error);
+            emit importProgressChanged();
+        }
+    }
+    bool drained;
+    {
+        QMutexLocker lock(&state.mutex);
+        drained = state.ready.isEmpty();
+    }
+    if (run.readAll && (drained || !run.writer))
+        finishImport();
+}
+
+void SongLibrary::stopImport()
+{
+    if (!m_import || !m_import->writer)
+        return;
+    m_importSave.stop();
+    m_import->stopped = importSummary();
+    m_import->stopped->stopped = m_import->handled < m_import->state->total || !m_import->readAll;
+    m_import->writer.reset();   // it saves into the library that's closing
+    m_import->state->stop = true;
+    {
+        QMutexLocker lock(&m_import->state->mutex);
+        m_import->state->ready.clear();
+        m_import->state->roomFree.wakeAll();
+    }
+    emit importProgressChanged();
+    if (m_import->readAll)   // finish once the caller is done switching libraries
+        QMetaObject::invokeMethod(this, &SongLibrary::finishImport, Qt::QueuedConnection);
+    else
+        connect(m_import->thread, &QThread::finished, this, &SongLibrary::finishImport, Qt::SingleShotConnection);
+}
+
+SongLibrary::ImportSummary SongLibrary::importSummary() const
+{
+    const SongImportReport &r = m_import->writer->report();
+    return ImportSummary{m_import->source, r.imported, r.skipped, r.failed, r.warnings, false,
+                         m_import->handled, m_import->state->total};
+}
+
 void SongLibrary::finishImport()
 {
-    m_importPoll.stop();
-    std::unique_ptr<ImportRun> run = std::move(m_import);
-    run->thread->wait();   // already finished: returns at once
-    delete run->thread;
-    const ImportSummary &summary = run->state->summary;
+    if (!m_import)
+        return;
+    m_importSave.stop();
+    m_import->thread->wait();   // already finished: returns at once
+    delete m_import->thread;
+    const ImportSummary summary = m_import->stopped ? *m_import->stopped : importSummary();
+    m_import.reset();
     setReport(importReport(summary));
     if (summary.stopped)
         qCInfo(lcLibrary) << "import stopped after" << summary.filesDone << "of" << summary.filesTotal << "files";
-    run.reset();   // closes a library this import outlived
     emit importingChanged();
     emit importProgressChanged();
     emit songsChanged();
@@ -242,12 +310,12 @@ QString SongLibrary::importProgress() const
 {
     if (!m_import)
         return {};
-    if (m_import->state->stop)
+    if (!m_import->writer)
         return QStringLiteral("Stopping the import…");
     const int total = m_import->state->total;
     if (total == 0)
         return QStringLiteral("Importing…");
-    return QStringLiteral("Importing %1 of %2 files…").arg(qMin(m_import->state->done + 1, total)).arg(total);
+    return QStringLiteral("Importing %1 of %2 files…").arg(qMin(m_import->handled + 1, total)).arg(total);
 }
 
 QString SongLibrary::importReport(const ImportSummary &s)

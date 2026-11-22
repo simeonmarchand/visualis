@@ -10,6 +10,7 @@
 #include "live/livestate.h"
 
 #include <QQmlApplicationEngine>
+#include <QSqlDatabase>
 #include <QQuickItem>
 #include <QQuickWindow>
 #include <QTemporaryDir>
@@ -525,6 +526,42 @@ private slots:
                  SongLibrary::importReport({{}, sync.imported, sync.skipped, sync.failed, sync.warnings}));
     }
 
+    // #77: the operator's saves never wait on another connection's lock during an import,
+    // because no other connection writes.
+    void guiSavesKeepLandingDuringALongImport()
+    {
+        const QString folder = writeSongFiles(2000);
+        qint64 longestGap = 0;
+        QElapsedTimer sinceTick;
+        QTimer timer;
+        timer.setInterval(10);
+        connect(&timer, &QTimer::timeout, this, [&] { longestGap = qMax(longestGap, sinceTick.restart()); });
+        sinceTick.start();
+        timer.start();
+        QVERIFY(m_songs->importSongs(QUrl::fromLocalFile(folder)));
+
+        qint64 slowestSave = 0;
+        int pasted = 0;
+        bool onlyOneConnection = true;
+        while (m_songs->importing()) {
+            onlyOneConnection = onlyOneConnection && QSqlDatabase::connectionNames().size() == 1;
+            QElapsedTimer save;
+            save.start();
+            QVERIFY(m_songs->createFromPaste(QStringLiteral("Pasted %1").arg(pasted++), kLyrics));
+            slowestSave = qMax(slowestSave, save.elapsed());
+            QTest::qWait(5);
+        }
+        timer.stop();
+        longestGap = qMax(longestGap, sinceTick.elapsed());
+        qInfo() << pasted << "saves during the import; slowest" << slowestSave << "ms; longest stall" << longestGap << "ms";
+        QVERIFY(pasted >= 5);
+        QVERIFY2(onlyOneConnection, "the import opened a database connection of its own");
+        QVERIFY2(slowestSave < kMaxSaveMs, qPrintable(QString("a save took %1 ms").arg(slowestSave)));
+        QVERIFY2(longestGap < kMaxStallMs, qPrintable(QString("the event loop stalled for %1 ms").arg(longestGap)));
+        QCOMPARE(m_songs->songs().size(), 2000 + pasted);
+        QVERIFY(m_songs->report().startsWith("Imported 2000 songs."));
+    }
+
     void oneImportAtATimeAndTheLibraryStaysWritable()
     {
         const QString folder = writeSongFiles(200);
@@ -839,6 +876,9 @@ private:
 
     QTemporaryDir m_dir;
     static constexpr qint64 kMaxStallMs = 100;
+    // An idle save is ~5 ms, nearly all disk sync; one behind another connection's lock took
+    // up to 205 ms before #77.
+    static constexpr qint64 kMaxSaveMs = 50;
     int m_libraries = 0;
     int m_folders = 0;
     std::unique_ptr<QQmlApplicationEngine> m_engine;
