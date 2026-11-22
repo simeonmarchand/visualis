@@ -2,7 +2,6 @@
 #include "library/library.h"
 #include "media/mediafiles.h"
 
-#include <QDir>
 #include <QFile>
 #include <QSqlError>
 #include <QSqlQuery>
@@ -24,6 +23,8 @@ MediaAsset fromRow(const QSqlQuery &q)
     a.id = QUuid::fromString(q.value(0).toString());
     a.contentHash = q.value(1).toString();
     a.file = q.value(2).toString();
+    if (!isValidMediaFile(a.file, a.contentHash))
+        a.file.clear();   // never joined to the media folder
     a.originalName = q.value(3).toString();
     a.kind = q.value(4).toString() == QLatin1String("video") ? MediaAsset::Kind::Video : MediaAsset::Kind::Image;
     a.width = q.value(5).toInt();
@@ -44,6 +45,25 @@ std::optional<MediaAsset> one(QSqlDatabase db, const QString &where, const QStri
         return fromRow(q);
     return std::nullopt;
 }
+
+// One statement that writes, without waiting on another program's lock (#88).
+MediaStore::Result write(QSqlDatabase db, QSqlQuery &q, int *rowsAffected = nullptr)
+{
+    QSqlQuery pragma(db);
+    pragma.exec("PRAGMA busy_timeout = 0");
+    const bool done = q.exec();
+    const QSqlError error = q.lastError();
+    if (rowsAffected)
+        *rowsAffected = q.numRowsAffected();
+    pragma.exec(QStringLiteral("PRAGMA busy_timeout = %1").arg(Library::kBusyTimeoutMs));
+    if (done)
+        return {};
+    if (error.nativeErrorCode() == QLatin1String("5"))   // SQLITE_BUSY
+        return {false, QStringLiteral("The library is in use by another program."), true};
+    if (error.nativeErrorCode() == QLatin1String("2067"))   // SQLITE_CONSTRAINT_UNIQUE
+        return {false, QStringLiteral("This file is already in the library.")};
+    return {false, error.text()};
+}
 } // namespace
 
 MediaStore::MediaStore(Library &library)
@@ -53,7 +73,7 @@ MediaStore::MediaStore(Library &library)
 
 MediaStore::Result MediaStore::save(MediaAsset &asset)
 {
-    if (asset.contentHash.isEmpty() || asset.file.isEmpty())
+    if (!isValidMediaFile(asset.file, asset.contentHash))
         return {false, QStringLiteral("A media asset needs its file.")};
     const bool isNew = asset.id.isNull();
     MediaAsset saved = asset;
@@ -73,12 +93,10 @@ MediaStore::Result MediaStore::save(MediaAsset &asset)
         q.addBindValue(v);
     if (!isNew)
         q.addBindValue(key(saved.id));
-    if (!q.exec()) {
-        if (q.lastError().nativeErrorCode() == QLatin1String("2067"))   // SQLITE_CONSTRAINT_UNIQUE
-            return {false, QStringLiteral("This file is already in the library.")};
-        return {false, q.lastError().text()};
-    }
-    if (!isNew && q.numRowsAffected() == 0)
+    int rows = 0;
+    if (Result r = write(m_library.database(), q, &rows); !r.ok)
+        return r;
+    if (!isNew && rows == 0)
         return {false, QStringLiteral("This media is no longer in the library.")};
     asset = saved;
     return {};
@@ -118,30 +136,50 @@ QStringList MediaStore::usedBy(const QUuid &id) const
     return out;
 }
 
-bool MediaStore::remove(const QUuid &id)
+bool MediaStore::isReferenced(const QString &file) const
+{
+    QSqlQuery q(m_library.database());
+    q.prepare("SELECT 1 FROM media_asset WHERE file = ? LIMIT 1");
+    q.addBindValue(file);
+    return q.exec() && q.next();
+}
+
+MediaStore::Result MediaStore::remove(const QUuid &id)
 {
     const std::optional<MediaAsset> asset = load(id);
     if (!asset)
-        return false;
+        return {false, QStringLiteral("This media is no longer in the library.")};
     QSqlQuery q(m_library.database());
     q.prepare("DELETE FROM media_asset WHERE id = ?");
     q.addBindValue(key(id));
-    if (!q.exec() || q.numRowsAffected() == 0)
-        return false;
-    // The row is the truth; a file left behind by a failed delete is harmless.
-    QFile::remove(filePath(*asset));
-    QFile::remove(thumbnailPath(*asset));
-    return true;
+    int rows = 0;
+    if (Result r = write(m_library.database(), q, &rows); !r.ok)
+        return r;
+    if (rows == 0)
+        return {false, QStringLiteral("This media is no longer in the library.")};
+    // The row is the truth: a file left behind by a failed delete is harmless, and a file
+    // another row still uses (hashes are unique, so only a hand-edited database) is kept.
+    if (!asset->file.isEmpty() && !isReferenced(asset->file)) {
+        if (const QString path = filePath(*asset); !path.isEmpty())
+            QFile::remove(path);
+        if (const QString path = thumbnailPath(*asset); !path.isEmpty())
+            QFile::remove(path);
+    }
+    return {};
 }
 
 QString MediaStore::filePath(const MediaAsset &asset) const
 {
-    return QDir(m_library.mediaPath()).filePath(asset.file);
+    if (!isValidMediaFile(asset.file, asset.contentHash))
+        return {};
+    return containedPath(m_library.mediaPath(), asset.file);
 }
 
 QString MediaStore::thumbnailPath(const MediaAsset &asset) const
 {
-    return QDir(m_library.mediaPath()).filePath(thumbnailFile(asset.contentHash));
+    if (!isValidHash(asset.contentHash))
+        return {};
+    return containedPath(m_library.mediaPath(), thumbnailFile(asset.contentHash));
 }
 
 } // namespace visualis

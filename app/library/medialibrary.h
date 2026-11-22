@@ -11,6 +11,7 @@
 
 #include <memory>
 
+struct MediaImportFile;
 class QJSEngine;
 class QQmlEngine;
 class QThread;
@@ -23,9 +24,11 @@ class MediaStore;
 // The media pane's view of the library's images and videos (#97): the searchable thumbnail
 // grid, importing, and deleting. The library itself is SongLibrary's; this follows it.
 //
-// An import copies, hashes, probes, and thumbnails each file on a worker thread, which never
-// opens the library. Only the saves (one small row each) happen here, on the GUI thread's
-// connection, as the worker finishes each file, so a large video never holds up the outputs.
+// An import copies, hashes, probes, and thumbnails each file on a worker thread, into
+// media/.partial/ only; the worker never opens the library or touches a published file. This
+// object, on the GUI thread, is the one place that publishes copies (a rename), saves their
+// rows, and deletes media, so those never race (#97 review). A save never waits for another
+// program's lock: it's retried on the next poll until a deadline (#88).
 class MediaLibrary : public QObject
 {
     Q_OBJECT
@@ -54,6 +57,10 @@ public:
     Q_INVOKABLE QStringList usedBy(const QString &id) const;
     Q_INVOKABLE bool removeAsset(const QString &id);
 
+    // How long a finished file waits for another program to let go of the library before
+    // it's reported failed (#88's pattern). For tests.
+    void setLockWaitLimit(int ms);
+
     QString search() const { return m_search; }
     void setSearch(const QString &search);
     QVariantList assets() const;
@@ -74,6 +81,8 @@ private:
     struct ImportRun;
     void libraryChanged();
     void saveFinishedFiles();
+    // Publishes and saves one file; false if the library is busy and it should be retried.
+    bool saveOne(MediaImportFile &file);
     void finishImport();
     void setReport(const QString &report);
 
@@ -84,4 +93,5 @@ private:
     QString m_report;
     std::unique_ptr<ImportRun> m_import;
     QTimer m_importPoll;   // saves what the worker has finished and updates the progress
+    int m_lockWaitLimitMs = 10'000;
 };

@@ -10,6 +10,8 @@
 #include <QFile>
 #include <QImage>
 #include <QSignalSpy>
+#include <QSqlDatabase>
+#include <QSqlQuery>
 #include <QTemporaryDir>
 #include <QtTest>
 
@@ -160,9 +162,162 @@ private slots:
                      || m_media->report().contains("already in the library as \"Sunrise.mp4\""),
                  qPrintable(m_media->report()));
 
+        // #97 review (M5): one file too, not one per extension.
+        QStringList stored = filesUnder(m_songs->library()->mediaPath(), "");
+        stored.removeIf([](const QString &f) { return f.contains("/thumbs/"); });
+        QCOMPARE(stored.size(), 1);
+
         QVERIFY(importAndWait({QUrl::fromLocalFile(in.filePath("Sunrise.mp4"))}));
         QCOMPARE(m_media->assets().size(), 1);
         QVERIFY(m_media->report().startsWith("Imported 0 files."));
+    }
+
+    // #97 review (H1): while another program holds the library's write lock, the save waits
+    // on a timer, not on the GUI thread; it lands once the lock is let go.
+    void aLockedLibraryDelaysTheSaveWithoutBlocking()
+    {
+        QTemporaryDir in;
+        QImage image(8, 8, QImage::Format_RGB32);
+        image.fill(Qt::yellow);
+        QVERIFY(image.save(in.filePath("Cross.png")));
+        QSqlDatabase other = QSqlDatabase::addDatabase("QSQLITE", "other-program");
+        other.setDatabaseName(m_songs->library()->databasePath());
+        QVERIFY(other.open());
+        QVERIFY(QSqlQuery(other).exec("BEGIN IMMEDIATE"));
+
+        QElapsedTimer sinceTick;
+        qint64 longestGap = 0;
+        int ticks = 0;
+        QTimer tick;
+        tick.setInterval(10);
+        connect(&tick, &QTimer::timeout, this, [&] {
+            longestGap = qMax(longestGap, sinceTick.restart());
+            ++ticks;
+        });
+        QSignalSpy finished(m_media.get(), &MediaLibrary::importFinished);
+        QVERIFY(m_media->importFiles({QUrl::fromLocalFile(in.filePath("Cross.png"))}));
+        sinceTick.start();
+        tick.start();
+        QTRY_VERIFY_WITH_TIMEOUT(m_media->importProgress().contains("Waiting for the library"), 5'000);
+        const int ticksBefore = ticks;
+        QTest::qWait(500);
+        QVERIFY(ticks - ticksBefore >= 10);   // the window kept running while it waited
+        QVERIFY(m_media->assets().isEmpty());
+        QVERIFY(QSqlQuery(other).exec("ROLLBACK"));
+        QVERIFY(finished.wait(5'000));
+        tick.stop();
+        other.close();
+        other = {};
+        QSqlDatabase::removeDatabase("other-program");
+
+        QCOMPARE(m_media->assets().size(), 1);
+        QVERIFY2(longestGap < Library::kBusyTimeoutMs / 2, qPrintable(QString::number(longestGap)));
+    }
+
+    // H1: a lock held past the deadline fails the file clearly, and leaves no file behind.
+    void aLibraryLockedTooLongFailsTheFileAndLeavesNothing()
+    {
+        QTemporaryDir in;
+        QImage image(8, 8, QImage::Format_RGB32);
+        image.fill(Qt::cyan);
+        QVERIFY(image.save(in.filePath("Cross.png")));
+        m_media->setLockWaitLimit(300);
+        {
+            QSqlDatabase other = QSqlDatabase::addDatabase("QSQLITE", "other-program");
+            other.setDatabaseName(m_songs->library()->databasePath());
+            QVERIFY(other.open());
+            QVERIFY(QSqlQuery(other).exec("BEGIN IMMEDIATE"));
+            QVERIFY(importAndWait({QUrl::fromLocalFile(in.filePath("Cross.png"))}));
+            QVERIFY(QSqlQuery(other).exec("ROLLBACK"));
+            other.close();
+        }
+        QSqlDatabase::removeDatabase("other-program");
+        QVERIFY2(m_media->report().contains("another program kept the library busy"), qPrintable(m_media->report()));
+        QVERIFY(m_media->assets().isEmpty());
+        QVERIFY2(filesUnder(m_songs->library()->mediaPath(), "").isEmpty(),
+                 qPrintable(filesUnder(m_songs->library()->mediaPath(), "").join('\n')));
+    }
+
+    // #97 review (M4): deleting an asset while an import of the same content is under way
+    // leaves the import's row with its file.
+    void deletingDuringAnImportKeepsTheImportedFile()
+    {
+        QTemporaryDir in;
+        QVERIFY(!copyFixture("h264-320x180-30fps-2s.mp4", in.path(), "Sunrise.mp4").isEmpty());
+        QVERIFY(importAndWait({QUrl::fromLocalFile(in.filePath("Sunrise.mp4"))}));
+        QCOMPARE(m_media->assets().size(), 1);
+        const QString id = m_media->assets()[0].toMap().value("id").toString();
+
+        QFile big(in.filePath("A long loop.mov"));
+        QVERIFY(big.open(QIODevice::WriteOnly) && big.resize(qint64(300) * 1024 * 1024));
+        big.close();
+        QVERIFY(!copyFixture("h264-320x180-30fps-2s.mp4", in.path(), "Sunrise again.mp4").isEmpty());
+        QSignalSpy finished(m_media.get(), &MediaLibrary::importFinished);
+        QVERIFY(m_media->importFiles({QUrl::fromLocalFile(big.fileName()), QUrl::fromLocalFile(in.filePath("Sunrise again.mp4"))}));
+        QTRY_VERIFY_WITH_TIMEOUT(!filesUnder(m_songs->library()->mediaPath(), ".partial").isEmpty(), 10'000);
+        QVERIFY(m_media->removeAsset(id));   // while the worker is on the first file
+        QVERIFY(finished.wait(60'000));
+
+        MediaStore store(*m_songs->library());
+        bool found = false;
+        for (const MediaAsset &a : store.list()) {
+            if (a.originalName == "Sunrise again.mp4") {
+                found = true;
+                QVERIFY2(QFileInfo(store.filePath(a)).isFile(), qPrintable(a.file));
+            }
+        }
+        QVERIFY2(found, qPrintable(m_media->report()));
+    }
+
+    // #97 review (M7, H3): two Visualis importing the same file into one library make one
+    // asset with its file, and neither reports a failure.
+    void twoImportersOfTheSameFileMakeOneAsset()
+    {
+        QTemporaryDir in;
+        QVERIFY(!copyFixture("h264-320x180-30fps-2s.mp4", in.path(), "Sunrise.mp4").isEmpty());
+        SongLibrary otherSongs;
+        QVERIFY(otherSongs.openLibrary(m_songs->library()->folder()));
+        MediaLibrary otherMedia(&otherSongs);
+
+        QSignalSpy finished(m_media.get(), &MediaLibrary::importFinished);
+        QSignalSpy otherFinished(&otherMedia, &MediaLibrary::importFinished);
+        QVERIFY(m_media->importFiles({QUrl::fromLocalFile(in.filePath("Sunrise.mp4"))}));
+        QVERIFY(otherMedia.importFiles({QUrl::fromLocalFile(in.filePath("Sunrise.mp4"))}));
+        QVERIFY(finished.count() == 1 || finished.wait(30'000));
+        QVERIFY(otherFinished.count() == 1 || otherFinished.wait(30'000));
+
+        for (const QString &report : {m_media->report(), otherMedia.report()})
+            QVERIFY2(!report.contains("Couldn't read"), qPrintable(report));
+        MediaStore store(*m_songs->library());
+        QCOMPARE(store.list().size(), 1);
+        QVERIFY(QFileInfo(store.filePath(store.list()[0])).isFile());
+    }
+
+    // H3: switching libraries mid-import never unlinks a file another Visualis saved.
+    void switchingLibrariesNeverRemovesAnotherImportsFile()
+    {
+        QTemporaryDir in, elsewhere;
+        QVERIFY(!copyFixture("h264-320x180-30fps-2s.mp4", in.path(), "Sunrise.mp4").isEmpty());
+        SongLibrary otherSongs;
+        QVERIFY(otherSongs.openLibrary(m_songs->library()->folder()));
+        MediaLibrary otherMedia(&otherSongs);
+        QSignalSpy otherFinished(&otherMedia, &MediaLibrary::importFinished);
+        QVERIFY(otherMedia.importFiles({QUrl::fromLocalFile(in.filePath("Sunrise.mp4"))}));
+        QVERIFY(otherFinished.wait(30'000));
+        MediaStore store(*otherSongs.library());   // stays open on this library throughout
+        const QString saved = store.filePath(store.list().value(0));
+        QVERIFY(QFileInfo(saved).isFile());
+
+        QFile big(in.filePath("Big.mov"));
+        QVERIFY(big.open(QIODevice::WriteOnly) && big.resize(qint64(2) * 1024 * 1024 * 1024));
+        big.close();
+        QSignalSpy finished(m_media.get(), &MediaLibrary::importFinished);
+        QVERIFY(m_media->importFiles({QUrl::fromLocalFile(in.filePath("Sunrise.mp4")), QUrl::fromLocalFile(big.fileName())}));
+        QTRY_VERIFY_WITH_TIMEOUT(m_media->importProgress().contains("2 of 2"), 10'000);
+        QVERIFY(m_songs->openLibrary(elsewhere.path()));
+        QVERIFY(finished.wait(10'000));
+        QVERIFY(QFileInfo(saved).isFile());
+        QCOMPARE(store.list().size(), 1);
     }
 
     // Fail soft: damaged and unknown files are skipped with a reason, and nothing of them stays
