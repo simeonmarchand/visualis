@@ -14,6 +14,9 @@ qt_add_library(visualis_core STATIC
     live/livestate.h live/livestate.cpp
     live/commands.h live/commands.cpp
     live/livejournal.h live/livejournal.cpp
+    service/service.h service/service.cpp
+    service/servicestore.h service/servicestore.cpp
+    service/servicejson.h service/servicejson.cpp
     output/displayplacement.h output/displayplacement.cpp
     output/displaysettle.h output/displaysettle.cpp
     video/framewatchdog.h video/framewatchdog.cpp
