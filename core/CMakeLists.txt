@@ -25,6 +25,7 @@ qt_add_library(visualis_core STATIC
     pco/pcotypes.h
     pco/pcojson.h pco/pcojson.cpp
     pco/planimport.h pco/planimport.cpp
+    pco/songlink.h pco/songlink.cpp
     scripture/reference.h scripture/reference.cpp
     output/displayplacement.h output/displayplacement.cpp
     output/displaysettle.h output/displaysettle.cpp

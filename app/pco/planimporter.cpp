@@ -4,7 +4,9 @@
 #include "pco/pcoclient.h"
 #include "pco/planimport.h"
 #include "pco/planningcenter.h"
+#include "pco/songlink.h"
 #include "service/servicestore.h"
+#include "song/songstore.h"
 
 #include <QDate>
 #include <QDateTime>
@@ -199,6 +201,9 @@ void PlanImporter::save(const PcoServiceType &type, const PcoPlan &plan, const P
         setStatus(why);
         return;
     }
+    // Songs the library is sure of become song items (#55); the rest wait for the operator.
+    SongStore songStore(*m_songs->library());
+    const SongLinkReport links = linkSongs(r.service, songStore);
     const ServiceStore::Result saved = store.save(r.service);
     if (!saved.ok) {
         setStatus(saved.error);
@@ -207,6 +212,10 @@ void PlanImporter::save(const PcoServiceType &type, const PcoPlan &plan, const P
     const qsizetype n = r.service.items.size();
     QString status = n == 1 ? tr("Imported \"%1\": 1 item.").arg(r.service.title)
                             : tr("Imported \"%1\": %2 items.").arg(r.service.title, QString::number(n));
+    if (const QString songs = links.summary(); !songs.isEmpty())
+        status += QLatin1Char(' ') + songs;
+    for (const QString &missing : links.unmatched)
+        status += QLatin1Char(' ') + tr("No group for %1.").arg(missing);
     if (!r.notes.isEmpty())
         status += QLatin1Char(' ') + r.notes.join(QLatin1Char(' '));
     setStatus(status);

@@ -49,6 +49,7 @@ visualis_add_test(tst_songeditor Qt6::Quick visualis_ui visualis_uiplugin visual
 target_include_directories(tst_songeditor PRIVATE ${CMAKE_SOURCE_DIR}/app)
 visualis_add_test(tst_pcoauth visualis_core)
 visualis_add_test(tst_planimport visualis_core)
+visualis_add_test(tst_songlink visualis_core)
 visualis_add_test(tst_planningcenter Qt6::Network visualis_ui visualis_core)
 target_include_directories(tst_planningcenter PRIVATE ${CMAKE_SOURCE_DIR}/app)
 visualis_add_test(tst_pcojson visualis_core)
