@@ -411,6 +411,91 @@ private slots:
         QCOMPARE(imported.size(), 1);
     }
 
+    // #88 review: an import is for the library that was open when it started.
+    void switchingLibrariesWhileWaitingOnTheLockCancelsTheImport()
+    {
+        const QString first = m_dir.filePath(QString::number(++m_n));
+        const QString second = m_dir.filePath(QString::number(++m_n));
+        SongLibrary songs;
+        QVERIFY(songs.openLibrary(first));
+        auto other = Library::open(first).library;
+        QSqlQuery lock(other->database());
+        QVERIFY(lock.exec("BEGIN IMMEDIATE"));
+
+        FakePlanningCenter server;
+        serve(server);
+        PlanImporter importer;
+        importer.setSongLibrary(&songs);
+        importer.setClient(client(server.url()));
+        QSignalSpy imported(&importer, &PlanImporter::imported);
+        importer.importPlan("1001", "5001");
+        QTRY_VERIFY(importer.status().contains("Waiting for the library"));
+        // The next retry would succeed here. (Closing the locked first library takes the
+        // 5 s busy timeout, in ~Library's checkpoint: reported separately from #88.)
+        QVERIFY(songs.openLibrary(second));
+        QVERIFY(idle(importer));
+        QCOMPARE(imported.size(), 0);
+        QVERIFY2(importer.status().contains("another library was opened"), qPrintable(importer.status()));
+        QVERIFY(ServiceStore(*songs.library()).list().isEmpty());
+
+        QVERIFY(QSqlQuery(other->database()).exec("ROLLBACK"));
+        QVERIFY(ServiceStore(*other).list().isEmpty());   // nor in the first
+    }
+
+    void switchingLibrariesDuringTheReadsCancelsTheImport()
+    {
+        SongLibrary songs;
+        QVERIFY(songs.openLibrary(m_dir.filePath(QString::number(++m_n))));
+        FakePlanningCenter server;
+        serve(server);
+        server.clear(kPlan);
+        server.onHeld(kPlan, "plan.json");
+        PlanImporter importer;
+        importer.setSongLibrary(&songs);
+        importer.setClient(client(server.url()));
+        QSignalSpy imported(&importer, &PlanImporter::imported);
+        importer.importPlan("1001", "5001");
+        QTRY_VERIFY(server.requests > 0);
+        QVERIFY(songs.openLibrary(m_dir.filePath(QString::number(++m_n))));
+        server.release();
+        QVERIFY(idle(importer));
+        QCOMPARE(imported.size(), 0);
+        QVERIFY(importer.status().contains("another library was opened"));
+        QVERIFY(ServiceStore(*songs.library()).list().isEmpty());
+    }
+
+    // #88 review: no attempt after the deadline, even if the lock is free by then.
+    void nothingIsSavedAfterTheDeadline()
+    {
+        const QString folder = m_dir.filePath(QString::number(++m_n));
+        SongLibrary songs;
+        QVERIFY(songs.openLibrary(folder));
+        auto other = Library::open(folder).library;
+        QSqlQuery lock(other->database());
+        QVERIFY(lock.exec("BEGIN IMMEDIATE"));
+
+        FakePlanningCenter server;
+        serve(server);
+        PlanImporter importer;
+        importer.setSongLibrary(&songs);
+        importer.setClient(client(server.url()));
+        importer.setLockWaitLimit(PlanImporter::kLockRetryMs + 50);   // one retry fits; the next is cut short
+        QSignalSpy imported(&importer, &PlanImporter::imported);
+        QTimer release;   // frees the lock after the deadline but before an uncapped retry
+        release.setSingleShot(true);
+        connect(&release, &QTimer::timeout, this, [&] { QSqlQuery(other->database()).exec("ROLLBACK"); });
+        connect(&importer, &PlanImporter::statusChanged, this, [&] {
+            if (importer.status().contains("Waiting") && !release.isActive())
+                release.start(PlanImporter::kLockRetryMs + 150);
+        });
+        importer.importPlan("1001", "5001");
+        QVERIFY(idle(importer));
+        QTest::qWait(2 * PlanImporter::kLockRetryMs);   // any stray retry would have run by now
+        QCOMPARE(imported.size(), 0);
+        QVERIFY2(importer.status().contains("another program kept the library busy"), qPrintable(importer.status()));
+        QVERIFY(ServiceStore(*songs.library()).list().isEmpty());
+    }
+
     void aFailedReadLeavesTheLibraryAlone()
     {
         SongLibrary songs;

@@ -73,8 +73,12 @@ private:
     void end();
     void setStatus(const QString &status);
     void save(const visualis::PcoServiceType &type, const visualis::PcoPlan &plan,
-              const visualis::PcoPlanItems &items);
-    void trySave(visualis::PlanImport import, visualis::SongLinkReport links, QDeadlineTimer deadline);
+              const visualis::PcoPlanItems &items, int library);
+    // One attempt at saving. `library` is m_libraryChanges when importPlan() was called: a
+    // library opened since isn't the one the operator imported into.
+    void trySave(visualis::PlanImport import, visualis::SongLinkReport links, QDeadlineTimer deadline,
+                 int library);
+    void gaveUpWaiting(const QString &title);
 
     QPointer<PlanningCenter> m_pco;
     QPointer<SongLibrary> m_songs;
@@ -85,4 +89,5 @@ private:
     int m_pending = 0;
     QString m_status;
     int m_lockWaitLimitMs = 10000;
+    int m_libraryChanges = 0;
 };
