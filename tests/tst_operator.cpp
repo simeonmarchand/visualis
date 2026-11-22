@@ -1,6 +1,9 @@
 #include "library/servicelist.h"
 #include "library/songlibrary.h"
+#include "library/library.h"
 #include "service/servicejson.h"
+#include "song/songjson.h"
+#include "song/songstore.h"
 #include "live/livestate.h"
 
 #include <QQmlApplicationEngine>
@@ -93,7 +96,8 @@ private slots:
 
     void importsVisualisSongExports()
     {
-        m_songs->importSongs(QUrl::fromLocalFile(FIXTURES_DIR "/songs"));
+        QVERIFY(m_songs->importSongs(QUrl::fromLocalFile(FIXTURES_DIR "/songs")));
+        QVERIFY(waitForImport());
         QCOMPARE(titles(m_songs->songs()), (QStringList{"Amazing Grace", "Holy, Holy, Holy"}));
         QVERIFY(m_songs->report().startsWith("Imported 2 songs"));
     }
@@ -370,7 +374,8 @@ private slots:
 
     void importsServiceExportsAndOpensThem()
     {
-        m_songs->importSongs(QUrl::fromLocalFile(FIXTURES_DIR "/songs"));
+        QVERIFY(m_songs->importSongs(QUrl::fromLocalFile(FIXTURES_DIR "/songs")));
+        QVERIFY(waitForImport());
         const QVariantList songs = m_songs->songs();
         Service s;
         s.id = QUuid::createUuid();
@@ -401,7 +406,120 @@ private slots:
         QCOMPARE(m_services->services().size(), 1);
     }
 
+    // #69: imports run on a worker; the operator window keeps going.
+    void aBigImportKeepsTheEventLoopRunningAndMatchesTheSynchronousOne()
+    {
+        const QString folder = writeSongFiles(1000);
+        int ticks = 0;
+        qint64 longestGap = 0;
+        QElapsedTimer sinceTick;
+        QTimer timer;
+        timer.setInterval(10);
+        connect(&timer, &QTimer::timeout, this, [&] {
+            longestGap = qMax(longestGap, sinceTick.restart());
+            ++ticks;
+        });
+        QElapsedTimer took;
+        took.start();
+        sinceTick.start();
+        timer.start();
+        QVERIFY(m_songs->importSongs(QUrl::fromLocalFile(folder)));
+        QVERIFY(m_songs->importing());
+        QVERIFY(waitForImport());
+        timer.stop();
+        longestGap = qMax(longestGap, sinceTick.elapsed());
+        qInfo() << "import took" << took.elapsed() << "ms;" << ticks << "ticks, longest gap" << longestGap << "ms";
+        QVERIFY(!m_songs->importing());
+        // On this thread the whole import would be one gap; on a worker, no gap comes near
+        // half of it.
+        const qint64 allowed = qMax<qint64>(150, took.elapsed() / 2);
+        QVERIFY2(longestGap < allowed, qPrintable(QString("the event loop stalled for %1 ms of a %2 ms import")
+                                                       .arg(longestGap).arg(took.elapsed())));
+        QVERIFY(ticks >= 5);
+
+        // The same songs and report as importing on this thread.
+        QTemporaryDir other;
+        auto library = Library::open(other.path()).library;
+        SongStore store(*library);
+        const SongImportReport sync = importSongs(folder, store);
+        QCOMPARE(m_songs->songs().size(), 1000);
+        QStringList syncTitles;
+        for (const SongSummary &s : store.list())
+            syncTitles << s.title;
+        QCOMPARE(titles(m_songs->songs()), syncTitles);
+        QCOMPARE(m_songs->report(),
+                 SongLibrary::importReport({{}, sync.imported, sync.skipped, sync.failed, sync.warnings}));
+    }
+
+    void oneImportAtATimeAndTheLibraryStaysWritable()
+    {
+        const QString folder = writeSongFiles(200);
+        QSignalSpy busy(m_songs, &SongLibrary::importingChanged);
+        QVERIFY(m_songs->importSongs(QUrl::fromLocalFile(folder)));
+        QVERIFY(!m_songs->importSongs(QUrl::fromLocalFile(folder)));
+        QVERIFY(!m_songs->importProPresenter(QUrl::fromLocalFile(folder)));
+        QVERIFY(m_songs->importProgress().startsWith("Importing"));
+        // A save on the operator's connection waits its turn instead of failing.
+        QVERIFY(m_songs->createFromPaste("Pasted Mid-Import", kLyrics));
+        QVERIFY(waitForImport());
+        QCOMPARE(m_songs->songs().size(), 201);
+        QVERIFY(m_songs->report().startsWith("Imported 200 songs."));
+        QVERIFY(m_songs->importSongs(QUrl::fromLocalFile(folder)));   // free again
+        QVERIFY(waitForImport());
+    }
+
+    void openingAnotherLibraryStopsAnImport()
+    {
+        const QString folder = writeSongFiles(400);
+        QVERIFY(m_songs->importSongs(QUrl::fromLocalFile(folder)));
+        QSignalSpy finished(m_songs, &SongLibrary::importFinished);
+        QVERIFY(m_songs->openLibrary(m_dir.filePath(QString::number(++m_libraries))));
+        QVERIFY(!m_songs->importing());
+        QTest::qWait(100);   // anything the stopped import queued arrives, and is dropped
+        QCOMPARE(finished.count(), 0);
+        QVERIFY(m_songs->songs().isEmpty());
+        QVERIFY(m_songs->importSongs(QUrl::fromLocalFile(folder)));
+        QVERIFY(waitForImport());
+        QCOMPARE(m_songs->songs().size(), 400);
+    }
+
+    void importReportGroupsSkipsByReason()
+    {
+        const QString report = SongLibrary::importReport(
+            {"from ProPresenter", {"A", "B"},
+             {{"x.pro", "not a song"}, {"y.pro", "too large to be a song"}, {"z.pro", "not a song"}},
+             {{"bad.pro", "truncated"}}, {}});
+        QCOMPARE(report, QStringLiteral("Imported 2 songs from ProPresenter.\nSkipped 2: not a song.\n"
+                                        "Skipped 1: too large to be a song.\nCouldn't read bad.pro: truncated"));
+    }
+
 private:
+    bool waitForImport()
+    {
+        if (!m_songs->importing())
+            return true;
+        QSignalSpy finished(m_songs, &SongLibrary::importFinished);
+        return finished.wait(30000);
+    }
+
+    // `count` synthetic songs as Visualis exports, in their own folder.
+    QString writeSongFiles(int count)
+    {
+        const QString folder = m_dir.filePath(QStringLiteral("songs-%1").arg(++m_folders));
+        QDir().mkpath(folder);
+        for (int i = 0; i < count; ++i) {
+            Song s;
+            s.title = QStringLiteral("Synthetic %1").arg(i, 4, 10, QChar('0'));
+            s.groups = {Group{QUuid::createUuid(), "Verse 1", "", {"line one\nline two", "line three"}},
+                        Group{QUuid::createUuid(), "Chorus", "", {"chorus"}}};
+            QFile f(QDir(folder).filePath(songFileName(s.title)));
+            if (!f.open(QIODevice::WriteOnly))
+                qFatal("can't write a song file");
+            f.write(songToJson(s));
+        }
+        return folder;
+    }
+
     QStringList makeSongs(const QStringList &names)
     {
         QStringList ids;
@@ -497,6 +615,7 @@ private:
 
     QTemporaryDir m_dir;
     int m_libraries = 0;
+    int m_folders = 0;
     std::unique_ptr<QQmlApplicationEngine> m_engine;
     SongLibrary *m_songs = nullptr;
     LiveState *m_live = nullptr;

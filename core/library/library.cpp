@@ -220,6 +220,9 @@ Library::OpenResult Library::open(const QString &folder, const std::vector<Migra
     {
         QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", connection);
         db.setDatabaseName(dbPath);
+        // A write waits this long for another connection's transaction (an import on a
+        // worker thread, #69) instead of failing at once.
+        db.setConnectOptions(QStringLiteral("QSQLITE_BUSY_TIMEOUT=5000"));
     }
     OpenResult r = prepare(connection, dbPath, existed, migrations);
     if (r.error != OpenError::None) {

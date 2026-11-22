@@ -6,9 +6,9 @@
 #include <QStringList>
 #include <optional>
 
-namespace visualis {
+#include "song/songstore.h"
 
-class SongStore;
+namespace visualis {
 
 namespace propresenter {
 
@@ -36,7 +36,9 @@ struct ImportReport {
 // Imports every .pro file in `folder` that looks like a song. Skips presentations that aren't
 // songs and songs whose title is already in the library, so running it twice adds nothing.
 // A file that can't be read is reported and the rest carry on.
-ImportReport importFolder(const QString &folder, SongStore &store);
+// Files over kMaxFileBytes are skipped unread: a real one is tens of KB.
+constexpr qint64 kMaxFileBytes = 16 * 1024 * 1024;
+ImportReport importFolder(const QString &folder, SongStore &store, const ImportProgress &progress = {});
 
 } // namespace propresenter
 } // namespace visualis
