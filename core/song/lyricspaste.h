@@ -24,6 +24,11 @@ struct PasteOptions {
 // In editorText, a slide that is only this line is a blank slide (#67).
 inline QString blankSlideLine() { return QStringLiteral("(blank)"); }
 
+// A lyric line as the editor writes it: with a leading "\\" if editorText would otherwise
+// read it as a header or the blank-slide line ("[Spoken Word]", "Chorus", "(blank)"), or
+// if it starts with "\\" itself. editorText removes it again.
+QString escapeEditorLine(const QString &line);
+
 struct PastedLyrics {
     QList<Group> groups;        // new ids, default colors by kind
     QList<QUuid> sequence;      // the order as pasted, with repeats

@@ -1,3 +1,4 @@
+#include "song/lyricspaste.h"
 #include "song/songtext.h"
 
 #include <QtTest>
@@ -203,6 +204,58 @@ private slots:
         QCOMPARE(e.song.groups[0].slides, (QStringList{"", "First", "", "Last", ""}));
         QCOMPARE(e.song.groups[2].slides, (QStringList{"", ""}));
         QCOMPARE(e.song.groups[1].slides, QStringList{"My chains are gone!"});
+    }
+
+    // PR #74 review: with two Choruses, renaming the first must keep each group's id, or
+    // the arrangement plays the wrong lyrics.
+    void renamingOneOfTwoDuplicatesKeepsEachGroup()
+    {
+        const Song s = withGroups({
+            Group{QUuid::createUuid(), "Chorus", "#cc004f", {"First chorus"}},
+            Group{QUuid::createUuid(), "Verse 1", "#0078cc", {"Amazing grace"}},
+            Group{QUuid::createUuid(), "Chorus", "#cc004f", {"Second chorus"}},
+        });
+        QString text = lyricsText(s);
+        text.replace(text.indexOf("[Chorus]"), 8, "[Refrain]");
+        const LyricsEdit e = applyLyricsText(s, text);
+        QCOMPARE(labels(e.song), (QStringList{"Refrain", "Verse 1", "Chorus"}));
+        for (int i = 0; i < 3; ++i)
+            QCOMPARE(e.song.groups[i].id, s.groups[i].id);
+        QCOMPARE(e.song.arrangements, s.arrangements);
+    }
+
+    void removingTheFirstOfTwoDuplicatesKeepsTheSecond()
+    {
+        const Song s = withGroups({
+            Group{QUuid::createUuid(), "Chorus", "#cc004f", {"First chorus"}},
+            Group{QUuid::createUuid(), "Verse 1", "#0078cc", {"Amazing grace"}},
+            Group{QUuid::createUuid(), "Chorus", "#cc004f", {"Second chorus"}},
+        });
+        QString text = lyricsText(s);
+        text.remove(0, text.indexOf("[Verse 1]"));
+        const LyricsEdit e = applyLyricsText(s, text);
+        QCOMPARE(e.song.groups.size(), 2);
+        QCOMPARE(e.song.groups[1].id, s.groups[2].id);
+        QCOMPARE(e.song.groups[1].slides, QStringList{"Second chorus"});
+    }
+
+    // PR #74 review: lyrics that look like the editor's own syntax stay lyrics.
+    void lyricsThatLookLikeEditorSyntaxSurvive()
+    {
+        const Song s = withGroups({
+            Group{QUuid::createUuid(), "Verse 1", "#0078cc",
+                  {"(blank)", "(BLANK)", "Amazing grace\n[Spoken Word]\nhow sweet", "[Tag]", "Chorus",
+                   "\\back\\slash", "Verse 2:\nstill a lyric"}},
+        });
+        verifyLossless(s);
+    }
+
+    void aBracketedLyricKeptByAPasteStaysALyric()
+    {
+        Song s = songFromPastedLyrics("Psalm", "[Verse 1]\nThe Lord is my shepherd\n[Spoken Word]");
+        QCOMPARE(s.groups.size(), 1);
+        const LyricsEdit e = applyLyricsText(s, lyricsText(s));
+        QCOMPARE(e.song.groups, s.groups);
     }
 
     void aGroupWithoutLyricsStaysABlankSlide()

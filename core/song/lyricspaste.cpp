@@ -13,14 +13,19 @@ struct Header {
     int repeat = 1;
 };
 
+bool isBlankSlideLine(const QString &line)
+{
+    return line.trimmed().compare(blankSlideLine(), Qt::CaseInsensitive) == 0;
+}
+
 // "[Chorus x2]", "Chorus (x2):", "(Bridge)", "Verse 1:" -> a header; any lyric line -> nullopt.
 std::optional<Header> header(const QString &line, bool editorText)
 {
     QString s = line.trimmed();
     if (editorText && s.startsWith('[') && s.endsWith(']'))
         return Header{s.mid(1, s.size() - 2).trimmed()};
-    if (editorText && s.compare(blankSlideLine(), Qt::CaseInsensitive) == 0)
-        return std::nullopt;   // not the "Blank" label: a blank slide
+    if (editorText && (s.startsWith('\\') || isBlankSlideLine(s)))
+        return std::nullopt;   // an escaped lyric, or a blank slide (not the "Blank" label)
     if (s.isEmpty() || s.size() > 40)
         return std::nullopt;
     if ((s.startsWith('[') && s.endsWith(']')) || (s.startsWith('(') && s.endsWith(')')))
@@ -117,6 +122,14 @@ QString normalize(QString text)
 
 } // namespace
 
+QString escapeEditorLine(const QString &line)
+{
+    const QString t = line.trimmed();
+    if (t.startsWith('\\') || isBlankSlideLine(t) || header(t, true))
+        return '\\' + line;
+    return line;
+}
+
 QString defaultGroupColor(const QString &label)
 {
     static const QHash<QString, QString> colors = {
@@ -141,8 +154,16 @@ PastedLyrics parsePastedLyrics(const QString &text, const PasteOptions &options)
         body.clear();
         if (options.editorText) {
             for (QString &s : slides) {
-                if (s.compare(blankSlideLine(), Qt::CaseInsensitive) == 0)
+                if (isBlankSlideLine(s)) {
                     s.clear();
+                    continue;
+                }
+                QStringList lines = s.split('\n');
+                for (QString &l : lines) {
+                    if (l.startsWith('\\'))
+                        l.remove(0, 1);
+                }
+                s = lines.join('\n');
             }
         }
         if (!current && slides.isEmpty())
