@@ -134,6 +134,44 @@ private slots:
         QCOMPARE(q.value(0).toString(), QStringLiteral("keep me"));
     }
 
+    // At merge time a PR's migration must be main's highest version + 1: a library opened
+    // between a v6 and a later v5 would skip v5 forever.
+    void theSchemaHistoryRunsOneToNWithoutGaps()
+    {
+        QCOMPARE(Library::migrationOrderError(Library::migrations()), QString());
+        QCOMPARE(Library::migrations().back().version, Library::latestVersion());
+    }
+
+    void refusesAMigrationListOutOfOrder_data()
+    {
+        QTest::addColumn<QList<int>>("versions");
+        QTest::addColumn<QString>("error");
+        QTest::newRow("gap") << QList<int>{1, 3} << "step 2 is version 3, expected 2";
+        QTest::newRow("duplicate") << QList<int>{1, 2, 2} << "step 3 is version 2, expected 3";
+        QTest::newRow("swapped") << QList<int>{2, 1} << "step 1 is version 2, expected 1";
+        QTest::newRow("not from 1") << QList<int>{2} << "step 1 is version 2, expected 1";
+    }
+    void refusesAMigrationListOutOfOrder()
+    {
+        QFETCH(QList<int>, versions);
+        QFETCH(QString, error);
+        std::vector<Migration> list;
+        for (int v : versions)
+            list.push_back({v, {QStringLiteral("CREATE TABLE t%1 (x)").arg(v)}});
+        QCOMPARE(Library::migrationOrderError(list), error);
+
+        QTemporaryDir tmp;
+        { QVERIFY(Library::open(tmp.path(), v1).library); }
+        QTest::ignoreMessage(QtCriticalMsg, qPrintable("schema migrations out of order: " + error));
+        auto r = Library::open(tmp.path(), list);
+        QCOMPARE(r.error, E::MigrationFailed);
+        QVERIFY(!r.library);
+        QVERIFY2(r.message.contains(error), qPrintable(r.message));
+        auto again = Library::open(tmp.path(), v1);   // untouched: no step ran, no copy was made
+        QCOMPARE(again.library->schemaVersion(), 1);
+        QVERIFY(QDir(tmp.path()).entryList({"library.sqlite.before-*"}, QDir::Files).isEmpty());
+    }
+
     void refusesANewerLibrary()
     {
         QTemporaryDir tmp;

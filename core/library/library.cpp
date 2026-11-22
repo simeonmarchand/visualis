@@ -59,6 +59,13 @@ Library::OpenResult prepare(const QString &connectionName, const QString &dbPath
                             const std::vector<Migration> &migrations)
 {
     using E = Library::OpenError;
+    // A bug in Visualis, not in the library: refuse before touching the file.
+    if (const QString bad = Library::migrationOrderError(migrations); !bad.isEmpty()) {
+        qCCritical(lcLibrary).noquote() << "schema migrations out of order:" << bad;
+        return failure(E::MigrationFailed, QStringLiteral("This version of Visualis can't update libraries safely (its "
+                                                          "schema steps are out of order: %1). The library was left "
+                                                          "unchanged.").arg(bad));
+    }
     QSqlDatabase db = QSqlDatabase::database(connectionName, false);
     if (!db.open())
         return failure(E::CannotCreate, QStringLiteral("Can't open %1: %2").arg(dbPath, db.lastError().text()));
@@ -141,6 +148,16 @@ Library::OpenResult prepare(const QString &connectionName, const QString &dbPath
 }
 
 } // namespace
+
+QString Library::migrationOrderError(const std::vector<Migration> &migrations)
+{
+    for (std::size_t i = 0; i < migrations.size(); ++i) {
+        const int expected = int(i) + 1;
+        if (migrations[i].version != expected)
+            return QStringLiteral("step %1 is version %2, expected %3").arg(i + 1).arg(migrations[i].version).arg(expected);
+    }
+    return {};
+}
 
 const std::vector<Migration> &Library::migrations()
 {
