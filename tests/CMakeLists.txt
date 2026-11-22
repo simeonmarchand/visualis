@@ -28,6 +28,7 @@ if(APPLE)
     # AVFoundation delivers no frames under the offscreen platform. This test opens no
     # windows, so the normal one is fine.
     set_tests_properties(tst_videoengine PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=cocoa")
+    target_link_libraries(tst_videoengine PRIVATE "-framework IOKit")
 endif()
 visualis_add_test(tst_operator Qt6::Quick visualis_ui visualis_uiplugin visualis_core)
 target_include_directories(tst_operator PRIVATE ${CMAKE_SOURCE_DIR}/app)

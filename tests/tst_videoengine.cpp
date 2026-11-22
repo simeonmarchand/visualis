@@ -1,3 +1,4 @@
+#include "output/platformdisplay.h"
 #include "video/videoengine.h"
 
 #include <QGuiApplication>
@@ -10,6 +11,10 @@
 
 #include <atomic>
 
+#ifdef Q_OS_MACOS
+#include <IOKit/pwr_mgt/IOPMLib.h>
+#endif
+
 // Plays a real clip through the engine. The clip is synthetic (ffmpeg's test pattern),
 // generated here so no media lives in the repo; without ffmpeg these tests skip.
 class VideoEngineTest : public QObject
@@ -19,6 +24,15 @@ class VideoEngineTest : public QObject
 private slots:
     void initTestCase()
     {
+        // AVFoundation delivers no frames while every display is asleep, which made these
+        // tests fail on an unattended Mac. Wake the displays as a key press would, and keep
+        // them awake until the tests finish.
+#ifdef Q_OS_MACOS
+        IOPMAssertionID activity = kIOPMNullAssertionID;
+        IOPMAssertionDeclareUserActivity(CFSTR("Visualis video engine tests"), kIOPMUserActiveLocal, &activity);
+        m_awake.setActive(true);
+        QTest::qWait(1500);   // displays take a moment to come back
+#endif
         const QString ffmpeg = QStandardPaths::findExecutable("ffmpeg");
         if (ffmpeg.isEmpty())
             QSKIP("ffmpeg not found; can't make a test clip");
@@ -120,6 +134,7 @@ private:
 
     QTemporaryDir m_dir;
     QString m_clip;
+    DisplaySleepBlocker m_awake;
 };
 
 int main(int argc, char *argv[])
