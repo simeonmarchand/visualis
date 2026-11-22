@@ -1,25 +1,41 @@
 #include "live/liveitem.h"
 
+#include "song/labels.h"
 #include "song/songlimits.h"
+
+#include <algorithm>
 
 namespace visualis {
 
 namespace {
 
-// The groups a custom sequence names, by label ignoring case. Labels that name no group
-// are left out.
-QList<QUuid> sequenceByLabel(const Song &song, const QStringList &labels)
+// This service's order for a song, from its Planning Center labels (#55). Labels match
+// groups forgivingly (matchSequence: "Pre Chorus 1" finds "PreChorus"). A lyric-less label
+// the song has no group for (Intro, Turnaround, Ending) gets a blank group of its own, added
+// to `song`, so the operator still lands on it; other unmatched labels are left out. Empty
+// when no label names one of the song's own groups.
+QList<QUuid> customSteps(Song &song, const QUuid &itemId, const QStringList &labels)
 {
-    QList<QUuid> out;
-    for (const QString &label : labels) {
-        for (const Group &g : song.groups) {
-            if (g.label.compare(label.trimmed(), Qt::CaseInsensitive) == 0) {
-                out << g.id;
-                break;
-            }
+    const SequenceMatch match = matchSequence(labels, song.groups);
+    QList<QUuid> steps;
+    bool any = false;
+    QList<Group> blanks;
+    for (int i = 0; i < labels.size(); ++i) {
+        if (!match.steps[i].isNull()) {
+            steps << match.steps[i];
+            any = true;
+        } else if (isLyricless(labels[i])) {
+            // Named from the item and label, so it's the same id each time the service loads.
+            const QUuid id = QUuid::createUuidV5(itemId, labels[i].trimmed().toLower());
+            if (std::none_of(blanks.cbegin(), blanks.cend(), [&](const Group &g) { return g.id == id; }))
+                blanks << Group{id, labels[i].trimmed(), {}, {QString()}};
+            steps << id;
         }
     }
-    return out;
+    if (!any)
+        return {};
+    song.groups << blanks;
+    return steps;
 }
 
 } // namespace
@@ -39,7 +55,7 @@ LiveItem liveItem(const ServiceItem &item, const std::optional<Song> &song)
             return live;
         live.song = *song;
         live.arrangement = item.arrangement;
-        if (const QList<QUuid> custom = sequenceByLabel(*song, item.customSequence); !custom.isEmpty()) {
+        if (const QList<QUuid> custom = customSteps(live.song, item.id, item.customSequence); !custom.isEmpty()) {
             // The item's id names it: unique, and the same each time the service loads.
             live.song.arrangements << Arrangement{item.id, QStringLiteral("This service"), custom, {}};
             live.arrangement = item.id;
