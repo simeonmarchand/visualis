@@ -9,6 +9,8 @@
 #include <QtQml/qqmlextensionplugin.h>
 #include <QtTest>
 
+#include "testkeychain.h"
+
 #include <memory>
 
 Q_IMPORT_QML_PLUGIN(Visualis_UiPlugin)
@@ -55,6 +57,8 @@ class OutputsTest : public QObject
     Q_OBJECT
 
 private slots:
+    void initTestCase() { useTestKeychainEntry(); }
+
     void init()
     {
         m_engine = std::make_unique<QQmlApplicationEngine>();

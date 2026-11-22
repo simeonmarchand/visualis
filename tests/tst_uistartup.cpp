@@ -3,6 +3,8 @@
 #include <QtQml/qqmlextensionplugin.h>
 #include <QtTest>
 
+#include "testkeychain.h"
+
 Q_IMPORT_QML_PLUGIN(Visualis_UiPlugin)
 
 // Catches QML that fails to load (syntax errors, missing imports, bad bindings) before a
@@ -12,6 +14,8 @@ class UiStartup : public QObject
     Q_OBJECT
 
 private slots:
+    void initTestCase() { m_service = useTestKeychainEntry(); }
+
     void operatorWindowLoadsWithoutWarnings()
     {
         QQmlApplicationEngine engine;
@@ -26,6 +30,12 @@ private slots:
         QCOMPARE(window->objectName(), QStringLiteral("operatorWindow"));
         QVERIFY(QTest::qWaitForWindowExposed(window));
         QVERIFY2(warnings.isEmpty(), qPrintable(warnings.value(0).toString()));
+
+        // The operator window shows the sign-in state, so it creates the PlanningCenter
+        // singleton; that must use the test entry, not the real one (#73).
+        auto *pco = engine.singletonInstance<PlanningCenter *>("Visualis.Ui", "PlanningCenter");
+        QVERIFY(pco);
+        QCOMPARE(pco->credentialService(), m_service);
     }
 
     // The offscreen platform has one display, which the operator window is on, so both
@@ -48,6 +58,9 @@ private slots:
         QVERIFY(outputs);
         QVERIFY(!outputs->property("keepingDisplaysAwake").toBool());
     }
+
+private:
+    QString m_service;
 };
 
 QTEST_MAIN(UiStartup)

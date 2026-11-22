@@ -9,6 +9,9 @@
 #include <QUrl>
 #include <QtQml/qqmlregistration.h>
 
+class QQmlEngine;
+class QJSEngine;
+
 #include <memory>
 
 // The Planning Center connection for the operator (#52): sign in with a Personal Access
@@ -30,9 +33,8 @@ class PlanningCenter : public QObject
     Q_PROPERTY(bool busy READ busy NOTIFY changed)
 
 public:
-    // The real Keychain entry.
-    explicit PlanningCenter(QObject *parent = nullptr);
-    // Tests pass their own store, so nothing touches the real entry.
+    // Tests pass their own store, so nothing touches the real entry. No default constructor:
+    // QML would prefer it to create() below.
     explicit PlanningCenter(std::shared_ptr<const CredentialStore> store, QObject *parent = nullptr);
 
     bool signedIn() const { return m_signedIn; }
@@ -54,6 +56,12 @@ public:
 
     // For tests: another API address.
     void setBaseUrl(const QUrl &url) { m_baseUrl = url; }
+    QString credentialService() const { return m_store->service(); }
+
+    // QML's instance: the real Keychain entry (the only place that names it), unless a test that loads the UI set another
+    // store first so it never opens the real one (#73).
+    static PlanningCenter *create(QQmlEngine *, QJSEngine *);
+    static void setQmlStore(std::shared_ptr<const CredentialStore> store);
 
 signals:
     void changed();

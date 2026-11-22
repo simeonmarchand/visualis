@@ -14,9 +14,24 @@ namespace {
 constexpr char kOrganizationKey[] = "planningCenter/organization";
 }
 
-PlanningCenter::PlanningCenter(QObject *parent)
-    : PlanningCenter(std::make_shared<CredentialStore>(QString::fromLatin1(CredentialStore::kDefaultService)), parent)
+namespace {
+std::shared_ptr<const CredentialStore> &qmlStore()
 {
+    static std::shared_ptr<const CredentialStore> store;
+    return store;
+}
+} // namespace
+
+PlanningCenter *PlanningCenter::create(QQmlEngine *, QJSEngine *)
+{
+    if (!qmlStore())
+        qmlStore() = std::make_shared<CredentialStore>(QString::fromLatin1(CredentialStore::kDefaultService));
+    return new PlanningCenter(qmlStore());
+}
+
+void PlanningCenter::setQmlStore(std::shared_ptr<const CredentialStore> store)
+{
+    qmlStore() = std::move(store);
 }
 
 PlanningCenter::PlanningCenter(std::shared_ptr<const CredentialStore> store, QObject *parent)
