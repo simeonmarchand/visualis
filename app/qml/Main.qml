@@ -126,6 +126,32 @@ Window {
             }
         }
 
+        // A song too big to take live (#83): what was live stays, and this says why.
+        RowLayout {
+            id: liveRefusal
+            property string reason: ""
+            objectName: "liveRefusal"
+            Layout.fillWidth: true
+            visible: reason !== ""
+            spacing: 12
+
+            Connections {
+                target: LiveState
+                function onRefused(reason) { liveRefusal.reason = reason }
+            }
+            Label {
+                Layout.fillWidth: true
+                text: liveRefusal.reason
+                wrapMode: Text.WordWrap
+                color: "#e0b040"
+            }
+            Button {
+                text: "OK"
+                focusPolicy: Qt.NoFocus
+                onClicked: liveRefusal.reason = ""
+            }
+        }
+
         Label {
             objectName: "libraryError"
             Layout.fillWidth: true

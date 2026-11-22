@@ -27,7 +27,9 @@ struct SongSlide {
 //  - A group with no slides gives one blank slide, so there's still something to land on.
 //  - A step whose group no longer exists is skipped.
 //  - An arrangement with no steps gives no slides; the caller should tell the operator.
-QList<SongSlide> songSlides(const Song &song, const QUuid &arrangement = {});
+//  - A song over songlimits (songlimits.h), or that would expand to more than
+//    kPlayedSlides, gives no slides and says why in `error`; nothing large is allocated.
+QList<SongSlide> songSlides(const Song &song, const QUuid &arrangement = {}, QString *error = nullptr);
 
 // The slides for a song played in an order given by label, such as a service's Planning
 // Center sequence (ServiceItem::customSequence). Labels are matched to groups with
@@ -35,7 +37,7 @@ QList<SongSlide> songSlides(const Song &song, const QUuid &arrangement = {});
 // Interlude, Ending...) and no group of its own gives one blank slide, labelled as given,
 // with a null group id (P3 finding 9). Other unmatched labels are skipped; the import
 // lists them for the operator (#55).
-QList<SongSlide> songSlides(const Song &song, const QStringList &sequence);
+QList<SongSlide> songSlides(const Song &song, const QStringList &sequence, QString *error = nullptr);
 
 // Whether a label names a section that has no lyrics: Intro, Interlude, Ending, Blank...
 bool isLyricless(const QString &label);

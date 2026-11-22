@@ -1,6 +1,8 @@
 #include "song/lyricspaste.h"
 #include "song/slidelist.h"
+#include "song/songlimits.h"
 
+#include <QElapsedTimer>
 #include <QtTest>
 
 using namespace visualis;
@@ -29,6 +31,20 @@ QStringList texts(const QList<SongSlide> &slides)
     for (const SongSlide &s : slides)
         out << s.text;
     return out;
+}
+
+
+// One group of `slides` slides, played `steps` times: structurally small, huge expanded.
+Song repeated(int slides, int steps)
+{
+    Song s;
+    s.title = "Huge";
+    QStringList text;
+    for (int i = 0; i < slides; ++i)
+        text << QString::number(i);
+    s.groups = {Group{QUuid::createUuid(), "Verse", "", text}};
+    s.arrangements = {Arrangement{QUuid::createUuid(), "Default", QList<QUuid>(steps, s.groups[0].id), {}}};
+    return s;
 }
 
 } // namespace
@@ -165,6 +181,58 @@ private slots:
             QVERIFY2(isLyricless(label), label);
         for (const char *label : {"Verse 1", "Chorus", "Tag", "Pre Chorus 1", "Bridge", ""})
             QVERIFY2(!isLyricless(label), label);
+    }
+
+    // #83: limits far above real songs, with the operator told which one and by how much.
+    void songLimitsNameWhatIsOver()
+    {
+        QVERIFY(songLimitError(repeated(30, 40)).isEmpty());
+        Song many;
+        for (int i = 0; i < 40'000; ++i)
+            many.groups << Group{QUuid::createUuid(), "Verse", "", {"x"}};
+        QCOMPARE(songLimitError(many), QStringLiteral("too many groups: 40,000; the limit is 500"));
+        QVERIFY(songLimitError(repeated(501, 1)).contains("slides in \"Verse\""));
+        QVERIFY(songLimitError(repeated(1, 1001)).contains("steps in arrangement"));
+        Song longSlide = repeated(1, 1);
+        longSlide.groups[0].slides[0] = QString(10'001, 'a');
+        QVERIFY(songLimitError(longSlide).contains("characters"));
+        Song arrangements = repeated(1, 1);
+        arrangements.arrangements = QList<Arrangement>(101, arrangements.arrangements[0]);
+        QVERIFY(songLimitError(arrangements).contains("arrangements"));
+        Song total;
+        for (int i = 0; i < 21; ++i)
+            total.groups << repeated(500, 1).groups[0];
+        QVERIFY(songLimitError(total).startsWith("too many slides:"));
+    }
+
+    // The issue's case: 10,000 slides played 10,000 times would be 100 million slides.
+    void aHugeExpansionIsRefusedNotAllocated()
+    {
+        QString error;
+        QElapsedTimer t;
+        t.start();
+        QVERIFY(songSlides(repeated(10'000, 10'000), QUuid(), &error).isEmpty());
+        QVERIFY(!error.isEmpty());
+        QVERIFY2(t.elapsed() < 1000, qPrintable(QString::number(t.elapsed())));
+
+        // Within every structural limit, but 500 x 1,000 = 500,000 slides to play.
+        error.clear();
+        QVERIFY(songSlides(repeated(500, 1000), QUuid(), &error).isEmpty());
+        QCOMPARE(error, QStringLiteral("too many slides to play: 500,000; the limit is 10,000"));
+
+        error.clear();
+        QCOMPARE(songSlides(repeated(10, 1000), QUuid(), &error).size(), 10'000);   // exactly at the limit
+        QVERIFY(error.isEmpty());
+    }
+
+    void aHugeSequenceIsRefused()
+    {
+        QString error;
+        QVERIFY(songSlides(repeated(500, 1), QStringList(1000, "Verse"), &error).isEmpty());
+        QVERIFY(error.contains("slides to play"));
+        error.clear();
+        QVERIFY(songSlides(repeated(1, 1), QStringList(1001, "Verse"), &error).isEmpty());
+        QVERIFY(error.contains("steps in the sequence"));
     }
 };
 

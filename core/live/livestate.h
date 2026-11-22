@@ -5,6 +5,8 @@
 
 #include <QObject>
 
+#include <optional>
+
 namespace visualis {
 
 // What is live right now: the one state every output renders (plan 5.2). The operator
@@ -41,14 +43,16 @@ public:
     // it). Shows the text again if it was cleared. Returns false, with no slide showing,
     // when the index is out of range or the arrangement has no slides; the song is still
     // live so the operator can pick another slide. A song shown this way isn't a service
-    // item, so Next stops at its last slide.
+    // item, so Next stops at its last slide. A song over the size limits (songlimits.h)
+    // isn't taken live at all: what's live stays, refused() says why, and it returns false.
     bool show(const Song &song, const QUuid &arrangement = {}, int index = 0);
 
     // Puts back a state saved earlier (crash recovery, #25): the song at that slide with its
     // clears, and the service and item it came from, if any. An index that no longer fits
     // leaves the song live with no slide, as show() does. setService() with the same service
-    // afterwards picks the service back up at that item.
-    void restore(const Song &song, const QUuid &arrangement, int index, bool textCleared, bool backgroundCleared,
+    // afterwards picks the service back up at that item. A song over the size limits is
+    // refused as in show(), leaving everything as it was; returns false then.
+    bool restore(const Song &song, const QUuid &arrangement, int index, bool textCleared, bool backgroundCleared,
                  const QUuid &service = {}, const QUuid &item = {});
 
     // The service being run, one LiveItem per service item in order (#51). Doesn't change
@@ -111,9 +115,13 @@ public:
 
 signals:
     void changed();
+    // A song wasn't taken live because it's too big to expand; for the operator.
+    void refused(const QString &reason);
 
 private:
     bool moveTo(int n);
+    // The song's slides, or nullopt (after refused()) when it's over the limits.
+    std::optional<QList<SongSlide>> slidesOrRefuse(const Song &song, const QUuid &arrangement);
     void showItem(int n, int slide);
     static QString braceless(const QUuid &id) { return id.isNull() ? QString() : id.toString(QUuid::WithoutBraces); }
 
