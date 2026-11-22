@@ -183,6 +183,67 @@ private slots:
         QCOMPARE(*store.load(s.id), s);
     }
 
+    // #103: re-linking a song to Planning Center touches only the link and the credits.
+    void updatePcoLinkChangesOnlyTheLinkAndCredits()
+    {
+        SongStore store(*m_lib);
+        Song s = sampleSong();
+        SAVE_OK(store, s);
+        Song relinked = s;
+        relinked.pcoSongId = "999";
+        relinked.credits = {"111", "New Author", "New Copyright"};
+        relinked.title = "Not Saved";   // everything else is left as stored
+        relinked.groups[1].slides = {"not saved"};
+        relinked.arrangements.clear();
+        QVERIFY(store.updatePcoLink(relinked).ok);
+
+        Song expected = s;
+        expected.pcoSongId = "999";
+        expected.credits = relinked.credits;
+        QCOMPARE(*store.load(s.id), expected);   // updated_at too
+    }
+
+    void updatePcoLinkRollsBackWithTheCallersTransaction()
+    {
+        SongStore store(*m_lib);
+        Song s = sampleSong();
+        SAVE_OK(store, s);
+        Song relinked = s;
+        relinked.pcoSongId = "999";
+        {
+            SongStore::Batch caller(store);
+            QVERIFY(store.updatePcoLink(relinked).ok);
+            QCOMPARE(store.load(s.id)->pcoSongId, QStringLiteral("999"));   // visible inside it
+        }   // rolled back
+        QCOMPARE(store.load(s.id)->pcoSongId, s.pcoSongId);
+
+        SongStore::Batch caller(store);
+        QVERIFY(store.updatePcoLink(relinked).ok);
+        QVERIFY(caller.commit().ok);
+        QCOMPARE(store.load(s.id)->pcoSongId, QStringLiteral("999"));
+    }
+
+    void updatePcoLinkRefusesAnUnknownSong()
+    {
+        SongStore store(*m_lib);
+        Song kept = sampleSong();
+        SAVE_OK(store, kept);
+        Song missing = sampleSong();
+        missing.id = QUuid::createUuid();
+        missing.title = "Gone";
+        SongStore::Batch caller(store);
+        const SongStore::Result r = store.updatePcoLink(missing);
+        QVERIFY(!r.ok);
+        QCOMPARE(r.error, QStringLiteral("\"Gone\" isn't in the library."));
+        QVERIFY(!store.updatePcoLink(Song{}).ok);   // no id at all
+        // The caller's transaction carries on.
+        Song other = sampleSong();
+        other.title = "After";
+        SAVE_OK(store, other);
+        QVERIFY(caller.commit().ok);
+        QCOMPARE(store.list().size(), 2);
+    }
+
     void savingGivesIdsToNewParts()
     {
         SongStore store(*m_lib);

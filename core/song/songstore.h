@@ -38,6 +38,11 @@ public:
     // song's groups or a group that doesn't exist, and songs over the limits in songlimits.h.
     Result save(Song &song);
     std::optional<Song> load(const QUuid &id) const;
+    // Updates only an existing song's Planning Center link and credits (pco_song_id,
+    // ccli_number, authors, copyright): no lyrics, arrangements, or timestamps. Inside a
+    // caller's transaction it lands or rolls back with it (#103), and alone it's a transaction
+    // of its own. Refuses a song that isn't in the library.
+    Result updatePcoLink(const Song &song);
     // Deletes the song with its groups and arrangements. False if there was no such song.
     bool remove(const QUuid &id);
     // Every song, sorted by title, ignoring case.

@@ -208,6 +208,29 @@ SongStore::Result SongStore::save(Song &song)
     return {};
 }
 
+SongStore::Result SongStore::updatePcoLink(const Song &song)
+{
+    QSqlDatabase db = m_library.database();
+    // A savepoint, as in save(): nests inside the caller's transaction.
+    if (QString err = run(db, "SAVEPOINT pco_link", {}); !err.isEmpty())
+        return {false, err};
+    int rows = 0;
+    QString err = run(db, "UPDATE song SET pco_song_id = ?, ccli_number = ?, authors = ?, copyright = ? WHERE id = ?",
+                      {text(song.pcoSongId), text(song.credits.ccliNumber), text(song.credits.authors),
+                       text(song.credits.copyright), key(song.id)},
+                      &rows);
+    if (err.isEmpty() && rows != 1)
+        err = QStringLiteral("\"%1\" isn't in the library.").arg(song.title);
+    if (err.isEmpty())
+        err = run(db, "RELEASE pco_link", {});
+    if (!err.isEmpty()) {
+        run(db, "ROLLBACK TO pco_link", {});
+        run(db, "RELEASE pco_link", {});
+        return {false, err};
+    }
+    return {};
+}
+
 SongStore::Batch::Batch(SongStore &store)
     : m_db(store.m_library.database())
 {
