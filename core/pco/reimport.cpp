@@ -152,6 +152,7 @@ QString ReimportResult::summary() const
     part(Change::Kind::Restored, "back in the plan");
     part(Change::Kind::Moved, "moved");
     part(Change::Kind::Changed, "changed");
+    part(Change::Kind::ChangedButDeleted, "you removed changed in Planning Center");
     part(Change::Kind::Relink, n.value(Change::Kind::Relink) == 1 ? "needs a song again" : "need a song again");
     QString s = parts.join(QStringLiteral(", "));
     if (!s.isEmpty())
@@ -164,7 +165,16 @@ QString ReimportResult::summary() const
     return s;
 }
 
-ReimportResult mergeReimport(const Service &local, const Service &fresh)
+// Whether Planning Center changed an item, apart from where it sits in the plan (other items
+// coming and going renumber it).
+bool changedApartFromPosition(QJsonObject before, QJsonObject now)
+{
+    before.remove(QStringLiteral("position"));
+    now.remove(QStringLiteral("position"));
+    return before != now;
+}
+
+ReimportResult mergeReimport(const Service &local, const Service &fresh, const QSet<QString> &addBack)
 {
     ReimportResult r;
     Service mine = local;
@@ -213,6 +223,14 @@ ReimportResult mergeReimport(const Service &local, const Service &fresh)
     const QSet<QString> movedLocally = movedBetween(localOrder, baseOrder);
     const QSet<QString> movedInPco = movedBetween(freshOrder, baseOrder);
 
+    QHash<QString, QJsonObject> deleted;   // pco id -> snapshot, of items the operator deleted
+    for (const RemovedPcoItem &d : std::as_const(mine.removedPcoItems)) {
+        if (!matched.contains(d.pcoItemId))
+            deleted.insert(d.pcoItemId, d.importSnapshot);
+    }
+    QList<RemovedPcoItem> stillDeleted;
+    QList<Change> deletedChanges;
+
     // The skeleton: Planning Center's new order, without what the operator moved.
     QList<ServiceItem> result;
     QHash<QUuid, QList<Change>> changesFor;
@@ -220,6 +238,13 @@ ReimportResult mergeReimport(const Service &local, const Service &fresh)
         const ServiceItem &f = fresh.items[fi];
         if (inFresh.value(f.pcoItemId, -1) != fi)
             continue;   // no id, or a second item with one: Planning Center doesn't make those
+        if (deleted.contains(f.pcoItemId) && !addBack.contains(f.pcoItemId)) {
+            if (changedApartFromPosition(deleted[f.pcoItemId], f.importSnapshot))
+                deletedChanges << Change{Change::Kind::ChangedButDeleted, {}, f.title, {},
+                                         QStringLiteral("changed in Planning Center; you removed it"), f.pcoItemId};
+            stillDeleted << RemovedPcoItem{f.pcoItemId, f.importSnapshot};
+            continue;
+        }
         if (!matched.contains(f.pcoItemId)) {
             ServiceItem added = f;
             added.id = QUuid::createUuid();
@@ -267,8 +292,10 @@ ReimportResult mergeReimport(const Service &local, const Service &fresh)
     }
 
     r.service.items = result;
+    r.service.removedPcoItems = stillDeleted;   // what Planning Center removed too is forgotten
     for (const ServiceItem &it : std::as_const(result))
         r.changes << changesFor.value(it.id);
+    r.changes << deletedChanges;
     return r;
 }
 

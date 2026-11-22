@@ -3,6 +3,7 @@
 #include "service/service.h"
 
 #include <QList>
+#include <QSet>
 #include <QString>
 #include <QStringList>
 #include <QUuid>
@@ -20,12 +21,15 @@ struct ReimportChange {
         KeptEdit,       // Planning Center changed `field`, but so did the operator: theirs is kept
         KeptPosition,   // Planning Center moved it, but so did the operator: theirs is kept
         Relink,         // Planning Center put another song here: the item needs a song again
+        ChangedButDeleted,   // the operator deleted it, and Planning Center changed it since: not
+                             // added back unless they ask (mergeReimport's `addBack`)
     };
     Kind kind;
     QUuid itemId;       // the item in the merged service
     QString title;      // the item's title after the merge
     QString field;      // Changed and KeptEdit: "title", "sequence", "service position", "reference", "kind"
     QString detail;     // "Amazing Grace → Amazing Grace (Live)"
+    QString pcoItemId;  // ChangedButDeleted: the item to pass to `addBack`; the item isn't in the service
 
     bool operator==(const ReimportChange &) const = default;
 };
@@ -56,8 +60,12 @@ struct ReimportResult {
 // operator moved, added, or that Planning Center removed stays right after the item that
 // was before it in the operator's list.
 //
-// Every matched item's snapshot becomes the fresh one, so merging the same plan again
-// changes nothing.
-ReimportResult mergeReimport(const Service &local, const Service &fresh);
+// An imported item the operator deleted (Service::removedPcoItems) stays deleted. If
+// Planning Center changed it since, the diff says so (ChangedButDeleted), and it comes back
+// only if its Planning Center id is in `addBack`. Once Planning Center removes it too, its
+// record goes.
+//
+// Every snapshot becomes the fresh one, so merging the same plan again changes nothing.
+ReimportResult mergeReimport(const Service &local, const Service &fresh, const QSet<QString> &addBack = {});
 
 } // namespace visualis

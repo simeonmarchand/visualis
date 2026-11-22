@@ -1,9 +1,12 @@
 #include "pco/planimport.h"
 #include "pco/reimport.h"
+#include "service/servicestore.h"
+#include "library/library.h"
 
 #include <QJsonArray>
 #include <QRandomGenerator>
 #include <QSet>
+#include <QTemporaryDir>
 #include <QtTest>
 
 using namespace visualis;
@@ -125,8 +128,9 @@ Run generate(quint32 seed)
     for (int k = rng.bounded(0, 6); k > 0; --k) {
         if (items.isEmpty())
             break;
-        ServiceItem &it = items[pick(items.size())];
-        switch (rng.bounded(10)) {
+        const qsizetype at = pick(items.size());
+        ServiceItem &it = items[at];
+        switch (rng.bounded(11)) {
         case 0:
             it.overrides["slides"] = QJsonArray{"split-" + next()};
             run.log << "split " + it.title;
@@ -177,6 +181,10 @@ Run generate(quint32 seed)
             run.log << "add " + added.title;
             break;
         }
+        case 9:
+            run.log << "delete " + it.title;
+            items.removeAt(at);
+            break;
         default: {
             const qsizetype from = pick(items.size());
             const qsizetype to = pick(items.size());
@@ -259,8 +267,17 @@ QUuid before(const QList<ServiceItem> &items, const QUuid &id)
     do { if (!(cond)) return QStringLiteral("%1 (line %2)").arg(QString(what)).arg(__LINE__); } while (0)
 
 // Every property of the merge, for one run. Empty when they all hold.
-QString check(const Run &run)
+QString check(Run run, ServiceStore &store)
 {
+    // Saved twice, as the app does: the store notes what the operator deleted.
+    CHECK(store.save(run.original).ok, "save the import");
+    run.mine.id = run.original.id;
+    run.mine.created = run.original.created;
+    CHECK(store.save(run.mine).ok, "save the edits");
+    QSet<QString> deleted;
+    for (const RemovedPcoItem &d : run.mine.removedPcoItems)
+        deleted << d.pcoItemId;
+
     const Service fresh = import(run.after);
     const ReimportResult r = mergeReimport(run.mine, fresh);
     const QList<ServiceItem> &out = r.service.items;
@@ -338,9 +355,54 @@ QString check(const Run &run)
         CHECK(has(mine.id, CK::Relink) == (linked && swapped), "Relink line for " + mine.title);
     }
 
+    // What the operator deleted stays deleted: they're told if Planning Center changed it,
+    // and it's forgotten once Planning Center removes it too.
+    QList<RemovedPcoItem> stillDeleted;
+    for (const PcoItem &p : run.after) {
+        if (!deleted.contains(p.id))
+            continue;
+        CHECK(!byPco(r.service, p.id), "a deleted item came back: " + p.title);
+        const ServiceItem &orig = *byPco(run.original, p.id);
+        QJsonObject was = orig.importSnapshot, now = byPco(fresh, p.id)->importSnapshot;
+        was.remove("position");
+        now.remove("position");
+        const bool told = std::any_of(r.changes.cbegin(), r.changes.cend(), [&](const ReimportChange &c) {
+            return c.kind == CK::ChangedButDeleted && c.pcoItemId == p.id;
+        });
+        CHECK(told == (was != now), "ChangedButDeleted line for " + p.title);
+        stillDeleted << RemovedPcoItem{p.id, byPco(fresh, p.id)->importSnapshot};
+    }
+    std::sort(stillDeleted.begin(), stillDeleted.end(),
+              [](const RemovedPcoItem &a, const RemovedPcoItem &b) { return a.pcoItemId < b.pcoItemId; });
+    QList<RemovedPcoItem> kept = r.service.removedPcoItems;
+    std::sort(kept.begin(), kept.end(), [](const RemovedPcoItem &a, const RemovedPcoItem &b) { return a.pcoItemId < b.pcoItemId; });
+    CHECK(kept == stillDeleted, "the deleted items' records");
+
+    // Only when the operator asks.
+    QSet<QString> addBack;
+    for (const ReimportChange &c : r.changes) {
+        if (c.kind == CK::ChangedButDeleted)
+            addBack << c.pcoItemId;
+    }
+    if (!addBack.isEmpty()) {
+        const ReimportResult back = mergeReimport(run.mine, fresh, addBack);
+        for (const QString &id : addBack) {
+            const ServiceItem *m = byPco(back.service, id);
+            CHECK(m, "not added back");
+            CHECK(std::none_of(back.service.removedPcoItems.cbegin(), back.service.removedPcoItems.cend(),
+                               [&](const RemovedPcoItem &d) { return d.pcoItemId == id; }), "added back, still recorded deleted");
+            CHECK(std::any_of(back.changes.cbegin(), back.changes.cend(),
+                              [&](const ReimportChange &c) { return c.kind == CK::Added && c.itemId == m->id; }),
+                  "no Added line for an item added back");
+        }
+        CHECK(back.service.items.size() == out.size() + addBack.size(), "adding back changed other items");
+    }
+
     // Everything in the plan is there; what's new was added.
     int added = 0;
     for (const PcoItem &p : run.after) {
+        if (deleted.contains(p.id))
+            continue;
         const ServiceItem *m = byPco(r.service, p.id);
         CHECK(m, "missing from the plan: " + p.title);
         if (!beforeIds.contains(p.id)) {
@@ -378,8 +440,10 @@ QString check(const Run &run)
     if (r.movedByOperator.isEmpty()) {
         // The operator reordered nothing of Planning Center's: its new order stands.
         QStringList pcoOrder, mergedOrder;
-        for (const PcoItem &p : run.after)
-            pcoOrder << p.id;
+        for (const PcoItem &p : run.after) {
+            if (!deleted.contains(p.id))
+                pcoOrder << p.id;
+        }
         for (const ServiceItem &it : out) {
             if (afterIds.contains(it.pcoItemId) && !mergedOrder.contains(it.pcoItemId))
                 mergedOrder << it.pcoItemId;
@@ -400,7 +464,25 @@ class ReimportTest : public QObject
 {
     Q_OBJECT
 
+    QTemporaryDir m_dir;
+    std::unique_ptr<Library> m_library;
+    std::unique_ptr<ServiceStore> m_store;
+
 private slots:
+    void initTestCase()
+    {
+        auto r = Library::open(m_dir.path());
+        QVERIFY2(r.library, qPrintable(r.message));
+        m_library = std::move(r.library);
+        m_store = std::make_unique<ServiceStore>(*m_library);
+    }
+
+    void cleanupTestCase()
+    {
+        m_store.reset();
+        m_library.reset();
+    }
+
     void theSamePlanIsUpToDate()
     {
         const QList<PcoItem> plan{plain("1", "Worship", PcoItemType::Header), song("2", "Amazing Grace")};
@@ -533,6 +615,41 @@ private slots:
         QVERIFY(kinds(both).contains(CK::Moved));
     }
 
+    // t4's decision on #56: deleting an imported item is a local edit too.
+    void aDeletedItemStaysDeleted()
+    {
+        const QList<PcoItem> plan{plain("1", "Welcome"), song("2", "Amazing Grace"), plain("3", "Sermon")};
+        Service mine = local(plan);
+        mine.removedPcoItems = {{"2", mine.items[1].importSnapshot}};
+        mine.items.removeAt(1);
+
+        // Unchanged, though renumbered: nothing to say.
+        const ReimportResult same = mergeReimport(mine, import({plain("1", "Welcome"), plain("4", "Notices"), song("2", "Amazing Grace"), plain("3", "Sermon")}));
+        QCOMPARE(titles(same.service), (QStringList{"Welcome", "Notices", "Sermon"}));
+        QCOMPARE(kinds(same), QList<CK>{CK::Added});
+        QCOMPARE(same.service.removedPcoItems.size(), 1);
+
+        // Changed: said, not added, until the operator asks.
+        const QList<PcoItem> changed{plain("1", "Welcome"), song("2", "Amazing Grace", {"Chorus"}), plain("3", "Sermon")};
+        const ReimportResult told = mergeReimport(mine, import(changed));
+        QCOMPARE(titles(told.service), (QStringList{"Welcome", "Sermon"}));
+        QCOMPARE(kinds(told), QList<CK>{CK::ChangedButDeleted});
+        QCOMPARE(told.changes[0].pcoItemId, QStringLiteral("2"));
+        QCOMPARE(told.changes[0].detail, QStringLiteral("changed in Planning Center; you removed it"));
+        QCOMPARE(told.summary(), QStringLiteral("1 you removed changed in Planning Center."));
+        QVERIFY(mergeReimport(told.service, import(changed)).upToDate());   // said once
+
+        const ReimportResult back = mergeReimport(mine, import(changed), {"2"});
+        QCOMPARE(titles(back.service), (QStringList{"Welcome", "Amazing Grace", "Sermon"}));
+        QVERIFY(back.service.removedPcoItems.isEmpty());
+        QCOMPARE(kinds(back), QList<CK>{CK::Added});
+
+        // Gone from Planning Center too: forgotten.
+        const ReimportResult gone = mergeReimport(mine, import({plain("1", "Welcome"), plain("3", "Sermon")}));
+        QVERIFY(gone.service.removedPcoItems.isEmpty());
+        QVERIFY(gone.upToDate());
+    }
+
     void aSummaryCountsEachKind()
     {
         ReimportResult r;
@@ -550,7 +667,7 @@ private slots:
         const quint32 first = quint32(qEnvironmentVariableIntValue("VISUALIS_REIMPORT_SEED"));
         for (quint32 seed = first; seed < first + quint32(runs); ++seed) {
             const Run run = generate(seed);
-            const QString failure = check(run);
+            const QString failure = check(run, *m_store);
             QVERIFY2(failure.isEmpty(), qPrintable(QStringLiteral("seed %1: %2\n  %3")
                                                        .arg(seed).arg(failure, run.log.join(QStringLiteral("\n  ")))));
         }
