@@ -22,6 +22,8 @@ VideoEngine::VideoEngine(QObject *parent)
         setStatus(QStringLiteral("Playing"), m_alert);
     });
     connect(&m_watchdog, &FrameWatchdog::stalled, this, &VideoEngine::onStalled);
+    m_displaysAsleep = m_sleepWatcher.displaysAsleep();
+    connect(&m_sleepWatcher, &DisplaySleepWatcher::displaysAsleepChanged, this, &VideoEngine::setDisplaysAsleep);
 }
 
 VideoEngine::~VideoEngine()
@@ -171,8 +173,33 @@ void VideoEngine::onFrame(const QVideoFrame &frame)
     m_lastFrameNs = now;
 }
 
+void VideoEngine::setDisplaysAsleep(bool asleep)
+{
+    if (asleep == m_displaysAsleep)
+        return;
+    m_displaysAsleep = asleep;
+    qCInfo(lcVideo) << (asleep ? "displays asleep" : "displays awake");
+    if (asleep)
+        return;
+    // Don't wait out a backoff timer: whatever stalled while asleep wasn't the file's fault.
+    // Restarting also covers a player that stopped without the watchdog noticing yet.
+    m_failuresInARow = 0;
+    if (!m_source.isEmpty()) {
+        stopPlayer();
+        startPlayer();
+    }
+}
+
 void VideoEngine::onStalled(milliseconds silence)
 {
+    if (m_displaysAsleep) {
+        // Expected: no frames while every display sleeps. Wake restarts the player.
+        qCInfo(lcVideo).noquote() << QStringLiteral("no frames for %1 ms while the displays sleep; waiting for wake")
+                                         .arg(silence.count());
+        stopPlayer();
+        setStatus(QStringLiteral("Paused while the displays sleep"), m_alert);
+        return;
+    }
     ++m_failuresInARow;
     ++m_restartCount;
     const milliseconds delay = restartDelay(m_failuresInARow);

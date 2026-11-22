@@ -13,3 +13,7 @@ bool DisplaySleepBlocker::setActive(bool)
 {
     return true;   // not implemented off macOS yet
 }
+
+DisplaySleepWatcher::DisplaySleepWatcher(QObject *parent) : QObject(parent) {}
+DisplaySleepWatcher::~DisplaySleepWatcher() = default;
+void DisplaySleepWatcher::setAsleep(bool) {}

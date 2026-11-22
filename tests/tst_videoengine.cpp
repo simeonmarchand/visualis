@@ -1,6 +1,7 @@
 #include "output/platformdisplay.h"
 #include "video/videoengine.h"
 
+#include <QElapsedTimer>
 #include <QGuiApplication>
 #include <QMediaPlayer>
 #include <QProcess>
@@ -93,6 +94,41 @@ private slots:
         const int before = *frames;
         QTRY_VERIFY(*frames > before + 10);
         QVERIFY(engine.findChild<QMediaPlayer *>() != player);
+    }
+
+    // #61: AVFoundation delivers nothing while every display sleeps (pausing stands in for
+    // that). That's no failure, and video must be back within about 1 s of waking, not at
+    // the next backed-off restart.
+    void sleepingDisplaysAreNotAFailureAndWakeResumesAtOnce()
+    {
+        VideoEngine engine;
+        QVideoSink sink;
+        auto frames = countFrames(&sink);
+        engine.addTarget(&sink);
+        engine.setSource(QUrl::fromLocalFile(m_clip));
+        QTRY_COMPARE_WITH_TIMEOUT(engine.status(), QStringLiteral("Playing"), 10000);
+
+        engine.setDisplaysAsleep(true);
+        auto *player = engine.findChild<QMediaPlayer *>();
+        QVERIFY(player);
+        player->pause();
+        QTRY_VERIFY_WITH_TIMEOUT(!engine.findChild<QMediaPlayer *>(), 3000);   // the watchdog gave up on it
+        QTest::qWait(1500);   // no restarts while asleep, so the backoff never grows
+        QCOMPARE(engine.restartCount(), 0);
+        QVERIFY(engine.alert().isEmpty());
+        QCOMPARE(engine.status(), QStringLiteral("Paused while the displays sleep"));
+        QVERIFY(!engine.findChild<QMediaPlayer *>());
+        QVERIFY(sink.videoFrame().isValid());   // outputs keep the last frame
+
+        const int before = *frames;
+        QElapsedTimer sinceWake;
+        sinceWake.start();
+        engine.setDisplaysAsleep(false);
+        QTRY_VERIFY_WITH_TIMEOUT(*frames > before, 1500);
+        qInfo() << "first frame" << sinceWake.elapsed() << "ms after wake";
+        QTRY_COMPARE_WITH_TIMEOUT(engine.status(), QStringLiteral("Playing"), 1000);
+        QCOMPARE(engine.restartCount(), 0);
+        QVERIFY(engine.alert().isEmpty());
     }
 
     void clearingTheSourceStopsAndBlanksTheOutputs()
