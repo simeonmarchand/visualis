@@ -100,7 +100,7 @@ struct PcoItem
 struct PcoPlanItems
 {
     QList<PcoItem> items;
-    QStringList skipped;        // records that couldn't be read, for the operator
+    QStringList skipped;        // records left out or only partly read; also in PcoResult::skipped
 };
 
 // Why a read failed. The message is written for the operator.
@@ -120,6 +120,8 @@ struct PcoResult
 {
     T value{};
     PcoError error;
+    // Records that were left out or only partly read, for the operator (set on success).
+    QStringList skipped;
 
     bool ok() const { return !error; }
 };

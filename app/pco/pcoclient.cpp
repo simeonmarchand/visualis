@@ -32,8 +32,11 @@ PcoClient::PcoClient(QNetworkAccessManager *network, const QUrl &baseUrl, Author
 void PcoClient::serviceTypes(Done<QList<PcoServiceType>> done)
 {
     getAll(endpoint({"service_types"}, {{"per_page", kPerPage}}), [done](PcoResult<PcoDocument> r) {
-        done(r.ok() ? PcoResult<QList<PcoServiceType>>{serviceTypesFrom(r.value), {}}
-                    : failed<QList<PcoServiceType>>(r.error));
+        if (!r.ok())
+            return done(failed<QList<PcoServiceType>>(r.error));
+        PcoResult<QList<PcoServiceType>> out;
+        out.value = serviceTypesFrom(r.value, &out.skipped);
+        done(out);
     });
 }
 
@@ -42,8 +45,11 @@ void PcoClient::futurePlans(const QString &serviceTypeId, Done<QList<PcoPlan>> d
     const QUrl url = endpoint({"service_types", serviceTypeId, "plans"},
                               {{"filter", "future"}, {"order", "sort_date"}, {"per_page", kPerPage}});
     getAll(url, [done, serviceTypeId](PcoResult<PcoDocument> r) {
-        done(r.ok() ? PcoResult<QList<PcoPlan>>{plansFrom(r.value, serviceTypeId), {}}
-                    : failed<QList<PcoPlan>>(r.error));
+        if (!r.ok())
+            return done(failed<QList<PcoPlan>>(r.error));
+        PcoResult<QList<PcoPlan>> out;
+        out.value = plansFrom(r.value, serviceTypeId, &out.skipped);
+        done(out);
     });
 }
 
@@ -53,8 +59,13 @@ void PcoClient::plan(const QString &serviceTypeId, const QString &planId, Done<P
     getDocument(url, [done, serviceTypeId](PcoResult<PcoDocument> r) {
         if (!r.ok())
             return done(failed<PcoPlan>(r.error));
-        const QList<PcoPlan> plans = plansFrom(r.value, serviceTypeId);
-        done(plans.size() == 1 ? PcoResult<PcoPlan>{plans.first(), {}} : failed<PcoPlan>(pcoMalformedError()));
+        QStringList skipped;
+        const QList<PcoPlan> plans = plansFrom(r.value, serviceTypeId, &skipped);
+        if (plans.size() != 1) {
+            qCWarning(lcPcoClient).noquote() << "plan unreadable:" << skipped.join("; ");
+            return done(failed<PcoPlan>(pcoMalformedError()));
+        }
+        done(PcoResult<PcoPlan>{plans.first(), {}, skipped});
     });
 }
 
@@ -63,7 +74,12 @@ void PcoClient::planItems(const QString &serviceTypeId, const QString &planId, D
     const QUrl url = endpoint({"service_types", serviceTypeId, "plans", planId, "items"},
                               {{"include", "song,arrangement,key"}, {"per_page", kPerPage}});
     getAll(url, [done](PcoResult<PcoDocument> r) {
-        done(r.ok() ? PcoResult<PcoPlanItems>{planItemsFrom(r.value), {}} : failed<PcoPlanItems>(r.error));
+        if (!r.ok())
+            return done(failed<PcoPlanItems>(r.error));
+        PcoResult<PcoPlanItems> out;
+        out.value = planItemsFrom(r.value);
+        out.skipped = out.value.skipped;
+        done(out);
     });
 }
 
@@ -81,6 +97,11 @@ QUrl PcoClient::endpoint(const QStringList &segments, const QList<QPair<QString,
     q.setQueryItems(query);
     url.setQuery(q);
     return url;
+}
+
+void PcoClient::holdUntil(qint64 delayMs)
+{
+    m_notBeforeMs = std::max(m_notBeforeMs, m_clock.elapsed() + delayMs);
 }
 
 bool PcoClient::sameApi(const QUrl &url) const
@@ -134,7 +155,21 @@ void PcoClient::getDocument(const QUrl &url, Fetched done)
 void PcoClient::send(const QUrl &url, int attempt, std::function<void(Response)> done)
 {
     const qint64 waitMs = std::max<qint64>(0, m_notBeforeMs - m_clock.elapsed());
+    // Planning Center asked for a longer pause than the operator should wait: say it's busy
+    // now rather than send inside its cooldown (it would only answer 429) or hang.
+    if (waitMs > m_maxWaitMs) {
+        QTimer::singleShot(0, this, [done] {
+            Response r;
+            r.status = 429;
+            r.notSent = true;   // never reached Planning Center
+            done(r);
+        });
+        return;
+    }
     QTimer::singleShot(waitMs, this, [this, url, attempt, done] {
+        // A response that came in meanwhile may have moved the deadline later.
+        if (m_notBeforeMs > m_clock.elapsed())
+            return send(url, attempt, done);
         const std::unique_ptr<PcoAuthorizer> auth = m_authorizer ? m_authorizer() : nullptr;
         if (!auth) {
             Response r;
@@ -163,17 +198,16 @@ void PcoClient::send(const QUrl &url, int attempt, std::function<void(Response)>
             // transport error with a success status means the body didn't arrive whole.
             r.cutOff = reply->error() != QNetworkReply::NoError && r.status >= 200 && r.status < 300;
 
-            // Waits as the headers say, but never so long that the operator is left hanging;
-            // past the cap, Planning Center answers 429 and that's reported as busy.
-            if (const qint64 pace = std::min<qint64>(pcoPacingDelayMs(pcoRateLimitFrom(r.headers)), m_maxWaitMs);
-                pace > 0)
-                m_notBeforeMs = std::max(m_notBeforeMs, m_clock.elapsed() + pace);
+            // The real deadline, however far off: send() turns a wait past the cap into "busy".
+            if (const qint64 pace = pcoPacingDelayMs(pcoRateLimitFrom(r.headers)); pace > 0)
+                holdUntil(pace);
 
             if (r.status == 429) {
                 const std::optional<qint64> delay = pcoRetryDelayMs(r.headers);
+                if (delay && *delay != kPcoWaitTooLongMs)
+                    holdUntil(*delay);
                 if (delay && *delay <= m_maxWaitMs && attempt < kMaxRateLimitRetries) {
                     qCInfo(lcPcoClient) << "rate limited; retrying in" << *delay << "ms";
-                    m_notBeforeMs = std::max(m_notBeforeMs, m_clock.elapsed() + *delay);
                     send(url, attempt + 1, done);
                     return;
                 }

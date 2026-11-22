@@ -1,6 +1,7 @@
 #include "pco/pcojson.h"
 
 #include <QFile>
+#include <QJsonDocument>
 #include <QtTest>
 
 using namespace visualis;
@@ -162,6 +163,171 @@ private slots:
         QVERIFY(plan.skipped[0].contains("Broken"));
     }
 
+    // #79: every record that can't be used is named, never dropped silently.
+    void badRecordsAreReported_data()
+    {
+        QTest::addColumn<QByteArray>("record");
+        QTest::addColumn<QString>("why");
+        QTest::newRow("null") << QByteArray("null") << "Record 1: not a Planning Center record";
+        QTest::newRow("string") << QByteArray(R"("Item")") << "Record 1: not a Planning Center record";
+        QTest::newRow("empty object") << QByteArray("{}") << "Record 1: not a Planning Center record";
+        QTest::newRow("no type") << QByteArray(R"({"id":"1","attributes":{}})") << "Record 1: has no type";
+        QTest::newRow("no id") << QByteArray(R"({"type":"%1","attributes":{}})") << "Record 1 (%1): has no id";
+        QTest::newRow("no attributes") << QByteArray(R"({"type":"%1","id":"7"})") << "%1 7: has no attributes";
+        QTest::newRow("string attributes") << QByteArray(R"({"type":"%1","id":"7","attributes":"x"})")
+                                           << "%1 7: has no attributes";
+    }
+    void badRecordsAreReported()
+    {
+        QFETCH(QByteArray, record);
+        QFETCH(QString, why);
+        for (const QString type : {"ServiceType", "Plan", "Item"}) {
+            const QByteArray body = "{\"data\":[" + QString::fromUtf8(record).arg(type).toUtf8() + "]}";
+            const PcoResult<PcoDocument> doc = parsePcoDocument(body);
+            QVERIFY2(doc.ok(), body.constData());
+            QStringList skipped;
+            qsizetype read = 0;
+            if (type == "ServiceType")
+                read = serviceTypesFrom(doc.value, &skipped).size();
+            else if (type == "Plan")
+                read = plansFrom(doc.value, "1", &skipped).size();
+            else {
+                const PcoPlanItems items = planItemsFrom(doc.value);
+                read = items.items.size();
+                skipped = items.skipped;
+            }
+            QCOMPARE(read, 0);
+            QCOMPARE(skipped, QStringList{why.arg(type)});
+        }
+    }
+
+    void aRecordOfTheWrongTypeIsReported()
+    {
+        QStringList skipped;
+        QVERIFY(serviceTypesFrom(document("plans.json"), &skipped).isEmpty());
+        QCOMPARE(skipped.size(), 2);
+        QCOMPARE(skipped[0], QStringLiteral("Record 1: a Plan where a ServiceType was expected"));
+    }
+
+    void requiredFieldsAreChecked_data()
+    {
+        QTest::addColumn<QByteArray>("body");
+        QTest::addColumn<QString>("why");
+        QTest::newRow("service type without a name")
+            << QByteArray(R"({"data":[{"type":"ServiceType","id":"1","attributes":{"name":null}}]})")
+            << "ServiceType 1: has no name";
+        QTest::newRow("plan without a date")
+            << QByteArray(R"({"data":[{"type":"Plan","id":"5","attributes":{"dates":"Soon"}}]})")
+            << "Plan 5: has no valid date";
+        QTest::newRow("plan with a bad date")
+            << QByteArray(R"({"data":[{"type":"Plan","id":"5","attributes":{"sort_date":"next week"}}]})")
+            << "Plan 5: has no valid date";
+        QTest::newRow("item without a position")
+            << QByteArray(R"({"data":[{"type":"Item","id":"9","attributes":{"title":"Welcome","item_type":"item"}}]})")
+            << "Item 9 (\"Welcome\"): is missing its position, kind, or title";
+        QTest::newRow("item with a text position")
+            << QByteArray(R"({"data":[{"type":"Item","id":"9","attributes":{"title":"Welcome","item_type":"item","sequence":"3"}}]})")
+            << "Item 9 (\"Welcome\"): is missing its position, kind, or title";
+        QTest::newRow("item without a kind")
+            << QByteArray(R"({"data":[{"type":"Item","id":"9","attributes":{"title":"Welcome","sequence":1}}]})")
+            << "Item 9 (\"Welcome\"): is missing its position, kind, or title";
+        QTest::newRow("item without a title")
+            << QByteArray(R"({"data":[{"type":"Item","id":"9","attributes":{"item_type":"item","sequence":1}}]})")
+            << "Item 9: is missing its position, kind, or title";
+    }
+    void requiredFieldsAreChecked()
+    {
+        QFETCH(QByteArray, body);
+        QFETCH(QString, why);
+        const PcoDocument doc = parsePcoDocument(body).value;
+        QStringList skipped;
+        qsizetype read = serviceTypesFrom(doc, &skipped).size() + plansFrom(doc, "1", &skipped).size();
+        const PcoPlanItems items = planItemsFrom(doc);
+        read += items.items.size();
+        skipped += items.skipped;
+        QCOMPARE(read, 0);
+        QVERIFY2(skipped.contains(why), qPrintable(skipped.join(" | ")));
+    }
+
+    // #79: a broken song, arrangement, or key keeps the item, without it, and says so.
+    void brokenRelationsAreReportedAndLeftOut_data()
+    {
+        QTest::addColumn<QString>("relation");
+        QTest::addColumn<QByteArray>("link");
+        QTest::addColumn<QByteArray>("included");
+        QTest::addColumn<QString>("why");
+        QTest::newRow("song without an id")
+            << "song" << QByteArray(R"({"type":"Song","id":"7"})")
+            << QByteArray(R"({"type":"Song","attributes":{"title":"Song"}})")
+            << "its song (Song 7) wasn't in Planning Center's answer";
+        QTest::newRow("song not included")
+            << "song" << QByteArray(R"({"type":"Song","id":"7"})") << QByteArray()
+            << "its song (Song 7) wasn't in Planning Center's answer";
+        QTest::newRow("song without attributes")
+            << "song" << QByteArray(R"({"type":"Song","id":"7"})") << QByteArray(R"({"type":"Song","id":"7"})")
+            << "its song (Song 7) has no attributes";
+        QTest::newRow("song without a title")
+            << "song" << QByteArray(R"({"type":"Song","id":"7"})")
+            << QByteArray(R"({"type":"Song","id":"7","attributes":{"title":5}})") << "its song has no title";
+        QTest::newRow("link without a type")
+            << "song" << QByteArray(R"({"id":"7"})") << QByteArray() << "its song link is malformed";
+        QTest::newRow("link that's a string")
+            << "arrangement" << QByteArray(R"("8")") << QByteArray() << "its arrangement link is malformed";
+        QTest::newRow("arrangement sequence not a list")
+            << "arrangement" << QByteArray(R"({"type":"Arrangement","id":"8"})")
+            << QByteArray(R"({"type":"Arrangement","id":"8","attributes":{"sequence":"Verse 1, Chorus"}})")
+            << "its arrangement's section order is malformed";
+        QTest::newRow("arrangement sequence with numbers")
+            << "arrangement" << QByteArray(R"({"type":"Arrangement","id":"8"})")
+            << QByteArray(R"({"type":"Arrangement","id":"8","attributes":{"sequence":["Verse 1", 2]}})")
+            << "its arrangement's section order is malformed";
+        QTest::newRow("key without attributes")
+            << "key" << QByteArray(R"({"type":"Key","id":"6"})") << QByteArray(R"({"type":"Key","id":"6","attributes":null})")
+            << "its key (Key 6) has no attributes";
+    }
+    void brokenRelationsAreReportedAndLeftOut()
+    {
+        QFETCH(QString, relation);
+        QFETCH(QByteArray, link);
+        QFETCH(QByteArray, included);
+        QFETCH(QString, why);
+        // Built as JSON values, not spliced strings (moc misreads raw strings with unbalanced braces).
+        QJsonObject item = QJsonDocument::fromJson(
+            R"({"type":"Item","id":"9","attributes":{"title":"Song One","item_type":"song","sequence":1}})").object();
+        item["relationships"] = QJsonObject{
+            {relation, QJsonObject{{"data", QJsonDocument::fromJson("[" + link + "]").array().at(0)}}}};
+        QJsonArray inc;
+        if (!included.isEmpty())
+            inc.append(QJsonDocument::fromJson(included).object());
+        const QByteArray body = QJsonDocument(QJsonObject{{"data", QJsonArray{item}}, {"included", inc}}).toJson();
+        const PcoResult<PcoDocument> doc = parsePcoDocument(body);
+        QVERIFY2(doc.ok(), body.constData());
+        const PcoPlanItems plan = planItemsFrom(doc.value);
+        QCOMPARE(plan.items.size(), 1);   // the item itself is fine
+        QVERIFY(!plan.items[0].song && !plan.items[0].arrangement && !plan.items[0].key);
+        QCOMPARE(plan.skipped, QStringList{"Item 9 (\"Song One\"): " + why});
+    }
+
+    void aNullArrangementSequenceIsJustEmpty()
+    {
+        const QByteArray body = R"({"data":[{"type":"Item","id":"9","attributes":{"title":"Song","item_type":"song","sequence":1},
+            "relationships":{"arrangement":{"data":{"type":"Arrangement","id":"8"}}}}],
+            "included":[{"type":"Arrangement","id":"8","attributes":{"name":"Default","sequence":null}}]})";
+        const PcoPlanItems plan = planItemsFrom(parsePcoDocument(body).value);
+        QVERIFY(plan.skipped.isEmpty());
+        QVERIFY(plan.items[0].arrangement);
+        QVERIFY(plan.items[0].arrangement->sequence.isEmpty());
+    }
+
+    void theFixturesHaveNothingToReport()
+    {
+        QStringList skipped;
+        serviceTypesFrom(document("service_types.json"), &skipped);
+        plansFrom(document("plans.json"), "1001", &skipped);
+        plansFrom(document("plan.json"), "1001", &skipped);
+        QVERIFY2(skipped.isEmpty(), qPrintable(skipped.join(" | ")));
+    }
+
     void malformedDocuments_data()
     {
         QTest::addColumn<QByteArray>("body");
@@ -245,10 +411,11 @@ private slots:
         QCOMPARE(pcoRetryDelayMs({{"Retry-After", "0"}}), std::optional<qint64>(0));
         // No Retry-After: the reported period.
         QCOMPARE(pcoRetryDelayMs({{"X-PCO-API-Request-Rate-Period", "20"}}), std::optional<qint64>(20000));
-        // Nothing to go on, or a date instead of seconds: don't guess.
+        // Nothing to go on: don't guess.
         QCOMPARE(pcoRetryDelayMs({}), std::nullopt);
-        QCOMPARE(pcoRetryDelayMs({{"Retry-After", "Wed, 21 Oct 2026 07:28:00 GMT"}}), std::nullopt);
-        QCOMPARE(pcoRetryDelayMs({{"Retry-After", "-5"}}), std::nullopt);
+        // Present but unreadable: too long to wait for, not absent (#79).
+        QCOMPARE(pcoRetryDelayMs({{"Retry-After", "Wed, 21 Oct 2026 07:28:00 GMT"}}), std::optional(kPcoWaitTooLongMs));
+        QCOMPARE(pcoRetryDelayMs({{"Retry-After", "-5"}}), std::optional(kPcoWaitTooLongMs));
     }
 
     void hugeHeaderValuesDontOverflow()
@@ -260,6 +427,23 @@ private slots:
         QCOMPARE(pcoRetryDelayMs({{"X-PCO-API-Request-Rate-Period", "3000000"}}), std::optional<qint64>(kDayMs));
         QCOMPARE(pcoPacingDelayMs({100, 100, 3'000'000}), kDayMs);
         QCOMPARE(pcoPacingDelayMs({100, 100, 3600}), 3'600'000LL);
+    }
+
+    // #79: numbers too big for an int saturate instead of wrapping to 0 (which disabled pacing).
+    void rateLimitNumbersParseWide()
+    {
+        const PcoRateLimit huge = pcoRateLimitFrom({{"X-PCO-API-Request-Rate-Count", "99999999999999999999999"},
+                                                    {"X-PCO-API-Request-Rate-Limit", "3000000000"},
+                                                    {"X-PCO-API-Request-Rate-Period", "5000000000"}});
+        QCOMPARE(huge.count, std::numeric_limits<qint64>::max());
+        QCOMPARE(huge.limit, 3'000'000'000LL);
+        QCOMPARE(huge.periodSeconds, 5'000'000'000LL);
+        QCOMPARE(pcoPacingDelayMs(huge), 24LL * 60 * 60 * 1000);   // used up; the wait clamps to a day
+        const PcoRateLimit junk = pcoRateLimitFrom({{"X-PCO-API-Request-Rate-Count", "-3"},
+                                                    {"X-PCO-API-Request-Rate-Limit", "lots"}});
+        QCOMPARE(junk.count, 0);
+        QCOMPARE(junk.limit, 0);
+        QCOMPARE(pcoRetryDelayMs({{"Retry-After", "99999999999999999999999"}}), std::optional<qint64>(24LL * 60 * 60 * 1000));
     }
 };
 
