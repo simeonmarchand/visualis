@@ -24,14 +24,18 @@ visualis_add_test(tst_songtext visualis_core)
 target_compile_definitions(tst_songjson PRIVATE FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
 visualis_add_test(tst_livestate visualis_core)
 visualis_add_test(tst_livejournal visualis_core)
-visualis_add_test(tst_services visualis_core)
 visualis_add_test(tst_media visualis_core)
 visualis_add_test(tst_mediaimport Qt6::Gui visualis_ui visualis_core)
 target_include_directories(tst_mediaimport PRIVATE ${CMAKE_SOURCE_DIR}/app)
 target_compile_definitions(tst_mediaimport PRIVATE FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
 if(APPLE)
-    target_link_libraries(tst_mediaimport PRIVATE "-framework AVFoundation" "-framework CoreMedia" "-framework VideoToolbox")
+    target_link_libraries(tst_mediaimport PRIVATE
+        "-framework AVFoundation"
+        "-framework CoreMedia"
+        "-framework VideoToolbox"
+    )
 endif()
+visualis_add_test(tst_services visualis_core)
 visualis_add_test(tst_displayplacement visualis_core)
 visualis_add_test(tst_framewatchdog visualis_core)
 visualis_add_test(tst_videoengine Qt6::Multimedia visualis_ui visualis_core)

@@ -18,13 +18,16 @@ qt_add_library(visualis_core STATIC
     template/template.h template/template.cpp
     template/templatejson.h template/templatejson.cpp
     template/templatestore.h template/templatestore.cpp
-    media/mediafiles.h media/mediafiles.cpp
-    media/mediastore.h media/mediastore.cpp
-    media/mediaasset.h media/medialimits.h
     live/liveitem.h live/liveitem.cpp
     live/livestate.h live/livestate.cpp
     live/commands.h live/commands.cpp
     live/livejournal.h live/livejournal.cpp
+    media/mediaasset.h
+    media/mediafiles.cpp
+    media/mediafiles.h
+    media/medialimits.h
+    media/mediastore.cpp
+    media/mediastore.h
     service/service.h service/service.cpp
     service/servicestore.h service/servicestore.cpp
     service/servicejson.h service/servicejson.cpp
