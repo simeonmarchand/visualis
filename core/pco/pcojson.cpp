@@ -1,6 +1,7 @@
 #include "pco/pcojson.h"
 
 #include <algorithm>
+#include <limits>
 
 #include <QHash>
 #include <QJsonDocument>
@@ -56,19 +57,6 @@ QHash<QString, QJsonObject> indexIncluded(const QJsonArray &included)
         index.insert(o.value("type").toString() + '/' + idOf(o.value("id")), o);
     }
     return index;
-}
-
-std::optional<QJsonObject> related(const QJsonObject &resource, const char *name,
-                                   const QHash<QString, QJsonObject> &index)
-{
-    const QJsonObject ref = resource.value("relationships").toObject().value(QLatin1String(name)).toObject()
-                                .value("data").toObject();
-    if (ref.isEmpty())
-        return std::nullopt;
-    const auto it = index.constFind(ref.value("type").toString() + '/' + idOf(ref.value("id")));
-    if (it == index.constEnd())
-        return std::nullopt;
-    return *it;
 }
 
 PcoItemType itemType(const QString &s)
@@ -168,37 +156,116 @@ PcoResult<PcoDocument> parsePcoDocument(const QByteArray &body)
     return {doc, {}};
 }
 
-QList<PcoServiceType> serviceTypesFrom(const PcoDocument &doc)
+namespace {
+
+// A data record that's a resource of the expected type with an id and attributes, or why not.
+struct Record
+{
+    QString id;
+    QJsonObject resource;
+    QJsonObject attributes;
+};
+
+std::optional<Record> record(const QJsonValue &v, qsizetype index, const char *type, QStringList *skipped)
+{
+    const auto skip = [skipped](const QString &why) {
+        if (skipped)
+            *skipped << why;
+        return std::nullopt;
+    };
+    const QString where = QStringLiteral("Record %1").arg(index + 1);
+    if (!v.isObject() || v.toObject().isEmpty())
+        return skip(QStringLiteral("%1: not a Planning Center record").arg(where));
+    const QJsonObject o = v.toObject();
+    const QString actual = o.value("type").toString();
+    if (actual != QLatin1String(type))
+        return skip(actual.isEmpty() ? QStringLiteral("%1: has no type").arg(where)
+                                     : QStringLiteral("%1: a %2 where a %3 was expected").arg(where, actual, type));
+    const QString id = idOf(o.value("id"));
+    if (id.isEmpty()) {
+        const QString title = o.value("attributes").toObject().value("title").toString().trimmed();
+        return skip(title.isEmpty() ? QStringLiteral("%1 (%2): has no id").arg(where, actual)
+                                    : QStringLiteral("%1 (%2 \"%3\"): has no id").arg(where, actual, title));
+    }
+    if (!o.value("attributes").isObject())
+        return skip(QStringLiteral("%1 %2: has no attributes").arg(actual, id));
+    return Record{id, o, o.value("attributes").toObject()};
+}
+
+bool isNumber(const QJsonValue &v) { return v.isDouble(); }
+
+// What a relationship of an item points at: nothing, the included record, or why it can't be used.
+struct Related
+{
+    std::optional<QJsonObject> resource;
+    QString problem;
+};
+
+Related related(const QJsonObject &item, const char *name, const QHash<QString, QJsonObject> &index)
+{
+    const QJsonValue data = item.value("relationships").toObject().value(QLatin1String(name)).toObject().value("data");
+    if (data.isNull() || data.isUndefined())
+        return {};
+    const QJsonObject ref = data.toObject();
+    const QString type = ref.value("type").toString();
+    const QString id = idOf(ref.value("id"));
+    if (type.isEmpty() || id.isEmpty())
+        return {std::nullopt, QStringLiteral("its %1 link is malformed").arg(QLatin1String(name))};
+    const auto it = index.constFind(type + '/' + id);
+    if (it == index.constEnd())
+        return {std::nullopt, QStringLiteral("its %1 (%2 %3) wasn't in Planning Center's answer").arg(QLatin1String(name), type, id)};
+    if (!it->value("attributes").isObject())
+        return {std::nullopt, QStringLiteral("its %1 (%2 %3) has no attributes").arg(QLatin1String(name), type, id)};
+    return {*it, {}};
+}
+
+QString itemName(const PcoItem &item)
+{
+    return item.title.isEmpty() ? QStringLiteral("Item %1").arg(item.id)
+                                : QStringLiteral("Item %1 (\"%2\")").arg(item.id, item.title);
+}
+
+} // namespace
+
+QList<PcoServiceType> serviceTypesFrom(const PcoDocument &doc, QStringList *skipped)
 {
     QList<PcoServiceType> out;
-    for (const QJsonValue &v : doc.data) {
-        const QJsonObject o = v.toObject();
-        if (o.value("type").toString() != "ServiceType")
+    for (qsizetype i = 0; i < doc.data.size(); ++i) {
+        const std::optional<Record> r = record(doc.data[i], i, "ServiceType", skipped);
+        if (!r)
             continue;
-        const QString id = idOf(o.value("id"));
-        if (!id.isEmpty())
-            out.append({id, str(attrs(o), "name")});
+        const QString name = str(r->attributes, "name");
+        if (name.isEmpty()) {
+            if (skipped)
+                *skipped << QStringLiteral("ServiceType %1: has no name").arg(r->id);
+            continue;
+        }
+        out.append({r->id, name});
     }
     return out;
 }
 
-QList<PcoPlan> plansFrom(const PcoDocument &doc, const QString &serviceTypeId)
+QList<PcoPlan> plansFrom(const PcoDocument &doc, const QString &serviceTypeId, QStringList *skipped)
 {
     QList<PcoPlan> out;
-    for (const QJsonValue &v : doc.data) {
-        const QJsonObject o = v.toObject();
-        if (o.value("type").toString() != "Plan")
+    for (qsizetype i = 0; i < doc.data.size(); ++i) {
+        const std::optional<Record> r = record(doc.data[i], i, "Plan", skipped);
+        if (!r)
             continue;
+        const QJsonObject &a = r->attributes;
         PcoPlan p;
-        p.id = idOf(o.value("id"));
-        if (p.id.isEmpty())
-            continue;
-        const QJsonObject a = attrs(o);
+        p.id = r->id;
         p.serviceTypeId = serviceTypeId;
+        p.sortDate = QDateTime::fromString(str(a, "sort_date"), Qt::ISODate).toUTC();
+        // The date orders plans and picks "the next one"; a plan without one can't be placed.
+        if (!p.sortDate.isValid()) {
+            if (skipped)
+                *skipped << QStringLiteral("Plan %1: has no valid date").arg(p.id);
+            continue;
+        }
         p.title = str(a, "title");
         p.seriesTitle = str(a, "series_title");
         p.dates = str(a, "dates");
-        p.sortDate = QDateTime::fromString(str(a, "sort_date"), Qt::ISODate).toUTC();
         p.itemsCount = intOf(a.value("items_count"));
         p.planningCenterUrl = QUrl(str(a, "planning_center_url"));
         out.append(p);
@@ -210,16 +277,18 @@ PcoPlanItems planItemsFrom(const PcoDocument &doc)
 {
     const QHash<QString, QJsonObject> index = indexIncluded(doc.included);
     PcoPlanItems out;
-    for (const QJsonValue &v : doc.data) {
-        const QJsonObject o = v.toObject();
-        if (o.value("type").toString() != "Item")
+    for (qsizetype i = 0; i < doc.data.size(); ++i) {
+        const std::optional<Record> r = record(doc.data[i], i, "Item", &out.skipped);
+        if (!r)
             continue;
-        const QJsonObject a = attrs(o);
+        const QJsonObject &a = r->attributes;
         PcoItem item;
-        item.id = idOf(o.value("id"));
+        item.id = r->id;
         item.title = str(a, "title");
-        if (item.id.isEmpty()) {
-            out.skipped << QStringLiteral("An item with no id (\"%1\")").arg(item.title);
+        // Its place in the plan and its kind can't be guessed: made-up defaults would put a
+        // blank item first.
+        if (!isNumber(a.value("sequence")) || !a.value("item_type").isString() || !a.value("title").isString()) {
+            out.skipped << QStringLiteral("%1: is missing its position, kind, or title").arg(itemName(item));
             continue;
         }
         item.type = itemType(str(a, "item_type"));
@@ -231,19 +300,38 @@ PcoPlanItems planItemsFrom(const PcoDocument &doc)
         item.keyName = str(a, "key_name");
         item.customArrangementSequence = stringList(a.value("custom_arrangement_sequence"));
 
-        if (const auto s = related(o, "song", index)) {
-            const QJsonObject sa = attrs(*s);
-            item.song = PcoSong{idOf(s->value("id")), str(sa, "title"), idOf(sa.value("ccli_number")),
-                                str(sa, "author"), str(sa, "copyright")};
+        // A broken link keeps the item, without what it pointed at, and says so.
+        const auto problem = [&](const QString &what) { out.skipped << QStringLiteral("%1: %2").arg(itemName(item), what); };
+        if (const Related s = related(r->resource, "song", index); !s.problem.isEmpty()) {
+            problem(s.problem);
+        } else if (s.resource) {
+            const QJsonObject sa = attrs(*s.resource);
+            if (!sa.value("title").isString())
+                problem(QStringLiteral("its song has no title"));
+            else
+                item.song = PcoSong{idOf(s.resource->value("id")), str(sa, "title"), idOf(sa.value("ccli_number")),
+                                    str(sa, "author"), str(sa, "copyright")};
         }
-        if (const auto r = related(o, "arrangement", index)) {
-            const QJsonObject ra = attrs(*r);
-            item.arrangement = PcoArrangement{idOf(r->value("id")), str(ra, "name"), stringList(ra.value("sequence")),
-                                              intOf(ra.value("bpm")), str(ra, "meter"), intOf(ra.value("length"))};
+        if (const Related ar = related(r->resource, "arrangement", index); !ar.problem.isEmpty()) {
+            problem(ar.problem);
+        } else if (ar.resource) {
+            const QJsonObject ra = attrs(*ar.resource);
+            const QJsonValue sequence = ra.value("sequence");
+            const QJsonArray steps = sequence.toArray();
+            const bool sequenceOk = sequence.isNull() || sequence.isUndefined()
+                                    || (sequence.isArray() && std::all_of(steps.begin(), steps.end(),
+                                                                          [](const QJsonValue &e) { return e.isString(); }));
+            if (!sequenceOk)
+                problem(QStringLiteral("its arrangement's section order is malformed"));
+            else
+                item.arrangement = PcoArrangement{idOf(ar.resource->value("id")), str(ra, "name"), stringList(sequence),
+                                                  intOf(ra.value("bpm")), str(ra, "meter"), intOf(ra.value("length"))};
         }
-        if (const auto k = related(o, "key", index)) {
-            const QJsonObject ka = attrs(*k);
-            item.key = PcoKey{idOf(k->value("id")), str(ka, "name"), str(ka, "starting_key")};
+        if (const Related k = related(r->resource, "key", index); !k.problem.isEmpty()) {
+            problem(k.problem);
+        } else if (k.resource) {
+            const QJsonObject ka = attrs(*k.resource);
+            item.key = PcoKey{idOf(k.resource->value("id")), str(ka, "name"), str(ka, "starting_key")};
         }
         out.items.append(item);
     }
@@ -264,40 +352,52 @@ QByteArray header(const PcoHeaders &headers, const char *name)
 }
 } // namespace
 
-PcoRateLimit pcoRateLimitFrom(const PcoHeaders &headers)
+namespace {
+constexpr qint64 kOneDaySeconds = 24 * 60 * 60;
+
+// A non-negative whole number from a header, saturating instead of overflowing; nullopt when
+// it's absent or not a number.
+std::optional<qint64> wideNumber(const QByteArray &raw)
 {
-    return {header(headers, "X-PCO-API-Request-Rate-Count").toInt(),
-            header(headers, "X-PCO-API-Request-Rate-Limit").toInt(),
-            header(headers, "X-PCO-API-Request-Rate-Period").toInt()};
+    const QByteArray v = raw.trimmed();
+    if (v.isEmpty() || !std::all_of(v.begin(), v.end(), [](char c) { return c >= '0' && c <= '9'; }))
+        return std::nullopt;
+    bool ok = false;
+    const qint64 n = v.toLongLong(&ok);
+    return ok ? n : std::numeric_limits<qint64>::max();
 }
 
-namespace {
-// Header seconds as milliseconds, 64-bit and clamped, so a huge value can't overflow. Any
-// clamped value is far over what the client accepts anyway.
-std::optional<qint64> secondsToMs(const QByteArray &value)
+qint64 secondsToMs(qint64 seconds)
 {
-    bool ok = false;
-    const qint64 seconds = value.toLongLong(&ok);
-    if (!ok || seconds < 0)
-        return std::nullopt;
-    constexpr qint64 kOneDay = 24 * 60 * 60;
-    return std::min(seconds, kOneDay) * 1000;
+    return std::min(seconds, kOneDaySeconds) * 1000;
 }
 } // namespace
 
+PcoRateLimit pcoRateLimitFrom(const PcoHeaders &headers)
+{
+    return {wideNumber(header(headers, "X-PCO-API-Request-Rate-Count")).value_or(0),
+            wideNumber(header(headers, "X-PCO-API-Request-Rate-Limit")).value_or(0),
+            wideNumber(header(headers, "X-PCO-API-Request-Rate-Period")).value_or(0)};
+}
+
 std::optional<qint64> pcoRetryDelayMs(const PcoHeaders &headers)
 {
-    if (const auto retryAfter = secondsToMs(header(headers, "Retry-After")))
-        return retryAfter;
-    if (const auto period = secondsToMs(header(headers, "X-PCO-API-Request-Rate-Period")); period && *period > 0)
-        return period;
+    const QByteArray retryAfter = header(headers, "Retry-After");
+    if (!retryAfter.isEmpty()) {
+        // Present but unreadable (an HTTP date, garbage): the server asked for a wait we
+        // can't measure, so it's too long, not absent.
+        const std::optional<qint64> seconds = wideNumber(retryAfter);
+        return seconds ? secondsToMs(*seconds) : kPcoWaitTooLongMs;
+    }
+    if (const qint64 period = pcoRateLimitFrom(headers).periodSeconds; period > 0)
+        return secondsToMs(period);
     return std::nullopt;
 }
 
 qint64 pcoPacingDelayMs(const PcoRateLimit &rate)
 {
     if (rate.limit > 0 && rate.count >= rate.limit && rate.periodSeconds > 0)
-        return std::min<qint64>(rate.periodSeconds, 24 * 60 * 60) * 1000;
+        return secondsToMs(rate.periodSeconds);
     return 0;
 }
 

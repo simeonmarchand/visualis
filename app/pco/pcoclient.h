@@ -49,7 +49,9 @@ public:
     void setMaxWaitMs(int ms) { m_maxWaitMs = ms; }
 
     // Retries of one request after 429s before giving up, and the longest wait accepted
-    // (for a 429, and for pacing from the rate-limit headers).
+    // (for a 429, and for pacing from the rate-limit headers). A request that would have to
+    // wait longer fails at once as RateLimited; the deadline itself is kept, so nothing is
+    // sent inside Planning Center's cooldown.
     static constexpr int kMaxRateLimitRetries = 3;
     static constexpr int kMaxRetryWaitMs = 60'000;
     // A guard against a server whose `next` links never end.
@@ -63,6 +65,7 @@ private:
         visualis::PcoHeaders headers;
         bool signedOut = false;
         bool cutOff = false;   // a success status, but the transfer failed partway
+        bool notSent = false;  // held back: the rate-limit wait is longer than accepted
     };
     struct Pages
     {
@@ -77,6 +80,8 @@ private:
     void getDocument(const QUrl &url, Fetched done);
     void send(const QUrl &url, int attempt, std::function<void(Response)> done);
     bool sameApi(const QUrl &url) const;
+    // No request goes out until `delayMs` from now (or a later deadline already set).
+    void holdUntil(qint64 delayMs);
 
     QNetworkAccessManager *m_network;
     QUrl m_baseUrl;

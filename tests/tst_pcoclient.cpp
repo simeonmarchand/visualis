@@ -5,6 +5,7 @@
 #include <QNetworkAccessManager>
 #include <QTcpServer>
 #include <QTcpSocket>
+#include <QTimer>
 #include <QtTest>
 
 using namespace visualis;
@@ -18,6 +19,7 @@ struct Reply
     QList<QPair<QByteArray, QByteArray>> headers;
     bool hang = false;   // accept the request and never answer
     bool cutOff = false; // promise more body than is sent, then close
+    int delayMs = 0;     // answer this long after the request arrives
 };
 
 // A stand-in for Planning Center on localhost. Answers each path (query ignored) from a
@@ -90,8 +92,11 @@ private:
             head += k + ": " + v + "\r\n";
         const qsizetype length = reply.body.size() + (reply.cutOff ? 1000 : 0);
         head += "Content-Length: " + QByteArray::number(length) + "\r\nConnection: close\r\n\r\n";
-        s->write(head + reply.body);
-        s->disconnectFromHost();
+        const QByteArray response = head + reply.body;
+        QTimer::singleShot(reply.delayMs, s, [s, response] {
+            s->write(response);
+            s->disconnectFromHost();
+        });
     }
 
     QTcpServer m_server;
@@ -434,7 +439,9 @@ private slots:
         QCOMPARE(server.requests.size(), 3);
     }
 
-    void pacingNeverWaitsPastTheCap()
+    // #79: a used-up quota with a long period keeps its real deadline; requests that would
+    // wait past the cap fail at once as busy instead of going out inside the cooldown.
+    void aCooldownPastTheCapFailsAsBusyWithoutSending()
     {
         FakePlanningCenter server;
         const QList<QPair<QByteArray, QByteArray>> usedUp{{"X-PCO-API-Request-Rate-Count", "100"},
@@ -442,14 +449,127 @@ private slots:
                                                           {"X-PCO-API-Request-Rate-Period", "3600"}};
         server.on(kItems, {{200, server.fixture("items_page1.json"), usedUp},
                            {200, server.fixture("items_page2.json"), {}}});
+        server.onFixture("/services/v2/service_types", "service_types.json");
         auto pco = client(server);
         pco->setMaxWaitMs(500);
+        QElapsedTimer took;
+        took.start();
         Waiter<PcoPlanItems> w;
         pco->planItems("1001", "5001", w.done());
-        QVERIFY(w.wait(10000));
-        QVERIFY(w.result->ok());
-        const qint64 gap = server.requests[1].atMs - server.requests[0].atMs;
-        QVERIFY2(gap >= 400 && gap < 3000, qPrintable(QString::number(gap)));
+        QVERIFY(w.wait());
+        QCOMPARE(w.result->error.kind, PcoError::RateLimited);
+        QVERIFY(w.result->error.message.contains("busy"));
+        QCOMPARE(server.requests.size(), 1);   // page two was never sent
+
+        // Still inside the cooldown: the next read fails too, at once.
+        Waiter<QList<PcoServiceType>> next;
+        pco->serviceTypes(next.done());
+        QVERIFY(!next.result);   // still asynchronous
+        QVERIFY(next.wait());
+        QCOMPARE(next.result->error.kind, PcoError::RateLimited);
+        QCOMPARE(server.requests.size(), 1);
+        QVERIFY2(took.elapsed() < 400, qPrintable(QString::number(took.elapsed())));
+    }
+
+    // #79: a request already waiting honours a deadline that a later response pushed back.
+    void aWaitingRequestHonoursALaterDeadline()
+    {
+        FakePlanningCenter server;
+        // Read A: a 429 asking for 1 s, so its retry is armed for 1 s. Read B, sent at the same
+        // time but answered 300 ms later, while A waits: the quota is used up for 2 s more.
+        server.on("/services/v2/service_types",
+                  {{429, "{}", {{"Retry-After", "1"}}}, {200, server.fixture("service_types.json"), {}}});
+        Reply usedUp{200, server.fixture("plans.json"),
+                     {{"X-PCO-API-Request-Rate-Count", "100"}, {"X-PCO-API-Request-Rate-Limit", "100"},
+                      {"X-PCO-API-Request-Rate-Period", "2"}}};
+        usedUp.delayMs = 300;
+        server.on("/services/v2/service_types/1001/plans", {usedUp});
+        auto pco = client(server);
+        Waiter<QList<PcoServiceType>> a;
+        Waiter<QList<PcoPlan>> b;
+        pco->serviceTypes(a.done());
+        pco->futurePlans("1001", b.done());
+        QVERIFY(b.wait());
+        QVERIFY(a.wait(10000));
+        QVERIFY2(a.result->ok(), qPrintable(a.result->error.message));
+        QCOMPARE(server.requests.size(), 3);
+        const qint64 retryAt = server.requests[2].atMs - server.requests[0].atMs;
+        QVERIFY2(retryAt >= 2200, qPrintable(QString::number(retryAt)));   // 2.3 s, not the 1 s it was armed for
+    }
+
+    void aLaterDeadlinePastTheCapFailsTheWaitingRequest()
+    {
+        FakePlanningCenter server;
+        server.on("/services/v2/service_types",
+                  {{429, "{}", {{"Retry-After", "1"}}}, {200, server.fixture("service_types.json"), {}}});
+        Reply usedUp{200, server.fixture("plans.json"),
+                     {{"X-PCO-API-Request-Rate-Count", "100"}, {"X-PCO-API-Request-Rate-Limit", "100"},
+                      {"X-PCO-API-Request-Rate-Period", "20"}}};
+        usedUp.delayMs = 300;   // arrives while A's 1 s retry is armed
+        server.on("/services/v2/service_types/1001/plans", {usedUp});
+        auto pco = client(server);
+        pco->setMaxWaitMs(5000);
+        QElapsedTimer took;
+        took.start();
+        Waiter<QList<PcoServiceType>> a;
+        Waiter<QList<PcoPlan>> b;
+        pco->serviceTypes(a.done());
+        pco->futurePlans("1001", b.done());
+        QVERIFY(a.wait(10000));
+        QCOMPARE(a.result->error.kind, PcoError::RateLimited);
+        QCOMPARE(server.requests.size(), 2);   // the retry never went out
+        QVERIFY2(took.elapsed() < 4000, qPrintable(QString::number(took.elapsed())));
+    }
+
+    void anUnreadableRetryAfterGivesUpWithoutBlockingLaterReads()
+    {
+        FakePlanningCenter server;
+        server.on("/services/v2/service_types",
+                  {{429, "{}", {{"Retry-After", "soon"}, {"X-PCO-API-Request-Rate-Period", "1"}}},
+                   {200, server.fixture("service_types.json"), {}}});
+        auto pco = client(server);
+        Waiter<QList<PcoServiceType>> first;
+        pco->serviceTypes(first.done());
+        QVERIFY(first.wait());
+        QCOMPARE(first.result->error.kind, PcoError::RateLimited);
+        QCOMPARE(server.requests.size(), 1);   // not retried after the short period
+        Waiter<QList<PcoServiceType>> second;
+        pco->serviceTypes(second.done());
+        QVERIFY(second.wait());
+        QVERIFY(second.result->ok());
+    }
+
+    // #79: records left out reach the caller with the result.
+    void skippedRecordsComeWithTheResult()
+    {
+        FakePlanningCenter server;
+        server.on("/services/v2/service_types",
+                  {{200, R"({"data":[{"type":"ServiceType","id":"1","attributes":{"name":"Sunday"}},
+                                     {"type":"ServiceType","id":"2"}, null]})", {}}});
+        server.on("/services/v2/service_types/1/plans",
+                  {{200, R"({"data":[{"type":"Plan","id":"5","attributes":{"sort_date":null}}]})", {}}});
+        server.on("/services/v2/service_types/1/plans/5/items",
+                  {{200, R"({"data":[{"type":"Item","id":"9","attributes":{"title":"Welcome"}}]})", {}}});
+        auto pco = client(server);
+        Waiter<QList<PcoServiceType>> types;
+        pco->serviceTypes(types.done());
+        QVERIFY(types.wait());
+        QVERIFY(types.result->ok());
+        QCOMPARE(types.result->value.size(), 1);
+        QCOMPARE(types.result->skipped.size(), 2);
+
+        Waiter<QList<PcoPlan>> plans;
+        pco->futurePlans("1", plans.done());
+        QVERIFY(plans.wait());
+        QVERIFY(plans.result->value.isEmpty());
+        QCOMPARE(plans.result->skipped, QStringList{"Plan 5: has no valid date"});
+
+        Waiter<PcoPlanItems> items;
+        pco->planItems("1", "5", items.done());
+        QVERIFY(items.wait());
+        QVERIFY(items.result->value.items.isEmpty());
+        QCOMPARE(items.result->skipped.size(), 1);
+        QCOMPARE(items.result->skipped, items.result->value.skipped);
     }
 
 private:
