@@ -145,6 +145,24 @@ private slots:
         QVERIFY(m_songs->load(grace.id)->pcoSongId.isEmpty());   // not written
     }
 
+    // Second review of #103 (H2): a re-import links only what it's told to.
+    void onlyTheItemsNamedAreLinked()
+    {
+        Song grace = libSong("Amazing Grace", {group("Verse 1", "Amazing grace")});
+        Song holy = libSong("Holy, Holy, Holy", {group("Verse 1", "Holy")});
+        QVERIFY(m_songs->save(grace).ok);
+        QVERIFY(m_songs->save(holy).ok);
+        Service s = imported({songItem("1", "Amazing Grace", 1, {"Verse 1"}), songItem("2", "Holy, Holy, Holy", 2, {"Verse 1"})});
+        for (ServiceItem &it : s.items)
+            it.id = QUuid::createUuid();
+        const QSet<QUuid> only{s.items[1].id};
+        QList<Song> staged;
+        const SongLinkReport r = linkSongs(s, *m_songs, &staged, &only);
+        QCOMPARE(s.items[0].kind, Kind::Placeholder);   // left alone
+        QCOMPARE(s.items[1].kind, Kind::Song);
+        QCOMPARE(r.items, (QList<SongLinkReport::Linked>{{s.items[1].id, "Holy, Holy, Holy", true}}));
+    }
+
     void creditsTheSongHasAreKept()
     {
         Song s = libSong("Amazing Grace", {group("Verse 1", "Amazing grace")});

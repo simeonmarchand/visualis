@@ -645,7 +645,10 @@ private slots:
         QVERIFY(idle(importer));
         QCOMPARE(changeKinds(importer), QStringList{"changedButDeleted"});
         QCOMPARE(importer.reimportChanges()[0].toMap()["pcoItemId"].toString(), QStringLiteral("9001"));
-        QVERIFY(importer.applyReimport({"9001"}));
+        importer.setReimportAddBack({"9001"});   // the diff is worked out again: what's shown is what's applied
+        QCOMPARE(changeKinds(importer), QStringList{"added"});
+        QCOMPARE(importer.reimportChanges()[0].toMap()["pcoItemId"].toString(), QStringLiteral("9001"));
+        QVERIFY(importer.applyReimport());
         QVERIFY(idle(importer));
         const Service s = *store.load(QUuid::fromString(id));
         QCOMPARE(s.items.first().title, QStringLiteral("Countdown (10 min)"));
@@ -834,6 +837,124 @@ private slots:
         QCOMPARE(imported.size(), 1);
         QCOMPARE(SongStore(*songs.library()).load(one)->pcoSongId, QStringLiteral("7001"));
         QVERIFY(importer.status().contains("1 by title"));
+    }
+
+    // Imported, with "Example Song One" in the library but not linked yet: the operator left
+    // its placeholder alone or chose for it, as each test says.
+    QString importedWithLibrarySong(SongLibrary &songs, FakePlanningCenter &server, PlanImporter &importer)
+    {
+        serve(server);
+        importer.setSongLibrary(&songs);
+        importer.setClient(client(server.url()));
+        QSignalSpy imported(&importer, &PlanImporter::imported);
+        importer.importPlan("1001", "5001");
+        if (!idle(importer) || imported.isEmpty())
+            qFatal("import failed: %s", qPrintable(importer.status()));
+        if (!songs.createFromPaste("Example Song One", "[Verse 1]\nSynthetic words"))
+            qFatal("no song");
+        return imported[0][0].toString();
+    }
+
+    // Second review of #103 (H2): only what came from Planning Center is linked, and the
+    // diff says so before anything is saved.
+    void onlyPlanningCentersPlaceholdersAreLinkedAndShown()
+    {
+        SongLibrary songs;
+        QVERIFY(songs.openLibrary(m_dir.filePath(QString::number(++m_n))));
+        FakePlanningCenter server;
+        PlanImporter importer;
+        const QString id = importedWithLibrarySong(songs, server, importer);
+        server.clear(kItems);
+        server.on(kItems, {"items_page1.json", "items_page2.json"});
+        importer.reimport(id);
+        QVERIFY(idle(importer));
+        QCOMPARE(changeKinds(importer), QStringList{"linked"});   // shown first
+        QVERIFY(importer.reimportChanges()[0].toMap()["detail"].toString().contains("matched by title"));
+        QVERIFY(importer.reimportNeedsSave());
+        QVERIFY(importer.applyReimport());
+        QVERIFY(idle(importer));
+        QCOMPARE(byPco(*ServiceStore(*songs.library()).load(QUuid::fromString(id)), "9003")->kind, Kind::Song);
+
+        // An item the merge leaves alone isn't linked either: here, one whose song record
+        // didn't come, though the library has a song with its title.
+        SongLibrary other;
+        QVERIFY(other.openLibrary(m_dir.filePath(QString::number(++m_n))));
+        FakePlanningCenter server2;
+        PlanImporter importer2;
+        const QString id2 = importedWithLibrarySong(other, server2, importer2);
+        QFile f(QStringLiteral(FIXTURES_DIR "/pco/items_page1.json"));
+        QVERIFY(f.open(QIODevice::ReadOnly));
+        QJsonObject page = QJsonDocument::fromJson(f.readAll()).object();
+        page["included"] = QJsonArray{};
+        server2.clear(kItems);
+        server2.onBody(kItems, QJsonDocument(page).toJson());
+        server2.on(kItems, {"items_page2.json"});
+        importer2.reimport(id2);
+        QVERIFY(idle(importer2));
+        QCOMPARE(changeKinds(importer2), QStringList{"unreadable"});
+        QVERIFY(importer2.applyReimport());
+        QVERIFY(idle(importer2));
+        QCOMPARE(byPco(*ServiceStore(*other.library()).load(QUuid::fromString(id2)), "9003")->kind, Kind::Placeholder);
+    }
+
+    // Second review of #103 (H3, M4): what's applied is what was shown, or nothing.
+    void aServiceChangedWhileReviewingIsShownAgain()
+    {
+        SongLibrary songs;
+        QVERIFY(songs.openLibrary(m_dir.filePath(QString::number(++m_n))));
+        FakePlanningCenter server;
+        PlanImporter importer;
+        const QString id = readyReimport(songs, server, importer);   // Worship renamed in Planning Center
+        QCOMPARE(changeKinds(importer), QStringList{"changed"});
+
+        // Meanwhile the operator renames Worship themselves.
+        ServiceStore store(*songs.library());
+        Service mine = *store.load(QUuid::fromString(id));
+        const_cast<ServiceItem *>(byPco(mine, "9002"))->title = "Praise";
+        QVERIFY(store.save(mine).ok);
+        const Service edited = *store.load(QUuid::fromString(id));
+
+        QSignalSpy reimported(&importer, &PlanImporter::reimported);
+        QVERIFY(importer.applyReimport());
+        QVERIFY(idle(importer));
+        QCOMPARE(reimported.size(), 0);
+        QCOMPARE(*store.load(QUuid::fromString(id)), edited);   // nothing saved
+        QVERIFY(!importer.reimportNotice().isEmpty());
+        QCOMPARE(changeKinds(importer), QStringList{"keptEdit"});   // the new diff, for approval
+
+        QVERIFY(importer.applyReimport());   // approved this time
+        QVERIFY(idle(importer));
+        QCOMPARE(reimported.size(), 1);
+        QCOMPARE(byPco(*store.load(QUuid::fromString(id)), "9002")->title, QStringLiteral("Praise"));
+    }
+
+    // Second review of #103 (M5): only a song that's gone is skipped; any other failure to
+    // write a link rolls the whole update back.
+    void aLinkThatCantBeWrittenRollsTheUpdateBack()
+    {
+        const QString folder = m_dir.filePath(QString::number(++m_n));
+        SongLibrary songs;
+        QVERIFY(songs.openLibrary(folder));
+        FakePlanningCenter server;
+        PlanImporter importer;
+        const QString id = importedWithLibrarySong(songs, server, importer);
+        const Service before = *ServiceStore(*songs.library()).load(QUuid::fromString(id));
+        server.clear(kItems);
+        server.on(kItems, {"items_page1.json", "items_page2.json"});
+        importer.reimport(id);
+        QVERIFY(idle(importer));
+        QCOMPARE(changeKinds(importer), QStringList{"linked"});
+
+        QSqlQuery trigger(songs.library()->database());
+        QVERIFY(trigger.exec("CREATE TEMP TRIGGER refuse_links BEFORE UPDATE OF pco_song_id ON song "
+                             "BEGIN SELECT RAISE(ABORT, 'refused'); END"));
+        QSignalSpy reimported(&importer, &PlanImporter::reimported);
+        QVERIFY(importer.applyReimport());
+        QVERIFY(idle(importer));
+        QCOMPARE(reimported.size(), 0);
+        QVERIFY2(importer.status().contains("refused"), qPrintable(importer.status()));
+        QCOMPARE(*ServiceStore(*songs.library()).load(QUuid::fromString(id)), before);
+        QVERIFY(trigger.exec("DROP TRIGGER refuse_links"));
     }
 
     void aCancelledReimportChangesNothing()

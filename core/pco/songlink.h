@@ -6,6 +6,8 @@
 #include "song/songmatch.h"
 
 #include <QList>
+#include <QSet>
+#include <QUuid>
 #include <QString>
 #include <QStringList>
 
@@ -42,6 +44,13 @@ struct SongLinkReport {
     int toConfirm = 0;       // a suggestion is waiting for the operator
     int placeholders = 0;    // nothing close in the library
     QStringList unmatched;   // "Song title: Bridge 2, Bridge 3", one per song with any
+    struct Linked {
+        QUuid itemId;
+        QString songTitle;
+        bool byTitle = false;
+        bool operator==(const Linked &) const = default;
+    };
+    QList<Linked> items;     // each item linked, in service order
 
     // "4 songs matched (1 by title), 1 to confirm, 1 not in the library." Empty with no songs.
     QString summary() const;
@@ -50,7 +59,9 @@ struct SongLinkReport {
 // Links every song placeholder in `service` that matchSong() is sure of, and remembers each
 // library song's Planning Center id. Doesn't save the service. With `staged`, the songs to
 // update are put there for the caller to save with the service (#103 review, M6); without
-// it they're saved at once.
-SongLinkReport linkSongs(Service &service, SongStore &songs, QList<Song> *staged = nullptr);
+// it they're saved at once. With `only`, just those items are considered (a re-import links
+// only what came from Planning Center, ReimportResult::linkable).
+SongLinkReport linkSongs(Service &service, SongStore &songs, QList<Song> *staged = nullptr,
+                         const QSet<QUuid> *only = nullptr);
 
 } // namespace visualis

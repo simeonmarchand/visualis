@@ -335,6 +335,64 @@ private slots:
         QCOMPARE(m_services->load(s.id)->title, QStringLiteral("Imported"));
     }
 
+    // Second review of #103 (H3, M4): load, decide and save as one step under the write lock.
+    void applyWithoutWaitingDecidesOnWhatsSaved()
+    {
+        Service s;
+        s.title = "Sunday";
+        s.items = {item(Kind::Header, "Worship")};
+        QVERIFY(m_services->save(s).ok);
+
+        // A refusal writes nothing, and says why.
+        const ServiceStore::Result refused = m_services->applyWithoutWaiting(s.id, [](const Service &) {
+            return ServiceStore::Decision{std::nullopt, {}, QStringLiteral("changed")};
+        });
+        QVERIFY(!refused.ok);
+        QVERIFY(refused.conflict);
+        QCOMPARE(refused.error, QStringLiteral("changed"));
+
+        // `decide` sees the service as saved, and what it returns is saved with `also`.
+        Service saved;
+        bool alsoRan = false;
+        const ServiceStore::Result ok = m_services->applyWithoutWaiting(
+            s.id,
+            [&](const Service &current) {
+                Service next = current;
+                next.items[0].title = current.items[0].title + " Set";
+                return ServiceStore::Decision{next, [&] { alsoRan = true; return QString(); }, {}};
+            },
+            &saved);
+        QVERIFY2(ok.ok, qPrintable(ok.error));
+        QVERIFY(alsoRan);
+        QCOMPARE(m_services->load(s.id)->items[0].title, QStringLiteral("Worship Set"));
+        QCOMPARE(saved.items[0].title, QStringLiteral("Worship Set"));
+
+        // An error from `also` rolls it all back.
+        const ServiceStore::Result rolled = m_services->applyWithoutWaiting(s.id, [](const Service &current) {
+            Service next = current;
+            next.title = "Renamed";
+            return ServiceStore::Decision{next, [] { return QStringLiteral("no"); }, {}};
+        });
+        QVERIFY(!rolled.ok);
+        QCOMPARE(m_services->load(s.id)->title, QStringLiteral("Sunday"));
+
+        // Busy: refused at once, before `decide` runs.
+        auto other = Library::open(m_library->folder()).library;
+        QSqlQuery lock(other->database());
+        QVERIFY(lock.exec("BEGIN IMMEDIATE"));
+        bool decided = false;
+        QElapsedTimer took;
+        took.start();
+        const ServiceStore::Result busy = m_services->applyWithoutWaiting(s.id, [&](const Service &current) {
+            decided = true;
+            return ServiceStore::Decision{current, {}, {}};
+        });
+        QVERIFY(busy.busy);
+        QVERIFY(!decided);
+        QVERIFY(took.elapsed() < Library::kBusyTimeoutMs / 2);
+        QVERIFY(QSqlQuery(other->database()).exec("ROLLBACK"));
+    }
+
     void aVersion3LibraryGainsThePlanLink()
     {
         const QString folder = m_dir.filePath("v3");

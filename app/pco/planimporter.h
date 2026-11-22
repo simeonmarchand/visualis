@@ -2,6 +2,7 @@
 
 #include "pco/pcotypes.h"
 #include "pco/planimport.h"
+#include "pco/reimport.h"
 #include "pco/songlink.h"
 #include "song/song.h"
 #include "service/service.h"
@@ -40,7 +41,9 @@ class PlanImporter : public QObject
     // A re-import read and waiting for Apply or Cancel (#56): the service it's for (empty when
     // none), its diff as {kind, title, field, detail, pcoItemId}, and the diff in a sentence.
     // `kind` is "added", "removed", "restored", "moved", "changed", "keptEdit",
-    // "keptPosition", "relink" or "changedButDeleted".
+    // "keptPosition", "relink", "changedButDeleted", "unreadable" or "linked" (a song
+    // placeholder applying links to the library). An "added" line with a `pcoItemId` is an
+    // item the operator chose to add back.
     Q_PROPERTY(QString reimportServiceId READ reimportServiceId NOTIFY reimportChanged)
     Q_PROPERTY(QVariantList reimportChanges READ reimportChanges NOTIFY reimportChanged)
     Q_PROPERTY(QString reimportSummary READ reimportSummary NOTIFY reimportChanged)
@@ -48,6 +51,8 @@ class PlanImporter : public QObject
     Q_PROPERTY(bool reimportNeedsSave READ reimportNeedsSave NOTIFY reimportChanged)
     // What couldn't be read from Planning Center, for the operator.
     Q_PROPERTY(QStringList reimportNotes READ reimportNotes NOTIFY reimportChanged)
+    // Set when the service changed while the diff was open, so this is a new one to look at.
+    Q_PROPERTY(QString reimportNotice READ reimportNotice NOTIFY reimportChanged)
 
 public:
     explicit PlanImporter(QObject *parent = nullptr);
@@ -70,8 +75,9 @@ public:
     QString reimportServiceId() const;
     QVariantList reimportChanges() const;
     QString reimportSummary() const;
-    bool reimportNeedsSave() const { return m_reimport && m_reimport->needsSave; }
+    bool reimportNeedsSave() const;
     QStringList reimportNotes() const { return m_reimport ? m_reimport->fresh.notes : QStringList(); }
+    QString reimportNotice() const { return m_reimport ? m_reimport->notice : QString(); }
 
     Q_INVOKABLE void loadServiceTypes();
     Q_INVOKABLE void loadPlans(const QString &serviceTypeId);
@@ -84,12 +90,15 @@ public:
     // copy, without saving: the diff waits for applyReimport() or cancelReimport(). Nothing
     // the operator did is lost (mergeReimport).
     Q_INVOKABLE void reimport(const QString &serviceId);
-    // Saves the merge, adding back the deleted items in `addBack` (Planning Center item ids
-    // from "changedButDeleted" lines). Songs the library is sure of are linked, as on import.
-    // Like an import's save it never waits on another program's lock (#76): it retries, then
-    // gives up with the service unchanged. Returns whether a save was started; `reimported`
-    // says when it's done.
-    Q_INVOKABLE bool applyReimport(const QStringList &addBack = {});
+    // Deleted items to add back (Planning Center ids from "changedButDeleted" lines): the diff
+    // is worked out again, so what's shown is what Apply does.
+    Q_INVOKABLE void setReimportAddBack(const QStringList &pcoItemIds);
+    // Saves exactly the diff shown (#103 review). Under the library's write lock it works the
+    // diff out again from the service as saved; if that's not what was shown, nothing is
+    // saved and the new diff is offered instead (reimportNotice). Like an import's save it
+    // never waits on another program's lock (#76): it retries, then gives up with the service
+    // unchanged. Returns whether a save was started; `reimported` says when it's done.
+    Q_INVOKABLE bool applyReimport();
     Q_INVOKABLE void cancelReimport();
 
 signals:
@@ -117,11 +126,23 @@ private:
                  int library);
     void gaveUpWaiting(const QString &title);
 
-    void offerReimport(const QUuid &serviceId, const visualis::PlanImport &fresh, int library);
-    void tryApply(const QSet<QString> &addBack, QDeadlineTimer deadline, int request);
-    // The library songs linkSongs() updated, to write in the service's transaction. Titles of
-    // any that couldn't be written (deleted meanwhile) go to `failed`.
-    std::function<QString()> linkWrites(const QList<visualis::Song> &linked, QStringList *failed);
+    // What applying a re-import would do: the merge, the links it makes, and the lines shown.
+    struct Proposal {
+        visualis::ReimportResult merge;
+        visualis::SongLinkReport links;
+        QList<visualis::Song> linked;           // library songs to update with the service
+        QList<visualis::ReimportChange> changes;   // the merge's lines and a "linked" line per link
+        bool same(const Proposal &other) const;
+    };
+    Proposal propose(const visualis::Service &local, const visualis::PlanImport &fresh,
+                     const QSet<QString> &addBack);
+    void offerReimport(const QUuid &serviceId, const visualis::PlanImport &fresh, int library,
+                       const QSet<QString> &addBack = {}, const QString &notice = {});
+    void tryApply(QDeadlineTimer deadline, int request);
+    // The library songs linkSongs() updated, to write in the service's transaction. A song
+    // that's gone from the library is skipped and named in `missing`; any other failure is
+    // returned, so the whole save rolls back.
+    std::function<QString()> linkWrites(const QList<visualis::Song> &linked, QStringList *missing);
 
     QPointer<PlanningCenter> m_pco;
     QPointer<SongLibrary> m_songs;
@@ -136,10 +157,10 @@ private:
     struct PendingReimport {
         QUuid serviceId;
         visualis::PlanImport fresh;   // the plan as read, as serviceFromPlan made it
-        QVariantList changes;
-        QString summary;
-        bool needsSave = false;
-        int library = 0;           // m_libraryChanges when read: only applied to that library
+        int library = 0;              // m_libraryChanges when read: only applied to that library
+        QSet<QString> addBack;
+        Proposal shown;               // what the operator is looking at, and approves with Apply
+        QString notice;
     };
     std::optional<PendingReimport> m_reimport;
     int m_reimportRequest = 0;   // only the latest reimport() answer is offered

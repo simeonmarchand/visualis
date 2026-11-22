@@ -18,14 +18,11 @@ Dialog {
 
     readonly property bool ready: PlanImporter.reimportServiceId !== ""
     readonly property bool upToDate: ready && PlanImporter.reimportChanges.length === 0 && !PlanImporter.reimportNeedsSave
-    property var addBack: ({})   // Planning Center item id -> true, for deleted items to add back
-
-    onOpened: addBack = ({})
     onRejected: PlanImporter.cancelReimport()   // Cancel, Escape, or a click outside
 
     function line(c) {
         switch (c.kind) {
-        case "added": return "Added: " + c.title
+        case "added": return (c.pcoItemId !== "" ? "Adding back: " : "Added: ") + c.title
         case "removed": return "Removed in Planning Center: " + c.title + " (kept here, marked removed)"
         case "restored": return "Back in the plan: " + c.title
         case "moved": return "Moved: " + c.title
@@ -34,6 +31,7 @@ Dialog {
         case "keptPosition": return c.title + ": kept where you put it; Planning Center moved it"
         case "relink": return c.title + ": Planning Center has another song here, so it needs a song again"
         case "changedButDeleted": return c.title + ": " + c.detail
+        case "linked": return c.title + ": " + c.detail
         case "unreadable": return c.title !== "" ? c.title + ": " + c.detail : c.detail.charAt(0).toUpperCase() + c.detail.slice(1)
         }
         return c.title
@@ -42,6 +40,16 @@ Dialog {
     ColumnLayout {
         anchors.fill: parent
         spacing: 10
+
+        // The service changed while this was open: a new diff to look at before applying.
+        Label {
+            objectName: "reimportNotice"
+            Layout.fillWidth: true
+            visible: dialog.ready && PlanImporter.reimportNotice !== ""
+            wrapMode: Text.Wrap
+            font.bold: true
+            text: PlanImporter.reimportNotice
+        }
 
         Label {
             Layout.fillWidth: true
@@ -67,15 +75,13 @@ Dialog {
                     text: dialog.line(row.modelData)
                     color: row.modelData.kind === "keptEdit" || row.modelData.kind === "keptPosition" ? "#8b8f96" : palette.text
                 }
+                // Ticking it works the diff out again, so what's shown is what Apply does.
                 CheckBox {
                     objectName: "addBack" + row.index
-                    visible: row.modelData.kind === "changedButDeleted"
+                    visible: row.modelData.pcoItemId !== ""
+                    checked: row.modelData.kind === "added"
                     text: "Add back"
-                    onToggled: {
-                        const next = Object.assign({}, dialog.addBack)
-                        next[row.modelData.pcoItemId] = checked
-                        dialog.addBack = next
-                    }
+                    onToggled: dialog.toggleAddBack(row.modelData.pcoItemId, checked)
                 }
             }
         }
@@ -104,8 +110,16 @@ Dialog {
         }
     }
 
-    onAccepted: {
-        const ids = Object.keys(addBack).filter(k => addBack[k])
-        PlanImporter.applyReimport(ids)
+    function toggleAddBack(pcoItemId, on) {
+        const ids = []
+        for (const c of PlanImporter.reimportChanges) {
+            if (c.kind === "added" && c.pcoItemId !== "" && c.pcoItemId !== pcoItemId)
+                ids.push(c.pcoItemId)
+        }
+        if (on)
+            ids.push(pcoItemId)
+        PlanImporter.setReimportAddBack(ids)
     }
+
+    onAccepted: PlanImporter.applyReimport()
 }

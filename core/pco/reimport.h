@@ -32,7 +32,7 @@ struct ReimportChange {
     QString title;      // the item's title after the merge
     QString field;      // Changed and KeptEdit: "title", "sequence", "service position", "reference", "kind"
     QString detail;     // "Amazing Grace → Amazing Grace (Live)"
-    QString pcoItemId;  // ChangedButDeleted: the item to pass to `addBack`; the item isn't in the service
+    QString pcoItemId;  // ChangedButDeleted, and Added for an item added back: its id in `addBack`
 
     bool operator==(const ReimportChange &) const = default;
 };

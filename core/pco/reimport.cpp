@@ -343,7 +343,10 @@ ReimportResult mergeReimport(const Service &local, const Service &fresh, const R
         ServiceItem added = f;
         added.id = QUuid::createUuidV5(space, QStringLiteral("pco %1").arg(id));
         r.linkable << added.id;
-        changesFor[added.id] << Change{Change::Kind::Added, added.id, added.title, {}, {}, {}};
+        // One the operator chose to add back says so, with its id, so they can change their mind.
+        changesFor[added.id] << (options.addBack.contains(id) && deleted.contains(id)
+                                     ? Change{Change::Kind::Added, added.id, added.title, {}, QStringLiteral("added back"), id}
+                                     : Change{Change::Kind::Added, added.id, added.title, {}, {}, {}});
         result << added;
     }
     // A deleted item missing from the answer is forgotten, unless it may only have been unreadable.

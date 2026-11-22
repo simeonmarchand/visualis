@@ -83,12 +83,12 @@ QString SongLinkReport::summary() const
     return parts.join(QStringLiteral(", ")) + QLatin1Char('.');
 }
 
-SongLinkReport linkSongs(Service &service, SongStore &songs, QList<Song> *staged)
+SongLinkReport linkSongs(Service &service, SongStore &songs, QList<Song> *staged, const QSet<QUuid> *only)
 {
     SongLinkReport report;
     QList<SongCandidate> candidates = songs.matchCandidates();
     for (ServiceItem &item : service.items) {
-        if (item.kind != ServiceItem::Kind::Placeholder)
+        if (item.kind != ServiceItem::Kind::Placeholder || (only && !only->contains(item.id)))
             continue;
         const std::optional<PcoSong> pco = snapshotSong(item.importSnapshot);
         if (!pco)
@@ -127,6 +127,7 @@ SongLinkReport linkSongs(Service &service, SongStore &songs, QList<Song> *staged
         }
         item = linkedItem(item, *song);
         ++(m.by == SongMatch::By::Title ? report.byTitle : report.linked);
+        report.items << SongLinkReport::Linked{item.id, song->title, m.by == SongMatch::By::Title};
         if (const QStringList missing = unmatchedLabels(item, *song); !missing.isEmpty())
             report.unmatched << QStringLiteral("%1: %2").arg(song->title, missing.join(QStringLiteral(", ")));
     }
