@@ -12,6 +12,7 @@ bool LiveState::show(const Song &song, const QUuid &arrangement, int index)
     m_song = song;
     m_arrangement = arrangement;
     m_slides = songSlides(song, arrangement);
+    m_itemId = QUuid();
     const bool valid = index >= 0 && index < m_slides.size();
     m_index = valid ? index : -1;
     m_textCleared = false;
@@ -20,8 +21,12 @@ bool LiveState::show(const Song &song, const QUuid &arrangement, int index)
 }
 
 void LiveState::restore(const Song &song, const QUuid &arrangement, int index, bool textCleared,
-                        bool backgroundCleared)
+                        bool backgroundCleared, const QUuid &service, const QUuid &item)
 {
+    if (service != m_serviceId)
+        m_items.clear();
+    m_serviceId = service;
+    m_itemId = item;
     m_song = song;
     m_arrangement = arrangement;
     m_slides = songSlides(song, arrangement);
@@ -31,14 +36,77 @@ void LiveState::restore(const Song &song, const QUuid &arrangement, int index, b
     emit changed();
 }
 
+void LiveState::setService(const QUuid &id, const QList<LiveItem> &items)
+{
+    m_serviceId = id;
+    m_items = items;
+    emit changed();
+}
+
+int LiveState::itemIndex() const
+{
+    if (m_itemId.isNull())
+        return -1;
+    for (int i = 0; i < m_items.size(); ++i) {
+        if (m_items[i].id == m_itemId)
+            return i;
+    }
+    return -1;
+}
+
+bool LiveState::goToItem(int n, int slide)
+{
+    if (n < 0 || n >= m_items.size())
+        return false;
+    const int count = int(m_items[n].slides.size());
+    if (slide == -1)
+        slide = count - 1;
+    if (slide < 0 || slide >= count)
+        return false;
+    showItem(n, slide);
+    return true;
+}
+
+void LiveState::showItem(int n, int slide)
+{
+    const LiveItem &item = m_items[n];
+    m_song = item.song;
+    m_arrangement = item.arrangement;
+    m_slides = item.slides;
+    m_itemId = item.id;
+    m_index = slide;
+    m_textCleared = false;
+    emit changed();
+}
+
 bool LiveState::next()
 {
-    return m_index + 1 < m_slides.size() && moveTo(m_index + 1);
+    if (m_index + 1 < m_slides.size())
+        return moveTo(m_index + 1);
+    const int item = itemIndex();
+    // Nothing live yet: Next starts the service.
+    if (item < 0 && (!m_itemId.isNull() || !m_slides.isEmpty()))
+        return false;
+    for (int i = item + 1; i < m_items.size(); ++i) {
+        if (!m_items[i].slides.isEmpty()) {
+            showItem(i, 0);
+            return true;
+        }
+    }
+    return false;
 }
 
 bool LiveState::previous()
 {
-    return m_index > 0 && moveTo(m_index - 1);
+    if (m_index > 0)
+        return moveTo(m_index - 1);
+    for (int i = itemIndex() - 1; i >= 0; --i) {
+        if (!m_items[i].slides.isEmpty()) {
+            showItem(i, int(m_items[i].slides.size()) - 1);
+            return true;
+        }
+    }
+    return false;
 }
 
 bool LiveState::goToSlide(int n)

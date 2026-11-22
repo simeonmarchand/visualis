@@ -78,6 +78,39 @@ private slots:
         QVERIFY(recovery.message().isEmpty());
     }
 
+    // #51: a crash mid-service comes back to the same item and slide, and Next carries on
+    // into the next item once the service is open again.
+    void afterACrashMidServiceTheSameItemComesBack()
+    {
+        Song second = sample();
+        second.title = "O Come All Ye Faithful";
+        const ServiceItem a{QUuid::createUuid(), ServiceItem::Kind::Song, "Joy", {}, {}, {}, {}, {}, {}, {}, {}};
+        const ServiceItem b{QUuid::createUuid(), ServiceItem::Kind::Song, "O Come", {}, {}, {}, {}, {}, {}, {}, {}};
+        const QList<LiveItem> items{liveItem(a, sample()), liveItem(b, second)};
+        const QUuid service = QUuid::createUuid();
+        {
+            LiveState live;
+            Recovery recovery;
+            recovery.start(m_path, &live, nullptr);
+            live.setService(service, items);
+            QVERIFY(live.goToItem(0, 1));
+        }   // no finish(): the process died
+
+        LiveState live;
+        Recovery recovery;
+        QVERIFY(recovery.start(m_path, &live, nullptr));
+        QCOMPARE(live.serviceId(), service);
+        QCOMPARE(live.itemId(), a.id);
+        QCOMPARE(live.slideIndex(), 1);
+        live.setService(service, items);   // the operator window opens the service again
+        QCOMPARE(live.itemIndex(), 0);
+        QVERIFY(live.next());
+        QVERIFY(live.next());
+        QCOMPARE(live.itemIndex(), 1);
+        QCOMPARE(live.songTitle(), QStringLiteral("O Come All Ye Faithful"));
+        QCOMPARE(readJournal(m_path).snapshot->item, b.id);
+    }
+
     void theBackgroundComesBackToo()
     {
         const QUrl clip = QUrl::fromLocalFile(m_dir.filePath("motion.mp4"));

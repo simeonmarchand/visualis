@@ -1,0 +1,375 @@
+#include "library/servicelist.h"
+
+#include "library/library.h"
+#include "library/songlibrary.h"
+#include "live/livestate.h"
+#include "service/servicejson.h"
+#include "service/servicestore.h"
+
+#include <QDir>
+#include <QFile>
+#include <QLoggingCategory>
+#include <QQmlEngine>
+
+using namespace visualis;
+
+Q_LOGGING_CATEGORY(lcServices, "visualis.services")
+
+namespace {
+QString braceless(const QUuid &id) { return id.isNull() ? QString() : id.toString(QUuid::WithoutBraces); }
+constexpr auto kLastServiceSetting = "operator.lastService";
+constexpr auto kServiceSuffix = ".visualis-service.json";
+} // namespace
+
+ServiceList::ServiceList(SongLibrary *songs, LiveState *live, QObject *parent)
+    : QObject(parent)
+    , m_songs(songs)
+    , m_live(live)
+{
+    if (m_songs) {
+        connect(m_songs, &SongLibrary::libraryChanged, this, &ServiceList::libraryChanged);
+        // A song edited or deleted changes the items that use it.
+        connect(m_songs, &SongLibrary::songsChanged, this, [this] {
+            if (m_open)
+                refresh();
+        });
+    }
+    if (m_live)
+        connect(m_live, &LiveState::changed, this, &ServiceList::followLive);
+    libraryChanged();
+}
+
+ServiceList::~ServiceList() = default;
+
+ServiceList *ServiceList::create(QQmlEngine *qml, QJSEngine *)
+{
+    return new ServiceList(qml->singletonInstance<SongLibrary *>("Visualis.Ui", "SongLibrary"),
+                           qml->singletonInstance<LiveState *>("Visualis.Ui", "LiveState"));
+}
+
+void ServiceList::libraryChanged()
+{
+    m_open.reset();
+    m_liveItems.clear();
+    m_selected = -1;
+    m_inGrid = false;
+    Library *library = m_songs ? m_songs->library() : nullptr;
+    m_store = library ? std::make_unique<ServiceStore>(*library) : nullptr;
+    emit servicesChanged();
+    // Back to the service the operator had open last time.
+    if (!library || !openService(library->setting(kLastServiceSetting))) {
+        emit serviceChanged();
+        emit selectionChanged();
+    }
+}
+
+QVariantList ServiceList::services() const
+{
+    QVariantList list;
+    if (!m_store)
+        return list;
+    for (const ServiceSummary &s : m_store->list()) {
+        list.append(QVariantMap{{"id", braceless(s.id)}, {"title", s.title},
+                                {"date", s.date.isValid() ? s.date.toString("d MMM yyyy") : QString()}});
+    }
+    return list;
+}
+
+bool ServiceList::createService(const QString &title)
+{
+    if (!m_store)
+        return false;
+    Service s;
+    s.title = title.trimmed();
+    s.date = QDate::currentDate();
+    if (const ServiceStore::Result r = m_store->save(s); !r.ok) {
+        setReport(r.error);
+        return false;
+    }
+    emit servicesChanged();
+    return openService(braceless(s.id));
+}
+
+bool ServiceList::openService(const QString &id)
+{
+    if (!m_store || id.isEmpty())
+        return false;
+    std::optional<Service> s = m_store->load(QUuid::fromString(id));
+    if (!s)
+        return false;
+    m_open = std::move(s);
+    m_selected = -1;
+    m_inGrid = false;
+    m_songs->library()->setSetting(kLastServiceSetting, braceless(m_open->id));
+    refresh();
+    // Opening the service that's live (a recovery) shows the live item.
+    if (m_live && m_live->itemIndex() >= 0)
+        select(m_live->itemIndex());
+    return true;
+}
+
+bool ServiceList::renameService(const QString &title)
+{
+    if (!m_open || title.trimmed().isEmpty())
+        return false;
+    const QString before = m_open->title;
+    m_open->title = title.trimmed();
+    if (!save()) {
+        m_open->title = before;
+        return false;
+    }
+    emit servicesChanged();
+    emit serviceChanged();
+    return true;
+}
+
+bool ServiceList::removeService(const QString &id)
+{
+    const QUuid uuid = QUuid::fromString(id);
+    if (!m_store || !m_store->remove(uuid))
+        return false;
+    if (m_open && m_open->id == uuid) {
+        m_open.reset();
+        m_liveItems.clear();
+        m_selected = -1;
+        m_inGrid = false;
+        if (m_live && m_live->serviceId() == uuid)
+            m_live->clearService();
+        emit serviceChanged();
+        emit selectionChanged();
+    }
+    emit servicesChanged();
+    return true;
+}
+
+bool ServiceList::addSong(const QString &songId)
+{
+    const std::optional<Song> song = m_songs ? m_songs->loadSong(QUuid::fromString(songId)) : std::nullopt;
+    if (!song)
+        return false;
+    ServiceItem item;
+    item.kind = ServiceItem::Kind::Song;
+    item.title = song->title;
+    item.ref = song->id;
+    return insert(item);
+}
+
+bool ServiceList::addHeader(const QString &title)
+{
+    if (title.trimmed().isEmpty())
+        return false;
+    ServiceItem item;
+    item.kind = ServiceItem::Kind::Header;
+    item.title = title.trimmed();
+    return insert(item);
+}
+
+bool ServiceList::addText(const QString &title, const QString &body)
+{
+    ServiceItem item;
+    item.kind = ServiceItem::Kind::Text;
+    item.title = title.trimmed().isEmpty() ? (body.trimmed().isEmpty() ? QStringLiteral("Blank") : QStringLiteral("Text"))
+                                           : title.trimmed();
+    item.body = body.trimmed();
+    return insert(item);
+}
+
+bool ServiceList::insert(ServiceItem item)
+{
+    if (!m_open)
+        return false;
+    const int at = m_selected >= 0 ? m_selected + 1 : int(m_open->items.size());
+    m_open->items.insert(at, item);
+    if (!save()) {
+        m_open->items.removeAt(at);
+        return false;
+    }
+    refresh();
+    select(at);
+    return true;
+}
+
+bool ServiceList::removeItem(int index)
+{
+    if (!m_open || index < 0 || index >= m_open->items.size())
+        return false;
+    const ServiceItem removed = m_open->items.takeAt(index);
+    if (!save()) {
+        m_open->items.insert(index, removed);
+        return false;
+    }
+    if (m_selected == index)
+        m_selected = -1;
+    else if (m_selected > index)
+        --m_selected;
+    refresh();
+    emit selectionChanged();
+    return true;
+}
+
+bool ServiceList::moveItem(int from, int to)
+{
+    if (!m_open)
+        return false;
+    const int n = int(m_open->items.size());
+    if (from < 0 || from >= n || to < 0 || to >= n || from == to)
+        return false;
+    m_open->items.move(from, to);
+    if (!save()) {
+        m_open->items.move(to, from);
+        return false;
+    }
+    if (m_selected == from)
+        m_selected = to;
+    else if (from < m_selected && m_selected <= to)
+        --m_selected;
+    else if (to <= m_selected && m_selected < from)
+        ++m_selected;
+    refresh();
+    emit selectionChanged();
+    return true;
+}
+
+void ServiceList::select(int index)
+{
+    m_selected = m_open && index >= 0 && index < m_open->items.size() ? index : -1;
+    m_inGrid = m_selected >= 0;
+    emit selectionChanged();
+}
+
+void ServiceList::showLibrarySong()
+{
+    if (!m_inGrid)
+        return;
+    m_inGrid = false;
+    emit selectionChanged();
+}
+
+bool ServiceList::save()
+{
+    const ServiceStore::Result r = m_store->save(*m_open);
+    if (!r.ok)
+        setReport(r.error);
+    return r.ok;
+}
+
+void ServiceList::refresh()
+{
+    m_liveItems.clear();
+    if (m_open) {
+        for (const ServiceItem &item : std::as_const(m_open->items)) {
+            const bool isSong = item.kind == ServiceItem::Kind::Song;
+            m_liveItems << liveItem(item, isSong && m_songs ? m_songs->loadSong(item.ref) : std::nullopt);
+        }
+    }
+    if (m_live)
+        m_live->setService(m_open ? m_open->id : QUuid(), m_liveItems);
+    emit serviceChanged();
+    emit selectionChanged();
+}
+
+void ServiceList::followLive()
+{
+    // When what's live moves to another item (Next past an item's end), the grid follows,
+    // so the operator sees the slides that are on screen.
+    const QUuid item = m_live->itemId();
+    if (item == m_lastLiveItem)
+        return;
+    m_lastLiveItem = item;
+    if (const int index = m_live->itemIndex(); index >= 0 && m_open && m_live->serviceId() == m_open->id)
+        select(index);
+}
+
+void ServiceList::importServices(const QUrl &folder)
+{
+    if (!m_store)
+        return;
+    int imported = 0;
+    QStringList lines;
+    QString last;
+    const QFileInfoList files = QDir(folder.toLocalFile())
+                                    .entryInfoList({QStringLiteral("*") + kServiceSuffix}, QDir::Files, QDir::Name);
+    for (const QFileInfo &file : files) {
+        QFile f(file.absoluteFilePath());
+        // A service is a few KB; anything far bigger isn't one.
+        if (!f.open(QIODevice::ReadOnly) || f.size() > 4 * 1024 * 1024) {
+            lines << QStringLiteral("Couldn't read %1: %2").arg(file.fileName(), f.isOpen() ? "too large" : f.errorString());
+            continue;
+        }
+        ServiceJsonResult r = serviceFromJson(f.readAll());
+        if (!r.service) {
+            lines << QStringLiteral("Couldn't read %1: %2").arg(file.fileName(), r.error);
+            continue;
+        }
+        if (!r.service->id.isNull() && m_store->load(r.service->id)) {
+            lines << QStringLiteral("Skipped %1: already in the library.").arg(file.fileName());
+            continue;
+        }
+        if (const ServiceStore::Result saved = m_store->save(*r.service); !saved.ok) {
+            lines << QStringLiteral("Couldn't save %1: %2").arg(file.fileName(), saved.error);
+            continue;
+        }
+        for (const QString &w : std::as_const(r.warnings))
+            lines << QStringLiteral("%1: %2").arg(file.fileName(), w);
+        ++imported;
+        last = braceless(r.service->id);
+    }
+    lines.prepend(QStringLiteral("Imported %1 services.").arg(imported));
+    setReport(lines.join('\n'));
+    emit servicesChanged();
+    if (!last.isEmpty())
+        openService(last);
+}
+
+QString ServiceList::openId() const
+{
+    return m_open ? braceless(m_open->id) : QString();
+}
+
+QString ServiceList::openTitle() const
+{
+    return m_open ? m_open->title : QString();
+}
+
+QVariantList ServiceList::items() const
+{
+    QVariantList list;
+    if (!m_open)
+        return list;
+    for (int i = 0; i < m_open->items.size(); ++i) {
+        const ServiceItem &it = m_open->items[i];
+        list.append(QVariantMap{{"id", braceless(it.id)}, {"kind", kindName(it.kind)}, {"title", it.title},
+                                {"hasSlides", !m_liveItems.value(i).slides.isEmpty()}});
+    }
+    return list;
+}
+
+QString ServiceList::selectedTitle() const
+{
+    return m_open && m_selected >= 0 ? m_open->items[m_selected].title : QString();
+}
+
+QString ServiceList::selectedSongId() const
+{
+    if (!m_open || m_selected < 0)
+        return {};
+    const ServiceItem &it = m_open->items[m_selected];
+    return it.kind == ServiceItem::Kind::Song ? braceless(it.ref) : QString();
+}
+
+QVariantList ServiceList::selectedSlides() const
+{
+    QVariantList list;
+    if (m_selected < 0 || m_selected >= m_liveItems.size())
+        return list;
+    for (const SongSlide &s : m_liveItems[m_selected].slides)
+        list.append(QVariantMap{{"text", s.text}, {"groupLabel", s.groupLabel}, {"groupColor", s.groupColor}});
+    return list;
+}
+
+void ServiceList::setReport(const QString &report)
+{
+    m_report = report;
+    qCInfo(lcServices).noquote() << report;
+    emit reportChanged();
+}

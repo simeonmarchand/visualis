@@ -20,6 +20,8 @@ struct LiveSnapshot
     bool textCleared = false;
     bool backgroundCleared = false;
     QString background;         // the background video's URL, or empty
+    QUuid service;              // the live service, if one is being run (#51)
+    QUuid item;                 // the service item the song is, if it came from one
     QDateTime savedAt;          // UTC
 
     bool isEmpty() const { return !song && background.isEmpty(); }

@@ -15,6 +15,13 @@ bool runCommand(LiveState &live, const QString &name, const QVariant &arg)
         const int n = arg.toInt(&ok);
         return ok && live.goToSlide(n);
     }
+    if (name == "goto_item") {
+        const QVariantList parts = arg.typeId() == QMetaType::QVariantList ? arg.toList() : QVariantList{arg};
+        bool itemOk = false, slideOk = true;
+        const int item = parts.value(0).toInt(&itemOk);
+        const int slide = parts.size() > 1 ? parts[1].toInt(&slideOk) : 0;
+        return itemOk && slideOk && parts.size() <= 2 && live.goToItem(item, slide);
+    }
     if (name == "goto_group")
         return live.goToGroupStartingWith(arg.toString().left(1));
     if (name == "clear_text") {
@@ -38,7 +45,7 @@ bool runCommand(LiveState &live, const QString &name, const QVariant &arg)
 
 QStringList commandNames()
 {
-    return {"next_slide", "prev_slide", "goto_slide", "goto_group",
+    return {"next_slide", "prev_slide", "goto_slide", "goto_group", "goto_item",
             "clear_text", "clear_background", "show_background", "clear_all"};
 }
 

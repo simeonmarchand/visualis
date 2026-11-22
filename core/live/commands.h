@@ -13,6 +13,8 @@ class LiveState;
 //
 //   next_slide, prev_slide, goto_slide (arg: 0-based index),
 //   goto_group (arg: a letter; see LiveState::goToGroupStartingWith),
+//   goto_item (arg: the 0-based item index in the live service, or [item, slide] to land
+//              on a slide other than the first, as a slide tile click does),
 //   clear_text, clear_background, show_background, clear_all
 //
 // Returns false for an unknown name, a missing argument, or a command with nothing to do
