@@ -48,7 +48,8 @@ public:
     Q_INVOKABLE void loadServiceTypes();
     Q_INVOKABLE void loadPlans(const QString &serviceTypeId);
     // Reads the plan and its items, then saves a new service. A plan that's already in the
-    // library isn't imported again (updating it is re-import's job, #56).
+    // library isn't imported again (updating it is re-import's job, #56). A plan with no
+    // items that could be read isn't saved, so it can be tried again.
     Q_INVOKABLE void importPlan(const QString &serviceTypeId, const QString &planId);
 
 signals:
@@ -72,7 +73,7 @@ private:
     std::unique_ptr<PcoClient> m_client;
     QList<visualis::PcoServiceType> m_types;
     QList<visualis::PcoPlan> m_plans;
-    QString m_plansFor;          // the service type `m_plans` belong to
+    int m_plansRequest = 0;      // only the latest loadPlans() answer is shown
     int m_pending = 0;
     QString m_status;
 };

@@ -112,15 +112,15 @@ void PlanImporter::loadPlans(const QString &serviceTypeId)
         setStatus(tr("Sign in to Planning Center first."));
         return;
     }
-    m_plansFor = serviceTypeId;
+    const int request = ++m_plansRequest;
     m_plans.clear();
     emit plansChanged();
     begin();
     setStatus(tr("Reading plans…"));
-    pco->futurePlans(serviceTypeId, [this, serviceTypeId](PcoResult<QList<PcoPlan>> r) {
+    pco->futurePlans(serviceTypeId, [this, request](PcoResult<QList<PcoPlan>> r) {
         end();
-        if (serviceTypeId != m_plansFor)
-            return;   // the operator picked another type meanwhile
+        if (request != m_plansRequest)
+            return;   // the operator picked another type (or the same one again) meanwhile
         if (!r.ok()) {
             setStatus(r.error.message);
             return;
@@ -191,6 +191,14 @@ void PlanImporter::save(const PcoServiceType &type, const PcoPlan &plan, const P
         return;
     }
     PlanImport r = serviceFromPlan(type, plan, items, QDateTime::currentDateTimeUtc());
+    if (r.service.items.isEmpty()) {
+        // Nothing to run, and saving it would block a retry (a plan is imported once).
+        QString why = tr("Nothing was imported: Planning Center sent no items for this plan that could be read.");
+        if (!r.notes.isEmpty())
+            why += QLatin1Char(' ') + r.notes.join(QLatin1Char(' '));
+        setStatus(why);
+        return;
+    }
     const ServiceStore::Result saved = store.save(r.service);
     if (!saved.ok) {
         setStatus(saved.error);

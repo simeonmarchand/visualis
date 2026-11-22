@@ -10,6 +10,7 @@
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QTemporaryDir>
+#include <QTimer>
 #include <QtTest>
 
 using namespace visualis;
@@ -32,15 +33,21 @@ public:
     }
 
     QUrl url() const { return QUrl(QStringLiteral("http://127.0.0.1:%1/services/v2/").arg(m_server.serverPort())); }
-    void on(const QByteArray &path, const QStringList &fixtures)
+    void on(const QByteArray &path, const QStringList &fixtures, int delayMs = 0)
     {
         for (const QString &name : fixtures) {
             QFile f(QStringLiteral(FIXTURES_DIR "/pco/") + name);
             if (!f.open(QIODevice::ReadOnly))
                 qFatal("missing fixture %s", qPrintable(name));
-            m_routes[path] << f.readAll().replace("{{BASE}}", url().toString().toUtf8());
+            onBody(path, f.readAll(), delayMs);
         }
     }
+    // A reply written here, answered after `delayMs`.
+    void onBody(const QByteArray &path, const QByteArray &body, int delayMs = 0)
+    {
+        m_routes[path] << Reply{QByteArray(body).replace("{{BASE}}", url().toString().toUtf8()), delayMs};
+    }
+    void clear(const QByteArray &path) { m_routes.remove(path); }
     int requests = 0;
 
 private:
@@ -52,18 +59,25 @@ private:
         ++requests;
         QByteArray path = head.split(' ').value(1);
         path = path.left(path.indexOf('?') < 0 ? path.size() : path.indexOf('?'));
-        QByteArray status = "200 OK", body;
+        QByteArray status = "200 OK";
+        Reply reply{R"({"errors":[{"status":"404"}]})", 0};
         if (auto it = m_routes.find(path); it != m_routes.end() && !it->isEmpty())
-            body = it->size() > 1 ? it->takeFirst() : it->first();
+            reply = it->size() > 1 ? it->takeFirst() : it->first();
         else
-            status = "404 Not Found", body = R"({"errors":[{"status":"404"}]})";
-        s->write("HTTP/1.1 " + status + "\r\nContent-Type: application/json\r\nContent-Length: "
-                 + QByteArray::number(body.size()) + "\r\nConnection: close\r\n\r\n" + body);
-        s->disconnectFromHost();
+            status = "404 Not Found";
+        QTimer::singleShot(reply.delayMs, s, [s, status, body = reply.body] {
+            s->write("HTTP/1.1 " + status + "\r\nContent-Type: application/json\r\nContent-Length: "
+                     + QByteArray::number(body.size()) + "\r\nConnection: close\r\n\r\n" + body);
+            s->disconnectFromHost();
+        });
     }
 
+    struct Reply {
+        QByteArray body;
+        int delayMs = 0;
+    };
     QTcpServer m_server;
-    QHash<QByteArray, QList<QByteArray>> m_routes;
+    QHash<QByteArray, QList<Reply>> m_routes;
 };
 
 class FixedToken : public PcoAuthorizer
@@ -198,6 +212,69 @@ private slots:
         QCOMPARE(services.openTitle(), QStringLiteral("January 10, 2027"));   // no service types read: the date
         QCOMPARE(services.items().size(), 5);
         QCOMPARE(services.items()[3].toMap()["kind"].toString(), QStringLiteral("scripture"));
+    }
+
+    // Review of #72: A, then B, then A again. The first A answers last and must not win.
+    void onlyTheLatestPlanListIsShown()
+    {
+        FakePlanningCenter server;
+        server.on(kPlans, {"plans.json"}, 400);   // the first request for A is slow
+        server.onBody(kPlans, R"({"data":[{"type":"Plan","id":"5009","attributes":{"dates":"March 7, 2027",
+            "sort_date":"2027-03-07T10:00:00Z","items_count":1}}],"included":[],"meta":{}})");
+        server.onBody("/services/v2/service_types/1002/plans", R"({"data":[],"included":[],"meta":{}})");
+        PlanImporter importer;
+        importer.setClient(client(server.url()));
+        importer.loadPlans("1001");
+        importer.loadPlans("1002");
+        importer.loadPlans("1001");
+        QVERIFY(idle(importer));
+        QTest::qWait(100);   // nothing else is coming
+        const QVariantList plans = importer.plans();
+        QCOMPARE(plans.size(), 1);
+        QCOMPARE(plans[0].toMap()["id"].toString(), QStringLiteral("5009"));
+    }
+
+    // Review of #72: a plan whose items all fail to read isn't saved, and can be tried again.
+    void aPlanWithNoReadableItemsIsNotSavedAndCanBeRetried()
+    {
+        SongLibrary songs;
+        QVERIFY(songs.openLibrary(m_dir.filePath(QString::number(++m_n))));
+        FakePlanningCenter server;
+        server.on(kPlan, {"plan.json"});
+        server.onBody(kItems, R"({"data":[{"type":"Item","attributes":{"title":"No id","item_type":"item","sequence":1}}],
+            "included":[],"meta":{}})");
+        PlanImporter importer;
+        importer.setSongLibrary(&songs);
+        importer.setClient(client(server.url()));
+        QSignalSpy imported(&importer, &PlanImporter::imported);
+        importer.importPlan("1001", "5001");
+        QVERIFY(idle(importer));
+        QCOMPARE(imported.size(), 0);
+        QVERIFY2(importer.status().contains("Nothing was imported"), qPrintable(importer.status()));
+        QVERIFY(ServiceStore(*songs.library()).list().isEmpty());
+
+        server.clear(kItems);   // Planning Center is fine again
+        server.on(kItems, {"items_page1.json", "items_page2.json"});
+        importer.importPlan("1001", "5001");
+        QVERIFY(idle(importer));
+        QCOMPARE(imported.size(), 1);
+        QCOMPARE(ServiceStore(*songs.library()).list().size(), 1);
+    }
+
+    void anEmptyPlanIsNotSaved()
+    {
+        SongLibrary songs;
+        QVERIFY(songs.openLibrary(m_dir.filePath(QString::number(++m_n))));
+        FakePlanningCenter server;
+        server.on(kPlan, {"plan.json"});
+        server.onBody(kItems, R"({"data":[],"included":[],"meta":{}})");
+        PlanImporter importer;
+        importer.setSongLibrary(&songs);
+        importer.setClient(client(server.url()));
+        importer.importPlan("1001", "5001");
+        QVERIFY(idle(importer));
+        QVERIFY(importer.status().contains("Nothing was imported"));
+        QVERIFY(ServiceStore(*songs.library()).list().isEmpty());
     }
 
     void aPlanIsNotImportedTwice()
