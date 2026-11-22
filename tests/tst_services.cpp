@@ -214,6 +214,20 @@ private slots:
         QVERIFY(QFile::exists(folder + QStringLiteral("/library.sqlite.before-v%1").arg(Library::latestVersion())));
     }
 
+    void findsTheServiceImportedFromAPlan()
+    {
+        Service a;
+        a.title = "Imported";
+        a.pcoPlanId = "70001";
+        Service b;
+        b.title = "By hand";
+        QVERIFY(m_services->save(a).ok);
+        QVERIFY(m_services->save(b).ok);
+        QCOMPARE(m_services->findByPcoPlan("70001")->id, a.id);
+        QVERIFY(!m_services->findByPcoPlan("70002"));
+        QVERIFY(!m_services->findByPcoPlan(""));   // hand-built services have no plan
+    }
+
     // #54: a v3 library's services gain the plan link, empty, and keep everything else.
     void aVersion3LibraryGainsThePlanLink()
     {

@@ -210,4 +210,16 @@ QList<ServiceSummary> ServiceStore::list() const
     return out;
 }
 
+std::optional<ServiceSummary> ServiceStore::findByPcoPlan(const QString &pcoPlanId) const
+{
+    if (pcoPlanId.isEmpty())
+        return std::nullopt;
+    QSqlQuery q(m_library.database());
+    q.prepare("SELECT id, title, date FROM service WHERE pco_plan_id = ? ORDER BY created_at LIMIT 1");
+    q.addBindValue(pcoPlanId);
+    if (!q.exec() || !q.next())
+        return std::nullopt;
+    return ServiceSummary{uuid(q.value(0)), q.value(1).toString(), QDate::fromString(q.value(2).toString(), Qt::ISODate)};
+}
+
 } // namespace visualis
