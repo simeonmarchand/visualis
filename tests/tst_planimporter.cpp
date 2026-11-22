@@ -11,6 +11,9 @@
 #include <QTcpSocket>
 #include <QTemporaryDir>
 #include <QTimer>
+#include <QPointer>
+#include <functional>
+#include <utility>
 #include <QtTest>
 
 using namespace visualis;
@@ -48,6 +51,17 @@ public:
         m_routes[path] << Reply{QByteArray(body).replace("{{BASE}}", url().toString().toUtf8()), delayMs};
     }
     void clear(const QByteArray &path) { m_routes.remove(path); }
+    // A reply held back until release(), so a test decides the order answers arrive in.
+    void onHeld(const QByteArray &path, const QString &fixture)
+    {
+        on(path, {fixture});
+        m_routes[path].last().held = true;
+    }
+    void release()
+    {
+        for (const auto &send : std::exchange(m_held, {}))
+            send();
+    }
     int requests = 0;
 
 private:
@@ -65,17 +79,26 @@ private:
             reply = it->size() > 1 ? it->takeFirst() : it->first();
         else
             status = "404 Not Found";
-        QTimer::singleShot(reply.delayMs, s, [s, status, body = reply.body] {
-            s->write("HTTP/1.1 " + status + "\r\nContent-Type: application/json\r\nContent-Length: "
-                     + QByteArray::number(body.size()) + "\r\nConnection: close\r\n\r\n" + body);
-            s->disconnectFromHost();
-        });
+        const QPointer<QTcpSocket> socket(s);
+        auto send = [socket, status, body = reply.body] {
+            if (!socket)
+                return;
+            socket->write("HTTP/1.1 " + status + "\r\nContent-Type: application/json\r\nContent-Length: "
+                          + QByteArray::number(body.size()) + "\r\nConnection: close\r\n\r\n" + body);
+            socket->disconnectFromHost();
+        };
+        if (reply.held)
+            m_held << send;
+        else
+            QTimer::singleShot(reply.delayMs, s, send);
     }
 
     struct Reply {
         QByteArray body;
         int delayMs = 0;
+        bool held = false;
     };
+    QList<std::function<void()>> m_held;
     QTcpServer m_server;
     QHash<QByteArray, QList<Reply>> m_routes;
 };
@@ -218,17 +241,27 @@ private slots:
     void onlyTheLatestPlanListIsShown()
     {
         FakePlanningCenter server;
-        server.on(kPlans, {"plans.json"}, 400);   // the first request for A is slow
+        server.onHeld(kPlans, "plans.json");   // the first answer for A waits for release()
         server.onBody(kPlans, R"({"data":[{"type":"Plan","id":"5009","attributes":{"dates":"March 7, 2027",
             "sort_date":"2027-03-07T10:00:00Z","items_count":1}}],"included":[],"meta":{}})");
         server.onBody("/services/v2/service_types/1002/plans", R"({"data":[],"included":[],"meta":{}})");
         PlanImporter importer;
         importer.setClient(client(server.url()));
+        // Each request reaches the server before the next is sent, so they get the replies
+        // queued for them in this order (they'd otherwise race on separate connections).
+        const auto received = [&](int n) { return QTest::qWaitFor([&] { return server.requests >= n; }, 5000); };
         importer.loadPlans("1001");
+        QVERIFY(received(1));
         importer.loadPlans("1002");
+        QVERIFY(received(2));
         importer.loadPlans("1001");
+        QVERIFY(received(3));
+        // The latest request's answer is shown while the first is still outstanding...
+        QVERIFY(QTest::qWaitFor([&] { return importer.plans().size() == 1; }, 5000));
+        QVERIFY(importer.busy());
+        // ...and the first, answering last, doesn't replace it.
+        server.release();
         QVERIFY(idle(importer));
-        QTest::qWait(100);   // nothing else is coming
         const QVariantList plans = importer.plans();
         QCOMPARE(plans.size(), 1);
         QCOMPARE(plans[0].toMap()["id"].toString(), QStringLiteral("5009"));
