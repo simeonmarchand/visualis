@@ -59,6 +59,40 @@ QJsonObject importSnapshot(const PcoItem &item)
     return o;
 }
 
+ServiceItem importedItem(const QString &pcoItemId, const QJsonObject &snapshot)
+{
+    const auto strings = [](const QJsonValue &v) {
+        QStringList out;
+        for (const QJsonValue &label : v.toArray())
+            out << label.toString();
+        return out;
+    };
+    ServiceItem it;
+    it.title = snapshot.value("title").toString().trimmed();
+    it.servicePosition = snapshot.value("servicePosition").toString();
+    it.pcoItemId = pcoItemId;
+    it.importSnapshot = snapshot;
+    const QString type = snapshot.value("itemType").toString();
+    if (type == QLatin1String("header")) {
+        it.kind = ServiceItem::Kind::Header;
+    } else if (type == QLatin1String("media")) {
+        it.kind = ServiceItem::Kind::Media;   // no file yet: `ref` stays null
+    } else if (type == QLatin1String("song")) {
+        it.kind = ServiceItem::Kind::Placeholder;
+        if (it.title.isEmpty())
+            it.title = snapshot.value("song").toObject().value("title").toString();
+        it.customSequence = strings(snapshot.value("customArrangementSequence"));
+        if (it.customSequence.isEmpty())
+            it.customSequence = strings(snapshot.value("arrangement").toObject().value("sequence"));
+    } else if (const auto ref = findScriptureReference(it.title)) {
+        it.kind = ServiceItem::Kind::Scripture;
+        it.body = ref->reference;
+    } else {
+        it.kind = ServiceItem::Kind::Placeholder;
+    }
+    return it;
+}
+
 PlanImport serviceFromPlan(const PcoServiceType &type, const PcoPlan &plan, const PcoPlanItems &items,
                            const QDateTime &importedAt)
 {
@@ -82,36 +116,8 @@ PlanImport serviceFromPlan(const PcoServiceType &type, const PcoPlan &plan, cons
     std::stable_sort(ordered.begin(), ordered.end(),
                      [](const PcoItem &a, const PcoItem &b) { return a.position < b.position; });
 
-    for (const PcoItem &p : std::as_const(ordered)) {
-        ServiceItem it;
-        it.title = p.title.trimmed();
-        it.servicePosition = positionName(p.servicePosition);
-        it.pcoItemId = p.id;
-        it.importSnapshot = importSnapshot(p);
-        switch (p.type) {
-        case PcoItemType::Header:
-            it.kind = ServiceItem::Kind::Header;
-            break;
-        case PcoItemType::Media:
-            it.kind = ServiceItem::Kind::Media;   // no file yet: `ref` stays null
-            break;
-        case PcoItemType::Song:
-            it.kind = ServiceItem::Kind::Placeholder;
-            if (it.title.isEmpty() && p.song)
-                it.title = p.song->title.trimmed();
-            it.customSequence = p.sequence();
-            break;
-        case PcoItemType::Item:
-            if (const auto ref = findScriptureReference(it.title)) {
-                it.kind = ServiceItem::Kind::Scripture;
-                it.body = ref->reference;
-            } else {
-                it.kind = ServiceItem::Kind::Placeholder;
-            }
-            break;
-        }
-        s.items << it;
-    }
+    for (const PcoItem &p : std::as_const(ordered))
+        s.items << importedItem(p.id, importSnapshot(p));
     for (const QString &skipped : items.skipped)
         r.notes << QStringLiteral("Skipped from Planning Center: %1").arg(skipped);
     return r;

@@ -34,6 +34,10 @@ PlanImport serviceFromPlan(const PcoServiceType &type, const PcoPlan &plan, cons
 // order, songs, keys); never people or notes (plan 7.2).
 QJsonObject importSnapshot(const PcoItem &item);
 
+// The item an import makes from a snapshot: what Planning Center's fields alone give. A
+// re-import compares it with the operator's item to see what the operator changed (#56).
+ServiceItem importedItem(const QString &pcoItemId, const QJsonObject &snapshot);
+
 // Plans for the picker: upcoming ones first, soonest first, then past ones, latest first.
 // A plan counts as upcoming through the whole of its day (`today` is the operator's date).
 QList<PcoPlan> plansForPicker(QList<PcoPlan> plans, const QDate &today);
