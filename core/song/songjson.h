@@ -36,6 +36,7 @@ struct SongJsonResult {
 SongJsonResult songFromJson(const QByteArray &json);
 
 // The file name a song exports to, with characters that aren't allowed in file names replaced.
+// The title part is at most 120 UTF-8 bytes, cut between characters, never inside one.
 QString songFileName(const QString &title);
 
 struct SongExportReport {

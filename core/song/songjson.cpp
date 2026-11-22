@@ -17,6 +17,29 @@ namespace {
 constexpr int kVersion = 1;
 const char *kFormat = "visualis-song";
 const char *kSuffix = ".visualis-song.json";
+// File systems limit a name to 255 bytes (APFS and ext4 count UTF-8 bytes), so the stem is
+// budgeted in UTF-8 bytes, with room left for a collision tag " (n)", the suffix, and
+// QSaveFile's temporary ".XXXXXX": 120 + 16 + 19 + 7 bytes stays well under 255.
+constexpr qsizetype kMaxStemBytes = 120;
+constexpr qsizetype kMaxTagBytes = 16;
+
+// The longest prefix of `s` that fits in `maxBytes` of UTF-8, never splitting a character.
+QString leftUtf8(const QString &s, qsizetype maxBytes)
+{
+    qsizetype bytes = 0;
+    qsizetype i = 0;
+    while (i < s.size()) {
+        const bool pair = s[i].isHighSurrogate() && i + 1 < s.size() && s[i + 1].isLowSurrogate();
+        const char32_t cp = pair ? QChar::surrogateToUcs4(s[i], s[i + 1]) : s[i].unicode();
+        // A lone surrogate is written as U+FFFD: 3 bytes.
+        const int n = cp < 0x80 ? 1 : cp < 0x800 ? 2 : cp < 0x10000 ? 3 : 4;
+        if (bytes + n > maxBytes)
+            break;
+        bytes += n;
+        i += pair ? 2 : 1;
+    }
+    return s.left(i);
+}
 
 QString idText(const QUuid &id) { return id.toString(QUuid::WithoutBraces); }
 QJsonValue idOrNull(const QUuid &id) { return id.isNull() ? QJsonValue() : QJsonValue(idText(id)); }
@@ -171,7 +194,7 @@ QString songFileName(const QString &title)
         name.remove(0, 1);
     if (name.isEmpty())
         name = QStringLiteral("Untitled");
-    return name.left(120) + kSuffix;
+    return leftUtf8(name, kMaxStemBytes) + kSuffix;
 }
 
 SongExportReport exportSongs(SongStore &store, const QString &folder)
@@ -186,8 +209,13 @@ SongExportReport exportSongs(SongStore &store, const QString &folder)
             continue;
         }
         QString name = songFileName(song->title);
-        for (int n = 2; used.contains(name.toLower()); ++n)
-            name = songFileName(QStringLiteral("%1 (%2)").arg(song->title).arg(n));
+        // The stem's budget leaves room for " (n)", so the tag is never cut off.
+        const QString stem = name.chopped(qsizetype(qstrlen(kSuffix)));
+        for (int n = 2; used.contains(name.toLower()); ++n) {
+            const QString tag = QStringLiteral(" (%1)").arg(n);
+            Q_ASSERT(tag.size() <= kMaxTagBytes);
+            name = stem + tag + kSuffix;
+        }
         used.insert(name.toLower());
 
         QSaveFile f(QDir(folder).filePath(name));   // written whole or not at all

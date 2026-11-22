@@ -180,6 +180,82 @@ private slots:
         QCOMPARE(again.skipped.size(), 3);
     }
 
+    // #65: the collision suffix used to be cut off by the length limit, so the loop never
+    // found a free name and export hung.
+    void longTitlesThatCollideExportAsSeparateFiles()
+    {
+        QTemporaryDir lib, out;
+        auto library = Library::open(lib.path()).library;
+        SongStore store(*library);
+        const QString longTitle = QString(130, 'x');
+        for (int i = 0; i < 3; ++i) {
+            Song s = fixture("Amazing Grace");
+            s.title = longTitle;
+            QVERIFY(store.save(s).ok);
+        }
+        const SongExportReport exported = exportSongs(store, out.path());
+        QVERIFY(exported.failed.isEmpty());
+        QCOMPARE(exported.written.size(), 3);
+        QCOMPARE(QSet<QString>(exported.written.begin(), exported.written.end()).size(), 3);
+        QCOMPARE(QDir(out.path()).entryList({"*.visualis-song.json"}).size(), 3);
+        QVERIFY(exported.written.contains(QString(120, 'x') + " (2).visualis-song.json"));
+    }
+
+    // Truncation never splits a character: an emoji straddling the limit is left out whole.
+    void truncationKeepsCharactersWhole_data()
+    {
+        QTest::addColumn<QString>("title");
+        const QString emoji = QString::fromUtf8("\xF0\x9F\x98\x80");   // U+1F600, a surrogate pair
+        QTest::newRow("emoji at the limit") << QString(118, 'x') + emoji + "tail";
+        QTest::newRow("115 x and emoji") << QString(115, 'x') + emoji + emoji + emoji;
+        QTest::newRow("all emoji") << emoji.repeated(40);
+        QTest::newRow("accents") << QString::fromUtf8("\xC3\xA9").repeated(80);   // é, 2 bytes each
+    }
+    void truncationKeepsCharactersWhole()
+    {
+        QFETCH(QString, title);
+        const QString name = songFileName(title);
+        for (qsizetype i = 0; i < name.size(); ++i) {
+            if (name[i].isHighSurrogate()) {
+                QVERIFY2(i + 1 < name.size() && name[i + 1].isLowSurrogate(), qPrintable(name));
+                ++i;   // the pair's second half
+            } else {
+                QVERIFY2(!name[i].isLowSurrogate(), qPrintable(name));
+            }
+        }
+        QCOMPARE(QString::fromUtf8(name.toUtf8()), name);   // survives a UTF-8 round trip
+        QVERIFY(name.toUtf8().size() <= 120 + 19);
+        QVERIFY(title.startsWith(name.chopped(19)));
+    }
+
+    // Names are limited in bytes, not characters: long CJK and emoji titles, colliding, still
+    // export (APFS and ext4 refuse names over 255 UTF-8 bytes).
+    void wideCharacterTitlesExportWithinTheByteLimit_data()
+    {
+        QTest::addColumn<QString>("title");
+        QTest::newRow("CJK") << QString::fromUtf8("\xE8\xAF\x97").repeated(130);   // 3 bytes each
+        QTest::newRow("emoji") << QString(115, 'x') + QString::fromUtf8("\xF0\x9F\x98\x80").repeated(20);
+    }
+    void wideCharacterTitlesExportWithinTheByteLimit()
+    {
+        QFETCH(QString, title);
+        QTemporaryDir lib, out;
+        auto library = Library::open(lib.path()).library;
+        SongStore store(*library);
+        for (int i = 0; i < 3; ++i) {
+            Song s = fixture("Amazing Grace");
+            s.title = title;
+            QVERIFY(store.save(s).ok);
+        }
+        const SongExportReport exported = exportSongs(store, out.path());
+        QVERIFY2(exported.failed.isEmpty(), qPrintable(exported.failed.value(0).second));
+        QCOMPARE(QDir(out.path()).entryList({"*.visualis-song.json"}).size(), 3);
+        for (const QString &name : exported.written) {
+            QVERIFY2(name.toUtf8().size() <= 255, qPrintable(name));
+            QCOMPARE(QString::fromUtf8(name.toUtf8()), name);
+        }
+    }
+
     void importReportsBadFilesAndTitleClashes()
     {
         QTemporaryDir lib, in;
