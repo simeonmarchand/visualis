@@ -18,6 +18,7 @@ qt_add_library(visualis_core STATIC
     service/service.h service/service.cpp
     service/servicestore.h service/servicestore.cpp
     service/servicejson.h service/servicejson.cpp
+    pco/pcoauth.h pco/pcoauth.cpp
     output/displayplacement.h output/displayplacement.cpp
     output/displaysettle.h output/displaysettle.cpp
     video/framewatchdog.h video/framewatchdog.cpp

@@ -14,6 +14,7 @@ qt_add_qml_module(visualis_ui
         qml/StageDisplay.qml
         qml/LyricsTemplate.qml
         qml/OutputSettings.qml
+        qml/PlanningCenterDialog.qml
         qml/SongListPane.qml
         qml/PasteSongDialog.qml
         qml/SlideGrid.qml
@@ -27,21 +28,23 @@ qt_add_qml_module(visualis_ui
         live/livestateqml.h
         live/commandsqml.h live/commandsqml.cpp
         live/recovery.h live/recovery.cpp
+        pco/credentialstore.h
+        pco/planningcenter.h pco/planningcenter.cpp
         library/songlibrary.h library/songlibrary.cpp
         library/songeditor.h library/songeditor.cpp
 )
 # The generated QML type registrations include headers by file name alone.
 target_include_directories(visualis_ui PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/output
     ${CMAKE_CURRENT_SOURCE_DIR}/video ${CMAKE_CURRENT_SOURCE_DIR}/live
-    ${CMAKE_CURRENT_SOURCE_DIR}/library)
+    ${CMAKE_CURRENT_SOURCE_DIR}/library ${CMAKE_CURRENT_SOURCE_DIR}/pco)
 # GuiPrivate for QRhi: the video hub's own GPU context (ADR 0001, kept in videoengine.cpp).
-target_link_libraries(visualis_ui PRIVATE Qt6::Quick Qt6::Multimedia Qt6::GuiPrivate visualis_core)
+target_link_libraries(visualis_ui PRIVATE Qt6::Quick Qt6::Multimedia Qt6::Network Qt6::GuiPrivate visualis_core)
 if(APPLE)
     enable_language(OBJCXX)
-    target_sources(visualis_ui PRIVATE output/platformdisplay_mac.mm)
-    target_link_libraries(visualis_ui PRIVATE "-framework AppKit" "-framework IOKit")
+    target_sources(visualis_ui PRIVATE output/platformdisplay_mac.mm pco/credentialstore_mac.cpp)
+    target_link_libraries(visualis_ui PRIVATE "-framework AppKit" "-framework IOKit" "-framework Security")
 else()
-    target_sources(visualis_ui PRIVATE output/platformdisplay_other.cpp)
+    target_sources(visualis_ui PRIVATE output/platformdisplay_other.cpp pco/credentialstore_other.cpp)
 endif()
 
 qt_add_executable(Visualis MACOSX_BUNDLE WIN32 main.cpp)
