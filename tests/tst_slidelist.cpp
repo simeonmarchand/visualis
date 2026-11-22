@@ -120,6 +120,42 @@ private slots:
         QCOMPARE(slides[1].groupLabel, QStringLiteral("Chorus"));
         QCOMPARE(slides[2].groupLabel, QStringLiteral("Chorus"));
     }
+
+    // #54: a service's Planning Center order, by label. Lyric-less sections the song has no
+    // group for become blank slides (P3 finding 9); other unknown labels are skipped.
+    void aLabelSequencePlaysInThatOrder()
+    {
+        Song s = sample();
+        s.groups.removeFirst();   // no Intro group of its own
+        const QList<SongSlide> slides =
+            songSlides(s, {"Intro", "Verse 1", "Chorus", "Turnaround", "Bridge 2", "Chorus", "Interlude", "Ending"});
+        QCOMPARE(texts(slides), (QStringList{"", "Joy to the world\nThe Lord is come", "Let earth\nReceive her King",
+                                             "And heaven and nature sing", "", "And heaven and nature sing", "", ""}));
+        QCOMPARE(slides[0].groupLabel, QStringLiteral("Intro"));
+        QVERIFY(slides[0].groupId.isNull());
+        QVERIFY(slides[0].isBlank());
+        QCOMPARE(slides[4].groupLabel, QStringLiteral("Turnaround"));
+        QCOMPARE(slides[4].step, 3);
+        QCOMPARE(slides[5].step, 5);   // "Bridge 2" (step 4) has no group and lyrics, so it's skipped
+        QCOMPARE(slides[7].groupLabel, QStringLiteral("Ending"));
+    }
+
+    void aLyriclessLabelUsesTheSongsGroupWhenItHasOne()
+    {
+        const Song s = sample();
+        const QList<SongSlide> slides = songSlides(s, {"Intro", "Chorus"});
+        QCOMPARE(slides.size(), 2);
+        QCOMPARE(slides[0].groupId, s.groups[0].id);
+        QCOMPARE(slides[0].groupColor, QStringLiteral("#b3a624"));
+    }
+
+    void lyriclessLabels()
+    {
+        for (const char *label : {"Intro", "Turnaround", "Interlude", "Ending", "Instrumental", "Outro", "Interlude 2"})
+            QVERIFY2(isLyricless(label), label);
+        for (const char *label : {"Verse 1", "Chorus", "Tag", "Pre Chorus 1", "Bridge", ""})
+            QVERIFY2(!isLyricless(label), label);
+    }
 };
 
 QTEST_GUILESS_MAIN(SlideListTest)
