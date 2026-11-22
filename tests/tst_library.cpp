@@ -1,6 +1,7 @@
 #include "library/library.h"
 
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QSqlDatabase>
 #include <QSqlQuery>
@@ -226,6 +227,46 @@ private slots:
         auto r = Library::open(copy);
         QCOMPARE(r.error, E::None);
         QCOMPARE(r.library->setting("church.name"), QStringLiteral("Grace Church"));
+    }
+
+    // #90: the checkpoint on close is best-effort, so it must never wait on another
+    // program that holds the database (it used to wait out the 5 s busy timeout).
+    void closingNeverWaitsOnAnotherConnection_data()
+    {
+        QTest::addColumn<QString>("hold");
+        QTest::newRow("write lock") << "BEGIN IMMEDIATE";
+        QTest::newRow("read transaction") << "BEGIN";
+    }
+
+    void closingNeverWaitsOnAnotherConnection()
+    {
+        QFETCH(QString, hold);
+        QTemporaryDir tmp;
+        auto r = Library::open(tmp.path());
+        QCOMPARE(r.error, E::None);
+        r.library->setSetting("church.name", "Grace Church");
+        {
+            QSqlDatabase other = QSqlDatabase::addDatabase("QSQLITE", "other");
+            other.setDatabaseName(tmp.filePath("library.sqlite"));
+            QVERIFY(other.open());
+            QSqlQuery q(other);
+            QVERIFY(q.exec(hold));
+            QVERIFY(q.exec("SELECT count(*) FROM sqlite_master"));   // starts the read
+            q.finish();
+
+            QElapsedTimer t;
+            t.start();
+            r.library.reset();
+            QVERIFY2(t.elapsed() < 100, qPrintable(QStringLiteral("%1 ms").arg(t.elapsed())));
+
+            QVERIFY(q.exec("ROLLBACK"));
+            other.close();
+        }
+        QSqlDatabase::removeDatabase("other");
+
+        auto again = Library::open(tmp.path());
+        QCOMPARE(again.error, E::None);
+        QCOMPARE(again.library->setting("church.name"), QStringLiteral("Grace Church"));
     }
 
     void openingTwiceSkipsTheBackup()

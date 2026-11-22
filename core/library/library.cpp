@@ -3,6 +3,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QLoggingCategory>
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QUuid>
@@ -11,6 +12,8 @@
 namespace visualis {
 
 namespace {
+
+Q_LOGGING_CATEGORY(lcLibrary, "visualis.library")
 
 // Stamped into every library file (SQLite's application_id) so Visualis never migrates some
 // other program's database by mistake. ASCII "VISL".
@@ -246,9 +249,17 @@ Library::~Library()
 {
     {
         // Fold the write-ahead log back into library.sqlite, so a closed library is one
-        // complete file that can be copied or synced on its own.
+        // complete file that can be copied or synced on its own. Best-effort: the WAL is
+        // durable without it. So it never waits on another program holding the database;
+        // closing runs on the GUI thread, and waiting froze it for the 5 s timeout (#90).
         QSqlDatabase db = database();
-        exec(db, "PRAGMA wal_checkpoint(TRUNCATE)");
+        exec(db, "PRAGMA busy_timeout = 0");
+        QSqlQuery q(db);
+        // One row: busy, frames in the log, frames checkpointed.
+        if (!q.exec("PRAGMA wal_checkpoint(TRUNCATE)"))
+            qCInfo(lcLibrary).noquote() << "closed without a checkpoint:" << q.lastError().text();
+        else if (q.next() && q.value(0).toInt() != 0)
+            qCInfo(lcLibrary) << "closed without a full checkpoint: another connection is using the library";
     }
     QSqlDatabase::database(m_connectionName, false).close();
     QSqlDatabase::removeDatabase(m_connectionName);
