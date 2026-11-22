@@ -1,0 +1,8 @@
+{
+ "data": {"type": "Plan", "id": "5001", "attributes": {
+   "title": null, "series_title": null, "dates": "January 10, 2027", "sort_date": "2027-01-10T10:00:00Z",
+   "items_count": 5, "planning_center_url": "https://services.planningcenteronline.com/plans/5001"},
+   "links": {"self": "{{BASE}}service_types/1001/plans/5001"}},
+ "included": [],
+ "meta": {}
+}

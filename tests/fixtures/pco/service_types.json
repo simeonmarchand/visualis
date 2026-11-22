@@ -1,0 +1,9 @@
+{
+ "links": {"self": "{{BASE}}service_types?per_page=100"},
+ "data": [
+  {"type": "ServiceType", "id": "1001", "attributes": {"name": "Sunday Morning", "sequence": 0}},
+  {"type": "ServiceType", "id": "1002", "attributes": {"name": "Youth Night", "sequence": 1}}
+ ],
+ "included": [],
+ "meta": {"total_count": 2, "count": 2}
+}

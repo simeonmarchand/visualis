@@ -1,0 +1,13 @@
+{
+ "links": {"self": "{{BASE}}service_types/1001/plans?filter=future"},
+ "data": [
+  {"type": "Plan", "id": "5001", "attributes": {
+    "title": null, "series_title": null, "dates": "January 10, 2027", "sort_date": "2027-01-10T10:00:00Z",
+    "items_count": 5, "planning_center_url": "https://services.planningcenteronline.com/plans/5001"}},
+  {"type": "Plan", "id": "5002", "attributes": {
+    "title": "Baptism Sunday", "series_title": "Acts", "dates": "January 17, 2027", "sort_date": "2027-01-17T10:00:00Z",
+    "items_count": 7, "planning_center_url": "https://services.planningcenteronline.com/plans/5002"}}
+ ],
+ "included": [],
+ "meta": {"total_count": 2, "count": 2}
+}

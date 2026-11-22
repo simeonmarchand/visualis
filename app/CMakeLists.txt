@@ -32,6 +32,7 @@ qt_add_qml_module(visualis_ui
         live/recovery.h live/recovery.cpp
         pco/credentialstore.h
         pco/planningcenter.h pco/planningcenter.cpp
+        pco/pcoclient.h pco/pcoclient.cpp
         library/songlibrary.h library/songlibrary.cpp
         library/songeditor.h library/songeditor.cpp
         library/servicelist.h library/servicelist.cpp

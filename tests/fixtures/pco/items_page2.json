@@ -1,0 +1,24 @@
+{
+ "links": {"self": "{{BASE}}service_types/1001/plans/5001/items?include=song,arrangement,key&offset=3&per_page=3"},
+ "data": [
+  {"type": "Item", "id": "9005", "attributes": {
+    "title": "Example Song Two", "item_type": "song", "sequence": 5, "service_position": "during",
+    "length": 240, "description": null, "html_details": null, "key_name": null,
+    "custom_arrangement_sequence": ["Verse 1", "Chorus", "Bridge", "Chorus"]},
+   "relationships": {"song": {"data": {"type": "Song", "id": "7002"}},
+                     "arrangement": {"data": {"type": "Arrangement", "id": "8002"}},
+                     "key": {"data": {"type": "Key", "id": "6002"}}}},
+  {"type": "Item", "id": "9004", "attributes": {
+    "title": "Acts 2:38", "item_type": "item", "sequence": 4, "service_position": "during",
+    "length": 60, "description": null, "html_details": null, "key_name": null, "custom_arrangement_sequence": null},
+   "relationships": {"song": {"data": null}, "arrangement": {"data": null}, "key": {"data": null}}}
+ ],
+ "included": [
+  {"type": "Song", "id": "7002", "attributes": {"title": "Example Song Two", "ccli_number": null,
+    "author": null, "copyright": null}},
+  {"type": "Arrangement", "id": "8002", "attributes": {"name": "Live", "bpm": null, "meter": null, "length": null,
+    "sequence": ["Verse 1", "Chorus", "Verse 2", "Chorus", "Bridge", "Chorus"]}},
+  {"type": "Key", "id": "6002", "attributes": {"name": "Capo 2", "starting_key": "G", "ending_key": "A"}}
+ ],
+ "meta": {"total_count": 5, "count": 2}
+}

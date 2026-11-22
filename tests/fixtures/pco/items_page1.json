@@ -1,0 +1,29 @@
+{
+ "links": {"self": "{{BASE}}service_types/1001/plans/5001/items?include=song,arrangement,key&per_page=3",
+           "next": "{{BASE}}service_types/1001/plans/5001/items?include=song,arrangement,key&offset=3&per_page=3"},
+ "data": [
+  {"type": "Item", "id": "9001", "attributes": {
+    "title": "Pre-service countdown", "item_type": "media", "sequence": 1, "service_position": "pre",
+    "length": 300, "description": null, "html_details": null, "key_name": null, "custom_arrangement_sequence": null},
+   "relationships": {"song": {"data": null}, "arrangement": {"data": null}, "key": {"data": null}}},
+  {"type": "Item", "id": "9002", "attributes": {
+    "title": "Worship", "item_type": "header", "sequence": 2, "service_position": "during",
+    "length": 0, "description": null, "html_details": null, "key_name": null, "custom_arrangement_sequence": null},
+   "relationships": {"song": {"data": null}, "arrangement": {"data": null}, "key": {"data": null}}},
+  {"type": "Item", "id": "9003", "attributes": {
+    "title": "Example Song One", "item_type": "song", "sequence": 3, "service_position": "during",
+    "length": 280, "description": "Start soft", "html_details": "<p>Start soft</p>", "key_name": "Db",
+    "custom_arrangement_sequence": null},
+   "relationships": {"song": {"data": {"type": "Song", "id": "7001"}},
+                     "arrangement": {"data": {"type": "Arrangement", "id": "8001"}},
+                     "key": {"data": {"type": "Key", "id": "6001"}}}}
+ ],
+ "included": [
+  {"type": "Song", "id": "7001", "attributes": {"title": "Example Song One", "ccli_number": 1234567,
+    "author": "A. Writer and B. Writer", "copyright": "  2020 Example Music Publishing"}},
+  {"type": "Arrangement", "id": "8001", "attributes": {"name": "Default", "bpm": 130, "meter": "4/4", "length": 454,
+    "sequence": ["Intro", "Verse 1", "Pre Chorus 1", "Chorus", "Chorus", "Ending"]}},
+  {"type": "Key", "id": "6001", "attributes": {"name": null, "starting_key": "Db", "ending_key": null}}
+ ],
+ "meta": {"total_count": 5, "count": 3, "next": {"offset": 3}}
+}
