@@ -6,6 +6,7 @@
 #include <QLoggingCategory>
 #include <QSqlError>
 #include <QSqlQuery>
+#include <QSysInfo>
 #include <QUuid>
 #include <QVariant>
 
@@ -21,6 +22,7 @@ constexpr int kApplicationId = 0x5649534C;
 
 const char *kDatabaseFile = "library.sqlite";
 const char *kMediaFolder = "media";
+const char *kLockFile = "library.lock";
 
 struct Step {
     bool ok = true;
@@ -256,7 +258,23 @@ Library::OpenResult Library::open(const QString &folder, const std::vector<Migra
     if (info.exists() && !info.isDir())
         return failure(OpenError::NotADirectory, QStringLiteral("%1 is a file, not a library folder.").arg(folder));
     const QString root = info.absoluteFilePath();
-    if (!QDir().mkpath(root) || !QDir(root).mkpath(kMediaFolder))
+    if (!QDir().mkpath(root))
+        return failure(OpenError::CannotCreate, QStringLiteral("Can't create the library folder %1.").arg(root));
+    // Before anything else in the folder is touched: one Visualis process per library (#109).
+    auto lock = std::make_unique<QLockFile>(QDir(root).filePath(kLockFile));
+    lock->setStaleLockTime(0);   // stale only when its process is gone, never by age
+    if (!lock->tryLock(0)) {
+        if (lock->error() == QLockFile::LockFailedError) {
+            // A folder synced between Macs: say which one has it, since it's never taken over.
+            qint64 pid = 0;
+            QString host, app;
+            if (lock->getLockInfo(&pid, &host, &app) && !host.isEmpty() && host != QSysInfo::machineHostName())
+                return failure(OpenError::InUse, QStringLiteral("This library is open in Visualis on %1.").arg(host));
+            return failure(OpenError::InUse, QStringLiteral("This library is open in another Visualis window."));
+        }
+        return failure(OpenError::CannotCreate, QStringLiteral("Can't lock the library folder %1.").arg(root));
+    }
+    if (!QDir(root).mkpath(kMediaFolder))
         return failure(OpenError::CannotCreate, QStringLiteral("Can't create the library folder %1.").arg(root));
 
     const QString dbPath = QDir(root).filePath(kDatabaseFile);
@@ -279,13 +297,14 @@ Library::OpenResult Library::open(const QString &folder, const std::vector<Migra
         QSqlDatabase::removeDatabase(connection);
         return r;
     }
-    r.library.reset(new Library(root, connection));
+    r.library.reset(new Library(root, connection, std::move(lock)));
     return r;
 }
 
-Library::Library(const QString &folder, const QString &connectionName)
+Library::Library(const QString &folder, const QString &connectionName, std::unique_ptr<QLockFile> lock)
     : m_folder(folder)
     , m_connectionName(connectionName)
+    , m_lock(std::move(lock))
 {
 }
 

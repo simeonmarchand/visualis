@@ -1,6 +1,11 @@
 #include "library/library.h"
 
+#include <QDateTime>
+#include <QDeadlineTimer>
 #include <QDir>
+#include <QProcess>
+#include <QThread>
+#include <cstdio>
 #include <QElapsedTimer>
 #include <QFile>
 #include <QSqlDatabase>
@@ -48,6 +53,22 @@ const std::vector<Migration> v1v2 = {v1[0], {2, {"ALTER TABLE note ADD COLUMN pi
 class LibraryTest : public QObject
 {
     Q_OBJECT
+
+    // Starts this binary as a second process holding `folder`; true once it has it.
+    static bool holdLibrary(QProcess &process, const QString &folder)
+    {
+        process.start(QCoreApplication::applicationFilePath(), {"--hold-library", folder});
+        if (!process.waitForStarted(5000))
+            return false;
+        QByteArray out;
+        for (QDeadlineTimer deadline(10000); !out.contains("locked") && !deadline.hasExpired();) {
+            process.waitForReadyRead(int(deadline.remainingTime()));
+            out += process.readAllStandardOutput();
+        }
+        if (!out.contains("locked"))
+            qWarning() << "the holding process didn't lock:" << process.readAllStandardError();
+        return out.contains("locked");
+    }
 
 private slots:
     void createsANewLibrary()
@@ -246,6 +267,96 @@ private slots:
         QVERIFY2(r.message.contains("integrity"), qPrintable(r.message));
     }
 
+    // #109: one Visualis process per library. A second open is refused and touches nothing.
+    void aSecondOpenIsRefusedAndChangesNothing()
+    {
+        QTemporaryDir tmp;
+        auto first = Library::open(tmp.path(), v1);
+        QVERIFY(first.library);
+        QVERIFY(QSqlQuery(first.library->database()).exec("INSERT INTO note (text) VALUES ('keep me')"));
+        const QString db = tmp.filePath("library.sqlite");
+        QFile f(db);
+        QVERIFY(f.open(QIODevice::ReadOnly));
+        const QByteArray bytes = f.readAll();
+        f.close();
+        const QDateTime modified = QFileInfo(db).lastModified();
+        const QStringList listing = QDir(tmp.path()).entryList(QDir::AllEntries | QDir::Hidden | QDir::NoDotAndDotDot);
+
+        // A newer schema, so a second open that got through would copy and migrate it.
+        auto second = Library::open(tmp.path(), v1v2);
+        QCOMPARE(second.error, E::InUse);
+        QVERIFY(!second.library);
+        QCOMPARE(second.message, QStringLiteral("This library is open in another Visualis window."));
+
+        QVERIFY(f.open(QIODevice::ReadOnly));
+        QCOMPARE(f.readAll(), bytes);
+        QCOMPARE(QFileInfo(db).lastModified(), modified);
+        QCOMPARE(QDir(tmp.path()).entryList(QDir::AllEntries | QDir::Hidden | QDir::NoDotAndDotDot), listing);
+        QCOMPARE(first.library->schemaVersion(), 1);
+        QSqlQuery q(first.library->database());
+        QVERIFY(q.exec("SELECT text FROM note") && q.next());
+        QCOMPARE(q.value(0).toString(), QStringLiteral("keep me"));
+    }
+
+    void closingReleasesTheLibraryForTheNextOpen()
+    {
+        QTemporaryDir tmp;
+        {
+            auto first = Library::open(tmp.path(), v1);
+            QVERIFY(first.library);
+        }
+        auto again = Library::open(tmp.path(), v1);
+        QCOMPARE(again.error, E::None);
+        QVERIFY(again.library);
+    }
+
+    // #109 with a real second process: one holding the library keeps this one out.
+    void anotherVisualisProcessKeepsTheLibrary()
+    {
+        QTemporaryDir tmp;
+        QProcess other;
+        QVERIFY(holdLibrary(other, tmp.path()));
+        auto r = Library::open(tmp.path());
+        QCOMPARE(r.error, E::InUse);
+        QCOMPARE(r.message, QStringLiteral("This library is open in another Visualis window."));
+        other.kill();
+        other.waitForFinished();
+    }
+
+    // #109: a crash leaves the lock file behind. The next start takes it over, or crash
+    // recovery (#25) couldn't open the library.
+    void aCrashedProcesssLockIsTakenOver()
+    {
+        QTemporaryDir tmp;
+        QProcess crashed;
+        QVERIFY(holdLibrary(crashed, tmp.path()));
+        crashed.kill();   // SIGKILL: no destructors, no unlock
+        QVERIFY(crashed.waitForFinished(5000));
+        QVERIFY(QFile::exists(tmp.filePath("library.lock")));
+
+        auto r = Library::open(tmp.path());
+        QCOMPARE(r.error, E::None);
+        QVERIFY(r.library);
+    }
+
+    // A library in a folder synced between Macs: the operator is told which Mac has it.
+    // QLockFile can't see another host's processes, so this lock is never taken over.
+    void aLockFromAnotherMacNamesIt()
+    {
+        QTemporaryDir tmp;
+        { QVERIFY(Library::open(tmp.path(), v1).library); }
+        QFile lock(tmp.filePath("library.lock"));   // what QLockFile writes on that Mac
+        QVERIFY(lock.open(QIODevice::WriteOnly));
+        lock.write("4242\nVisualis\nsanctuary-mac.local\n"
+                   "11111111-2222-3333-4444-555555555555\n66666666-7777-8888-9999-000000000000\n");
+        lock.close();
+
+        auto r = Library::open(tmp.path(), v1);
+        QCOMPARE(r.error, E::InUse);
+        QCOMPARE(r.message, QStringLiteral("This library is open in Visualis on sanctuary-mac.local."));
+        QVERIFY(lock.exists());   // left for that Mac
+    }
+
     void refusesAFileInPlaceOfTheFolder()
     {
         QTemporaryDir tmp;
@@ -326,5 +437,24 @@ private slots:
     }
 };
 
-QTEST_GUILESS_MAIN(LibraryTest)
+// With --hold-library <folder>, this binary stands in for a second Visualis process (#109):
+// it opens the library and holds it until it's killed.
+int main(int argc, char **argv)
+{
+    QCoreApplication app(argc, argv);
+    if (argc == 3 && qstrcmp(argv[1], "--hold-library") == 0) {
+        auto r = Library::open(QString::fromLocal8Bit(argv[2]));
+        if (!r.library) {
+            std::fprintf(stderr, "%s\n", qPrintable(r.message));
+            return 1;
+        }
+        std::fputs("locked\n", stdout);
+        std::fflush(stdout);
+        for (;;)
+            QThread::sleep(60);
+    }
+    LibraryTest test;
+    QTEST_SET_MAIN_SOURCE_PATH
+    return QTest::qExec(&test, argc, argv);
+}
 #include "tst_library.moc"

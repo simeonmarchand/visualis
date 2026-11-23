@@ -7,6 +7,8 @@
 #include <QTemporaryDir>
 #include <QtTest>
 
+#include "otherprogram.h"
+
 using namespace visualis;
 using Kind = ServiceItem::Kind;
 
@@ -252,8 +254,8 @@ private slots:
 
     void saveNewPlanDoesNotWaitForALockHeldElsewhere()
     {
-        auto other = Library::open(m_library->folder()).library;
-        QSqlQuery lock(other->database());
+        OtherProgram other(m_library->folder());
+        QSqlQuery lock(other.database());
         QVERIFY(lock.exec("BEGIN IMMEDIATE"));
         Service s;
         s.title = "Sunday";
@@ -264,7 +266,7 @@ private slots:
         QVERIFY(!r.ok);
         QVERIFY(r.busy);
         QVERIFY2(took.elapsed() < Library::kBusyTimeoutMs / 2, qPrintable(QString("waited %1 ms").arg(took.elapsed())));
-        QVERIFY(QSqlQuery(other->database()).exec("ROLLBACK"));
+        QVERIFY(QSqlQuery(other.database()).exec("ROLLBACK"));
         QVERIFY(m_services->saveNewPlan(s).ok);
         // The connection's usual busy timeout is back for other saves.
         QSqlQuery timeout(m_library->database());

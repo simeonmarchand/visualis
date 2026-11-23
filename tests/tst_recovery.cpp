@@ -1,9 +1,16 @@
 #include "live/livejournal.h"
 #include "live/livestate.h"
+#include "library/songlibrary.h"
 #include "live/recovery.h"
 #include "video/videoengine.h"
 
+#include <QDeadlineTimer>
+#include <QDir>
+#include <QGuiApplication>
+#include <QProcess>
 #include <QTemporaryDir>
+#include <QThread>
+#include <cstdio>
 #include <QtTest>
 
 using namespace visualis;
@@ -35,6 +42,9 @@ Song repeated(int slides, int steps)
     s.arrangements = {Arrangement{QUuid::createUuid(), "Default", QList<QUuid>(steps, s.groups[0].id), {}}};
     return s;
 }
+
+// Two slides (public domain).
+const char *kLyrics = "Verse 1\nJoy to the world\n\nChorus\nAnd heaven and nature sing\n";
 
 } // namespace
 
@@ -123,6 +133,36 @@ private slots:
         QCOMPARE(live.itemIndex(), 1);
         QCOMPARE(live.songTitle(), QStringLiteral("O Come All Ye Faithful"));
         QCOMPARE(readJournal(m_path).snapshot->item, b.id);
+    }
+
+    // #109 with #25: a Visualis that's killed mid-service leaves its library lock behind. The
+    // restart still opens the library, as main.cpp does, and the live song comes back from it.
+    void afterAKillTheLibraryOpensAndTheLiveSongComesBack()
+    {
+        const QString folder = m_dir.filePath(QString("library-%1").arg(m_n));
+        QProcess crashed;
+        crashed.start(QCoreApplication::applicationFilePath(), {"--crash-live", folder, m_path});
+        QVERIFY(crashed.waitForStarted(5000));
+        QByteArray out;
+        for (QDeadlineTimer deadline(15000); !out.contains("live ") && !deadline.hasExpired();) {
+            crashed.waitForReadyRead(int(deadline.remainingTime()));
+            out += crashed.readAllStandardOutput();
+        }
+        QVERIFY2(out.contains("live "), crashed.readAllStandardError().constData());
+        const QString songId = QString::fromUtf8(out.mid(out.indexOf("live ") + 5).trimmed());
+        crashed.kill();   // SIGKILL: no destructors, no unlock, no finish()
+        QVERIFY(crashed.waitForFinished(5000));
+        QVERIFY(QFile::exists(QDir(folder).filePath("library.lock")));
+
+        SongLibrary songs;
+        QVERIFY2(songs.openLibrary(folder), qPrintable(songs.error()));
+        LiveState live;
+        Recovery recovery;
+        QVERIFY(recovery.start(m_path, &live, nullptr));
+        QCOMPARE(live.songId(), songId);
+        songs.select(live.songId());
+        QCOMPARE(songs.selectedId(), songId);
+        QCOMPARE(songs.selectedSlides().size(), 2);
     }
 
     void theBackgroundComesBackToo()
@@ -232,5 +272,29 @@ private:
     int m_n = 0;
 };
 
-QTEST_MAIN(RecoveryTest)
+// With --crash-live <library> <journal>, this binary stands in for a Visualis that goes on
+// to crash (#109): it opens the library, takes a song live with the journal running, prints
+// "live <song id>", and waits to be killed.
+int main(int argc, char **argv)
+{
+    QGuiApplication app(argc, argv);
+    if (argc == 4 && qstrcmp(argv[1], "--crash-live") == 0) {
+        SongLibrary songs;
+        if (!songs.openLibrary(QString::fromLocal8Bit(argv[2])) || !songs.createFromPaste("Joy to the World", kLyrics))
+            return 1;
+        const std::optional<Song> song = songs.loadSong(QUuid::fromString(songs.selectedId()));
+        LiveState live;
+        Recovery recovery;
+        recovery.start(QString::fromLocal8Bit(argv[3]), &live, nullptr);
+        if (!song || !live.show(*song, {}, 1))
+            return 1;
+        std::printf("live %s\n", qPrintable(songs.selectedId()));
+        std::fflush(stdout);
+        for (;;)
+            QThread::sleep(60);
+    }
+    RecoveryTest test;
+    QTEST_SET_MAIN_SOURCE_PATH
+    return QTest::qExec(&test, argc, argv);
+}
 #include "tst_recovery.moc"
