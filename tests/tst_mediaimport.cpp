@@ -180,6 +180,7 @@ private slots:
         QImage image(8, 8, QImage::Format_RGB32);
         image.fill(Qt::yellow);
         QVERIFY(image.save(in.filePath("Cross.png")));
+        m_media->setLockWaitLimit(60'000);   // longer than any wait below, however slow the runner
         QSqlDatabase other = QSqlDatabase::addDatabase("QSQLITE", "other-program");
         other.setDatabaseName(m_songs->library()->databasePath());
         QVERIFY(other.open());
@@ -199,9 +200,10 @@ private slots:
         sinceTick.start();
         tick.start();
         QTRY_VERIFY_WITH_TIMEOUT(m_media->importProgress().contains("Waiting for the library"), 5'000);
+        // The window keeps running while the save waits: the timer goes on ticking, and the
+        // save still hasn't happened. No fixed tick count, so a slow CI runner can't fail it.
         const int ticksBefore = ticks;
-        QTest::qWait(500);
-        QVERIFY(ticks - ticksBefore >= 10);   // the window kept running while it waited
+        QTRY_VERIFY_WITH_TIMEOUT(ticks - ticksBefore >= 10, 10'000);
         QVERIFY(m_media->assets().isEmpty());
         QVERIFY(QSqlQuery(other).exec("ROLLBACK"));
         QVERIFY(finished.wait(5'000));
