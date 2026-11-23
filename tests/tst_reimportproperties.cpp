@@ -422,32 +422,30 @@ QString check(Run run, ServiceStore &store)
 
     // What the operator deleted stays deleted: they're told if Planning Center changed it,
     // and it's forgotten once Planning Center removes it too, unless it may only have been unreadable.
-    QList<RemovedPcoItem> expectDeleted;
+    QMap<QString, QJsonObject> expectDeleted;
     QSet<QString> addBack;
     for (auto it = deleted.cbegin(); it != deleted.cend(); ++it) {
-        const RemovedPcoItem d{it.key(), it.value()};
-        const ServiceItem *now = byPco(fresh, d.pcoItemId);
+        const QString &id = it.key();
+        const ServiceItem *now = byPco(fresh, id);
         if (!now) {
-            if (o.unreadable.contains(d.pcoItemId) || o.unreadableWithoutId)
-                expectDeleted << d;
+            if (o.unreadable.contains(id) || o.unreadableWithoutId)
+                expectDeleted.insert(id, it.value());
             continue;
         }
-        CHECK(!byPco(r.service, d.pcoItemId), "a deleted item came back: " + now->title);
-        if (o.unreadable.contains(d.pcoItemId)) {
-            expectDeleted << d;
+        CHECK(!byPco(r.service, id), "a deleted item came back: " + now->title);
+        if (o.unreadable.contains(id)) {
+            expectDeleted.insert(id, it.value());
             continue;
         }
-        const bool changed = withoutPlace(d.importSnapshot) != withoutPlace(now->importSnapshot);
+        const bool changed = withoutPlace(it.value()) != withoutPlace(now->importSnapshot);
         const bool told = std::any_of(r.changes.cbegin(), r.changes.cend(), [&](const ReimportChange &c) {
-            return c.kind == CK::ChangedButDeleted && c.pcoItemId == d.pcoItemId;
+            return c.kind == CK::ChangedButDeleted && c.pcoItemId == id;
         });
         CHECK(told == changed, "ChangedButDeleted line for " + now->title);
         if (changed)
-            addBack << d.pcoItemId;
-        expectDeleted << RemovedPcoItem{d.pcoItemId, now->importSnapshot};
+            addBack << id;
+        expectDeleted.insert(id, now->importSnapshot);
     }
-    std::sort(expectDeleted.begin(), expectDeleted.end(),
-              [](const RemovedPcoItem &a, const RemovedPcoItem &b) { return a.pcoItemId < b.pcoItemId; });
     CHECK(r.service.removedPcoItems == expectDeleted, "the deleted items' records");
 
     // Only when the operator asks.
@@ -458,8 +456,7 @@ QString check(Run run, ServiceStore &store)
         for (const QString &id : addBack) {
             const ServiceItem *m = byPco(back.service, id);
             CHECK(m, "not added back");
-            CHECK(std::none_of(back.service.removedPcoItems.cbegin(), back.service.removedPcoItems.cend(),
-                               [&](const RemovedPcoItem &d) { return d.pcoItemId == id; }), "added back, still recorded deleted");
+            CHECK(!back.service.removedPcoItems.contains(id), "added back, still recorded deleted");
             CHECK(std::any_of(back.changes.cbegin(), back.changes.cend(),
                               [&](const ReimportChange &c) { return c.kind == CK::Added && c.itemId == m->id; }),
                   "no Added line for an item added back");
@@ -599,8 +596,6 @@ QString check(Run run, ServiceStore &store)
 
     // Whether there's anything to save.
     Service was = run.mine, now = r.service;
-    std::sort(was.removedPcoItems.begin(), was.removedPcoItems.end(),
-              [](const RemovedPcoItem &a, const RemovedPcoItem &b) { return a.pcoItemId < b.pcoItemId; });
     now.lastImportedAt = was.lastImportedAt;
     CHECK(r.needsSave == (now != was), "needsSave");
 

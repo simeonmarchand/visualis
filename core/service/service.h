@@ -4,6 +4,7 @@
 #include <QDateTime>
 #include <QJsonObject>
 #include <QList>
+#include <QMap>
 #include <QString>
 #include <QStringList>
 #include <QUuid>
@@ -31,15 +32,6 @@ struct ServiceItem {
     bool operator==(const ServiceItem &) const = default;
 };
 
-// An imported item the operator deleted (#56): a re-import doesn't bring it back unless
-// they ask. `importSnapshot` is what Planning Center said when it was last merged.
-struct RemovedPcoItem {
-    QString pcoItemId;
-    QJsonObject importSnapshot;
-
-    bool operator==(const RemovedPcoItem &) const = default;
-};
-
 struct Service {
     QUuid id;                   // null until first saved
     QString title;
@@ -49,7 +41,10 @@ struct Service {
     QString pcoPlanUrl;         // the plan in Planning Center's web app (P3 finding 7)
     QDateTime lastImportedAt;   // UTC; invalid if never imported
     QList<ServiceItem> items;   // in order
-    QList<RemovedPcoItem> removedPcoItems;   // kept by ServiceStore when an imported item is deleted
+    // Imported items the operator deleted (#56), by Planning Center id, with what Planning
+    // Center said when each was last merged: a re-import doesn't bring them back unless they
+    // ask. Kept by ServiceStore when an imported item is deleted.
+    QMap<QString, QJsonObject> removedPcoItems;
     QDateTime created;          // set by ServiceStore, UTC
     QDateTime updated;
 

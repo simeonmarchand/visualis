@@ -24,8 +24,8 @@ QByteArray serviceToJson(const Service &s)
         });
     }
     QJsonArray removed;
-    for (const RemovedPcoItem &r : s.removedPcoItems)
-        removed.append(QJsonObject{{"pcoItemId", r.pcoItemId}, {"importSnapshot", r.importSnapshot}});
+    for (auto r = s.removedPcoItems.cbegin(); r != s.removedPcoItems.cend(); ++r)
+        removed.append(QJsonObject{{"pcoItemId", r.key()}, {"importSnapshot", r.value()}});
     const QJsonObject o{
         {"format", "visualis-service"}, {"version", kVersion}, {"id", idText(s.id)}, {"title", s.title},
         {"date", s.date.isValid() ? s.date.toString(Qt::ISODate) : QString()}, {"pcoPlanId", s.pcoPlanId},
@@ -84,7 +84,7 @@ ServiceJsonResult serviceFromJson(const QByteArray &json)
     }
     for (const QJsonValue &v : o.value("removedPcoItems").toArray()) {
         const QJsonObject x = v.toObject();
-        s.removedPcoItems << RemovedPcoItem{x.value("pcoItemId").toString(), x.value("importSnapshot").toObject()};
+        s.removedPcoItems.insert(x.value("pcoItemId").toString(), x.value("importSnapshot").toObject());
     }
     r.service = s;
     return r;

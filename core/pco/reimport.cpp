@@ -200,8 +200,6 @@ ItemMerge mergeUnknown(const ServiceItem &local, const ServiceItem &fresh)
     return m;
 }
 
-bool byPcoId(const RemovedPcoItem &a, const RemovedPcoItem &b) { return a.pcoItemId < b.pcoItemId; }
-
 // The operator's items, read against the fresh import: which is each Planning Center id's
 // item, and what can be compared.
 struct Reading {
@@ -372,12 +370,9 @@ ReimportResult mergeReimport(const Service &local, const Service &fresh, const R
 
     // 2. Planning Center's order, with its new items, the operator's placed items, and what
     //    they deleted kept out.
-    QHash<QString, RemovedPcoItem> deleted;   // pco id -> record, of items the operator deleted
-    for (const RemovedPcoItem &d : std::as_const(mine.removedPcoItems)) {
-        if (!reading.owner.contains(d.pcoItemId))
-            deleted.insert(d.pcoItemId, d);
-    }
-    QList<RemovedPcoItem> stillDeleted;
+    QMap<QString, QJsonObject> deleted = mine.removedPcoItems;   // of items the operator deleted
+    deleted.removeIf([&](const auto &d) { return reading.owner.contains(d.key()); });
+    QMap<QString, QJsonObject> stillDeleted;
     QList<Change> planChanges;   // not about an item in the service
     QList<ItemMerge> order;
     for (qsizetype fi = 0; fi < fresh.items.size(); ++fi) {
@@ -392,13 +387,13 @@ ReimportResult mergeReimport(const Service &local, const Service &fresh, const R
         }
         if (deleted.contains(id) && !options.addBack.contains(id)) {
             if (reading.unreadable(id)) {
-                stillDeleted << deleted[id];   // can't tell what changed: as it was
+                stillDeleted.insert(id, deleted[id]);   // can't tell what changed: as it was
                 continue;
             }
-            if (changedApartFromPosition(deleted[id].importSnapshot, f.importSnapshot))
+            if (changedApartFromPosition(deleted[id], f.importSnapshot))
                 planChanges << Change{Change::Kind::ChangedButDeleted, {}, f.title, {},
                                       QStringLiteral("changed in Planning Center; you removed it"), id};
-            stillDeleted << RemovedPcoItem{id, f.importSnapshot};
+            stillDeleted.insert(id, f.importSnapshot);
             continue;
         }
         ServiceItem added = f;
@@ -412,10 +407,9 @@ ReimportResult mergeReimport(const Service &local, const Service &fresh, const R
                            true};
     }
     // A deleted item missing from the answer is forgotten, unless it may only have been unreadable.
-    for (const RemovedPcoItem &d : std::as_const(mine.removedPcoItems)) {
-        if (deleted.contains(d.pcoItemId) && !reading.inFresh.contains(d.pcoItemId)
-            && (reading.unreadable(d.pcoItemId) || options.unreadableWithoutId))
-            stillDeleted << d;
+    for (auto d = deleted.cbegin(); d != deleted.cend(); ++d) {
+        if (!reading.inFresh.contains(d.key()) && (reading.unreadable(d.key()) || options.unreadableWithoutId))
+            stillDeleted.insert(d.key(), d.value());
     }
 
     // 3. Everything that keeps the operator's place goes right after the item before it in
@@ -447,11 +441,9 @@ ReimportResult mergeReimport(const Service &local, const Service &fresh, const R
         r.changes << m.changes;
     }
     r.changes << planChanges;
-    std::sort(stillDeleted.begin(), stillDeleted.end(), byPcoId);
     r.service.removedPcoItems = stillDeleted;   // what Planning Center removed too is forgotten
 
-    Service before = local;
-    std::sort(before.removedPcoItems.begin(), before.removedPcoItems.end(), byPcoId);
+    const Service &before = local;
     Service after = r.service;
     after.lastImportedAt = before.lastImportedAt;
     r.needsSave = after != before;

@@ -148,8 +148,6 @@ QString ServiceStore::write(Service &s)
         QSet<QString> stillThere;
         for (const ServiceItem &it : std::as_const(s.items))
             stillThere << it.pcoItemId;
-        for (const RemovedPcoItem &r : std::as_const(s.removedPcoItems))
-            stillThere << r.pcoItemId;
         QList<QUuid> gone;
         while (q.next()) {
             if (itemIds.contains(uuid(q.value(0))))
@@ -158,10 +156,9 @@ QString ServiceStore::write(Service &s)
             // Deleting an imported item is an edit a re-import must keep (#56). One Planning
             // Center already took out needs no record.
             const QString pcoId = q.value(1).toString();
-            if (!pcoId.isEmpty() && q.value(3).toInt() == 0 && !stillThere.contains(pcoId)) {
-                s.removedPcoItems << RemovedPcoItem{pcoId, objectFrom(q.value(2))};
-                stillThere << pcoId;
-            }
+            if (!pcoId.isEmpty() && q.value(3).toInt() == 0 && !stillThere.contains(pcoId)
+                && !s.removedPcoItems.contains(pcoId))
+                s.removedPcoItems.insert(pcoId, objectFrom(q.value(2)));
         }
         for (const QUuid &id : gone) {
             if (!(err = run(db, "DELETE FROM service_item WHERE id = ?", {key(id)})).isEmpty())
@@ -185,13 +182,11 @@ QString ServiceStore::write(Service &s)
             return err;
     }
 
-    std::sort(s.removedPcoItems.begin(), s.removedPcoItems.end(),
-              [](const RemovedPcoItem &a, const RemovedPcoItem &b) { return a.pcoItemId < b.pcoItemId; });
     if (!(err = run(db, "DELETE FROM service_removed_pco_item WHERE service_id = ?", {serviceId})).isEmpty())
         return err;
-    for (const RemovedPcoItem &r : std::as_const(s.removedPcoItems)) {
-        if (!(err = run(db, "INSERT OR REPLACE INTO service_removed_pco_item (service_id, pco_item_id, import_snapshot) "
-                            "VALUES (?, ?, ?)", {serviceId, r.pcoItemId, json(r.importSnapshot)})).isEmpty())
+    for (auto r = s.removedPcoItems.cbegin(); r != s.removedPcoItems.cend(); ++r) {
+        if (!(err = run(db, "INSERT INTO service_removed_pco_item (service_id, pco_item_id, import_snapshot) "
+                            "VALUES (?, ?, ?)", {serviceId, r.key(), json(r.value())})).isEmpty())
             return err;
     }
 
@@ -281,11 +276,11 @@ std::optional<Service> ServiceStore::load(const QUuid &id) const
         s.items << it;
     }
     QSqlQuery removed(db);
-    removed.prepare("SELECT pco_item_id, import_snapshot FROM service_removed_pco_item WHERE service_id = ? ORDER BY pco_item_id");
+    removed.prepare("SELECT pco_item_id, import_snapshot FROM service_removed_pco_item WHERE service_id = ?");
     removed.addBindValue(key(id));
     removed.exec();
     while (removed.next())
-        s.removedPcoItems << RemovedPcoItem{removed.value(0).toString(), objectFrom(removed.value(1))};
+        s.removedPcoItems.insert(removed.value(0).toString(), objectFrom(removed.value(1)));
     return s;
 }
 

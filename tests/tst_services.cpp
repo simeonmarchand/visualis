@@ -443,7 +443,7 @@ private slots:
 
         s.items.clear();
         QVERIFY(m_services->save(s).ok);
-        const QList<RemovedPcoItem> expected{{"11", welcome.importSnapshot}};
+        const QMap<QString, QJsonObject> expected{{"11", welcome.importSnapshot}};
         QCOMPARE(s.removedPcoItems, expected);
         QCOMPARE(m_services->load(s.id)->removedPcoItems, expected);
 
