@@ -27,11 +27,16 @@ Run the tests before calling any work done, and say plainly if any fail. Code th
 Work is tracked as GitHub issues on `simeonmarchand/visualis`, grouped by phase milestone.
 
 1. Read the issue and the plan sections and spike findings it links to.
-2. Branch from `main`: `<issue number>-<short-slug>`, e.g. `12-song-data-model`.
-3. Commit in Conventional Commits style (`feat:`, `fix:`, `test:`, `docs:`, `chore:`, `refactor:`), explaining why.
-4. Open a pull request whose body says `Closes #<n>`, summarizes what changed and how it was tested, and lists anything left for later. Simeon reviews and merges; never merge or push to `main` directly.
+2. Plan before writing code, in plan mode. For a large or unclear issue, get a plan from `/improve` first. It runs as a senior advisor in its own session: it only reads code and writes plans to `plans/`, which is git-ignored, and it never implements. The implementer follows that plan.
+3. Branch from `main`: `<issue number>-<short-slug>`, e.g. `12-song-data-model`.
+4. Build it test-first with `/tdd`: name the seams you'll test in the plan, then work red to green one behavior at a time.
+5. Commit in Conventional Commits style (`feat:`, `fix:`, `test:`, `docs:`, `chore:`, `refactor:`), explaining why.
+6. Before opening the pull request, run `/thermo-nuclear-code-quality-review` on the branch and make the fixes it finds. Then run `/pstack:unslop` on the pull request body and on any docs or comments you wrote.
+7. Open a pull request whose body says `Closes #<n>`, summarizes what changed and how it was tested, and lists anything left for later. Simeon reviews and merges; never merge or push to `main` directly.
    CI (`.github/workflows/ci.yml`) builds, tests, and lints every pull request on macOS. GitHub can't enforce it on this private repo, so the rule is a convention: don't ask for a merge while the check is red, and wait for it to finish before saying a pull request is ready.
-5. If an issue turns out bigger or different than written, say so on the issue before going further.
+8. If an issue turns out bigger or different than written, say so on the issue before going further.
+
+At the start of each feature area or phase, run `/improve-codebase-architecture` on the code that work will touch. Simeon picks which of its suggestions to take on.
 
 Labels: `type:` and `area:` describe the work; `needs-church`, `needs-hardware`, and `needs-decision` mean it's blocked on Simeon, the church, or hardware. Don't start those without asking.
 
