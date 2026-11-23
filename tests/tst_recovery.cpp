@@ -4,14 +4,13 @@
 #include "live/recovery.h"
 #include "video/videoengine.h"
 
-#include <QDeadlineTimer>
 #include <QDir>
 #include <QGuiApplication>
 #include <QProcess>
 #include <QTemporaryDir>
-#include <QThread>
-#include <cstdio>
 #include <QtTest>
+
+#include "childprocess.h"
 
 using namespace visualis;
 
@@ -141,26 +140,20 @@ private slots:
     {
         const QString folder = m_dir.filePath(QString("library-%1").arg(m_n));
         QProcess crashed;
-        crashed.start(QCoreApplication::applicationFilePath(), {"--crash-live", folder, m_path});
-        QVERIFY(crashed.waitForStarted(5000));
-        QByteArray out;
-        for (QDeadlineTimer deadline(15000); !out.contains("live ") && !deadline.hasExpired();) {
-            crashed.waitForReadyRead(int(deadline.remainingTime()));
-            out += crashed.readAllStandardOutput();
-        }
-        QVERIFY2(out.contains("live "), crashed.readAllStandardError().constData());
-        const QString songId = QString::fromUtf8(out.mid(out.indexOf("live ") + 5).trimmed());
+        const std::optional<QByteArray> live = childprocess::start(crashed, {"--crash-live", folder, m_path}, "live ");
+        QVERIFY(live);
+        const QString songId = QString::fromUtf8(*live);
         crashed.kill();   // SIGKILL: no destructors, no unlock, no finish()
         QVERIFY(crashed.waitForFinished(5000));
         QVERIFY(QFile::exists(QDir(folder).filePath("library.lock")));
 
         SongLibrary songs;
         QVERIFY2(songs.openLibrary(folder), qPrintable(songs.error()));
-        LiveState live;
+        LiveState restored;
         Recovery recovery;
-        QVERIFY(recovery.start(m_path, &live, nullptr));
-        QCOMPARE(live.songId(), songId);
-        songs.select(live.songId());
+        QVERIFY(recovery.start(m_path, &restored, nullptr));
+        QCOMPARE(restored.songId(), songId);
+        songs.select(restored.songId());
         QCOMPARE(songs.selectedId(), songId);
         QCOMPARE(songs.selectedSlides().size(), 2);
     }
@@ -288,10 +281,7 @@ int main(int argc, char **argv)
         recovery.start(QString::fromLocal8Bit(argv[3]), &live, nullptr);
         if (!song || !live.show(*song, {}, 1))
             return 1;
-        std::printf("live %s\n", qPrintable(songs.selectedId()));
-        std::fflush(stdout);
-        for (;;)
-            QThread::sleep(60);
+        return childprocess::readyUntilParentGoes("live " + songs.selectedId().toUtf8());
     }
     RecoveryTest test;
     QTEST_SET_MAIN_SOURCE_PATH

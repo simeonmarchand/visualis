@@ -1,17 +1,16 @@
 #include "library/library.h"
 
 #include <QDateTime>
-#include <QDeadlineTimer>
 #include <QDir>
 #include <QProcess>
-#include <QThread>
-#include <cstdio>
 #include <QElapsedTimer>
 #include <QFile>
 #include <QSqlDatabase>
 #include <QSqlQuery>
 #include <QTemporaryDir>
 #include <QtTest>
+
+#include "childprocess.h"
 
 using visualis::Library;
 using visualis::Migration;
@@ -54,20 +53,10 @@ class LibraryTest : public QObject
 {
     Q_OBJECT
 
-    // Starts this binary as a second process holding `folder`; true once it has it.
+    // This binary as a second Visualis process holding `folder`; true once it has it.
     static bool holdLibrary(QProcess &process, const QString &folder)
     {
-        process.start(QCoreApplication::applicationFilePath(), {"--hold-library", folder});
-        if (!process.waitForStarted(5000))
-            return false;
-        QByteArray out;
-        for (QDeadlineTimer deadline(10000); !out.contains("locked") && !deadline.hasExpired();) {
-            process.waitForReadyRead(int(deadline.remainingTime()));
-            out += process.readAllStandardOutput();
-        }
-        if (!out.contains("locked"))
-            qWarning() << "the holding process didn't lock:" << process.readAllStandardError();
-        return out.contains("locked");
+        return childprocess::start(process, {"--hold-library", folder}, "locked").has_value();
     }
 
 private slots:
@@ -448,10 +437,7 @@ int main(int argc, char **argv)
             std::fprintf(stderr, "%s\n", qPrintable(r.message));
             return 1;
         }
-        std::fputs("locked\n", stdout);
-        std::fflush(stdout);
-        for (;;)
-            QThread::sleep(60);
+        return childprocess::readyUntilParentGoes("locked");
     }
     LibraryTest test;
     QTEST_SET_MAIN_SOURCE_PATH

@@ -3,6 +3,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QLockFile>
 #include <QLoggingCategory>
 #include <QSqlError>
 #include <QSqlQuery>
@@ -53,6 +54,19 @@ Library::OpenResult failure(Library::OpenError error, const QString &message)
     r.error = error;
     r.message = message;
     return r;
+}
+
+// Why `lock` couldn't be taken.
+Library::OpenResult lockFailure(const QLockFile &lock, const QString &root)
+{
+    using E = Library::OpenError;
+    if (lock.error() != QLockFile::LockFailedError)
+        return failure(E::CannotCreate, QStringLiteral("Can't lock the library folder %1.").arg(root));
+    // A folder synced between Macs: say which one has it, since it's never taken over.
+    QString host;
+    if (lock.getLockInfo(nullptr, &host, nullptr) && !host.isEmpty() && host != QSysInfo::machineHostName())
+        return failure(E::InUse, QStringLiteral("This library is open in Visualis on %1.").arg(host));
+    return failure(E::InUse, QStringLiteral("This library is open in another Visualis window."));
 }
 
 // Opens or creates the database on an existing connection and migrates it. Returns an error
@@ -263,17 +277,8 @@ Library::OpenResult Library::open(const QString &folder, const std::vector<Migra
     // Before anything else in the folder is touched: one Visualis process per library (#109).
     auto lock = std::make_unique<QLockFile>(QDir(root).filePath(kLockFile));
     lock->setStaleLockTime(0);   // stale only when its process is gone, never by age
-    if (!lock->tryLock(0)) {
-        if (lock->error() == QLockFile::LockFailedError) {
-            // A folder synced between Macs: say which one has it, since it's never taken over.
-            qint64 pid = 0;
-            QString host, app;
-            if (lock->getLockInfo(&pid, &host, &app) && !host.isEmpty() && host != QSysInfo::machineHostName())
-                return failure(OpenError::InUse, QStringLiteral("This library is open in Visualis on %1.").arg(host));
-            return failure(OpenError::InUse, QStringLiteral("This library is open in another Visualis window."));
-        }
-        return failure(OpenError::CannotCreate, QStringLiteral("Can't lock the library folder %1.").arg(root));
-    }
+    if (!lock->tryLock(0))
+        return lockFailure(*lock, root);
     if (!QDir(root).mkpath(kMediaFolder))
         return failure(OpenError::CannotCreate, QStringLiteral("Can't create the library folder %1.").arg(root));
 

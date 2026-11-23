@@ -1,11 +1,12 @@
 #pragma once
 
-#include <QLockFile>
 #include <QSqlDatabase>
 #include <QString>
 #include <QStringList>
 #include <memory>
 #include <vector>
+
+class QLockFile;
 
 namespace visualis {
 
