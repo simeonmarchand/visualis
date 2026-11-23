@@ -40,8 +40,11 @@ bool Recovery::start(const QString &journalPath, LiveState *live, VideoEngine *v
             // A journal holding a song too big to expand (#83) is refused, not allocated.
             QString refusal;
             const auto onRefused = connect(live, &LiveState::refused, this, [&refusal](const QString &r) { refusal = r; });
-            if (s.song)
-                live->restore(*s.song, s.arrangement, s.slideIndex, s.textCleared, s.backgroundCleared, s.service, s.item);
+            if (s.song) {
+                LiveItem item = liveSong(*s.song, s.arrangement, templateSet({}));
+                item.id = s.item;
+                live->restore(item, s.slideIndex, s.textCleared, s.backgroundCleared, s.service);
+            }
             else if (s.backgroundCleared)
                 live->clearBackground();
             disconnect(onRefused);

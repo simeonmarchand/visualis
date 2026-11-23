@@ -1,7 +1,6 @@
 #pragma once
 
 #include "live/liveitem.h"
-#include "song/slidelist.h"
 
 #include <QObject>
 
@@ -14,6 +13,7 @@ namespace visualis {
 // so a reopened output window re-renders from here and loses nothing.
 //
 // Every change emits changed(). Outputs redraw the whole state instead of tracking deltas.
+// It takes finished LiveItems (liveitem.h) and never sees templates (#93).
 class LiveState : public QObject
 {
     Q_OBJECT
@@ -35,30 +35,38 @@ class LiveState : public QObject
     Q_PROPERTY(QString serviceId READ serviceIdString NOTIFY changed)
     Q_PROPERTY(QString itemId READ itemIdString NOTIFY changed)
     Q_PROPERTY(int itemIndex READ itemIndex NOTIFY changed)
+    // The live slide's content layer, even while its text is cleared; empty with no slide.
+    Q_PROPERTY(visualis::Content content READ content NOTIFY changed)
 
 public:
     explicit LiveState(QObject *parent = nullptr);
 
-    // Takes the song live at the given slide of the arrangement (Song::playOrder picks
-    // it). Shows the text again if it was cleared. Returns false, with no slide showing,
-    // when the index is out of range or the arrangement has no slides; the song is still
-    // live so the operator can pick another slide. A song shown this way isn't a service
-    // item, so Next stops at its last slide. A song over the size limits (songlimits.h)
+    // Takes the item live at the given slide (liveSong() for a song from the library). Shows
+    // the text again if it was cleared. Returns false, with no slide showing, when the index
+    // is out of range or the item has no slides; the item is still live so the operator can
+    // pick another slide. An item that isn't in the service (a library song) stops Next at
+    // its last slide. An item with an error (a song over the size limits, songlimits.h)
     // isn't taken live at all: what's live stays, refused() says why, and it returns false.
-    bool show(const Song &song, const QUuid &arrangement = {}, int index = 0);
+    bool show(const LiveItem &item, int index = 0);
 
-    // Puts back a state saved earlier (crash recovery, #25): the song at that slide with its
-    // clears, and the service and item it came from, if any. An index that no longer fits
-    // leaves the song live with no slide, as show() does. setService() with the same service
-    // afterwards picks the service back up at that item. A song over the size limits is
-    // refused as in show(), leaving everything as it was; returns false then.
-    bool restore(const Song &song, const QUuid &arrangement, int index, bool textCleared, bool backgroundCleared,
-                 const QUuid &service = {}, const QUuid &item = {});
+    // Puts back a state saved earlier (crash recovery, #25): the item at that slide with its
+    // clears, and the service it came from, if any. An index that no longer fits leaves the
+    // item live with no slide, as show() does. setService() with the same service afterwards
+    // picks the service back up at that item. An item with an error is refused as in show(),
+    // leaving everything as it was; returns false then.
+    bool restore(const LiveItem &item, int index, bool textCleared, bool backgroundCleared, const QUuid &service = {});
+
+    // Swaps in a new rendering of the live item (after its song or template changed), keeping
+    // the slide index, clamped to the slides it has now. The live item is the one with the
+    // same service item id, or, for a library song, the same song id. Returns false, changing
+    // nothing, when `item` isn't the live one.
+    bool update(const LiveItem &item);
 
     // The service being run, one LiveItem per service item in order (#51). Doesn't change
-    // what's showing: when the live item is among `items` the service carries on from it
-    // (after a reorder, an edit, or a recovery); otherwise Next and Previous stay in what's
-    // live until an item is taken live. Call again after every change to the service.
+    // which item is showing: when the live item is among `items` the service carries on from
+    // it (after a reorder, an edit, or a recovery) with its new rendering, as update() does;
+    // otherwise Next and Previous stay in what's live until an item is taken live. Call again
+    // after every change to the service, its songs, or their templates.
     void setService(const QUuid &id, const QList<LiveItem> &items);
     void clearService() { setService({}, {}); }
     const QList<LiveItem> &serviceItems() const { return m_items; }
@@ -89,16 +97,18 @@ public:
     // Brings a cleared background back (plan 5.8 show_background).
     Q_INVOKABLE void showBackground();
 
-    const Song &song() const { return m_song; }
-    QUuid arrangementId() const { return m_arrangement; }   // as passed to show(); null for the default
-    const QList<SongSlide> &slides() const { return m_slides; }
+    const LiveItem &item() const { return m_live; }   // what's live, whole
+    const Song &song() const { return m_live.song; }
+    QUuid arrangementId() const { return m_live.arrangement; }   // null for the default
+    const QList<LiveSlide> &slides() const { return m_live.slides; }
     const SongSlide *currentSlide() const;   // null when no slide is showing
+    Content content() const;
 
     bool hasSlide() const { return currentSlide() != nullptr; }
-    QString songTitle() const { return m_song.title; }
-    QString songId() const { return m_song.id.isNull() ? QString() : m_song.id.toString(QUuid::WithoutBraces); }
+    QString songTitle() const { return m_live.song.title; }
+    QString songId() const { return braceless(m_live.song.id); }
     int slideIndex() const { return m_index; }   // -1 when no slide is showing
-    int slideCount() const { return int(m_slides.size()); }
+    int slideCount() const { return int(m_live.slides.size()); }
     // The slide's text even while cleared: each output decides what clearing hides
     // (the audience shows nothing; a stage display may keep it).
     QString currentText() const;
@@ -108,9 +118,9 @@ public:
     bool textCleared() const { return m_textCleared; }
     bool backgroundCleared() const { return m_backgroundCleared; }
     QUuid serviceId() const { return m_serviceId; }
-    QUuid itemId() const { return m_itemId; }
+    QUuid itemId() const { return m_live.id; }
     QString serviceIdString() const { return braceless(m_serviceId); }
-    QString itemIdString() const { return braceless(m_itemId); }
+    QString itemIdString() const { return braceless(m_live.id); }
     int itemIndex() const;
 
 signals:
@@ -120,20 +130,19 @@ signals:
 
 private:
     bool moveTo(int n);
-    // The song's slides, or nullopt (after refused()) when it's over the limits.
-    std::optional<QList<SongSlide>> slidesOrRefuse(const Song &song, const QUuid &arrangement);
+    // False, after refused(), when the item can't be shown.
+    bool acceptable(const LiveItem &item);
+    // Swaps in `item` as the live one, clamping the slide index to its slides.
+    void replaceLive(const LiveItem &item);
     void showItem(int n, int slide);
     static QString braceless(const QUuid &id) { return id.isNull() ? QString() : id.toString(QUuid::WithoutBraces); }
 
-    Song m_song;
-    QUuid m_arrangement;
-    QList<SongSlide> m_slides;
+    LiveItem m_live;   // its id is the service item's, null for a library song
     int m_index = -1;
     bool m_textCleared = false;
     bool m_backgroundCleared = false;
     QUuid m_serviceId;
     QList<LiveItem> m_items;
-    QUuid m_itemId;   // the live song's service item; null when it didn't come from one
 };
 
 } // namespace visualis

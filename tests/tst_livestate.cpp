@@ -9,6 +9,12 @@ using namespace visualis;
 
 namespace {
 
+// A song taken live from the library, through the built-in template.
+LiveItem libraryItem(const Song &song, const QUuid &arrangement = {})
+{
+    return liveSong(song, arrangement, templateSet({}));
+}
+
 // Intro (blank), a two-slide verse, and a chorus the arrangement repeats:
 // slides are "", V1a, V1b, C, C.
 Song sample()
@@ -105,11 +111,55 @@ private slots:
         QVERIFY(!live.goToSlide(0));
     }
 
+    // #93: the outputs bind to the live slide's content layer.
+    void contentFollowsTheLiveSlide()
+    {
+        LiveState live;
+        QCOMPARE(live.content(), Content());
+        const LiveItem item = libraryItem(sample());
+        QVERIFY(live.show(item, 1));
+        QCOMPARE(live.content(), item.slides[1].content);
+        QCOMPARE(live.content().regions["main"].text, QStringLiteral("Joy to the world"));
+        live.next();
+        QCOMPARE(live.content(), item.slides[2].content);
+        live.clearText();   // each output decides what clearing hides, as with currentText
+        QCOMPARE(live.content(), item.slides[2].content);
+    }
+
+    // #93: after the live song or its template changes, what's live is the new rendering, at
+    // the same slide.
+    void updateSwapsInANewRenderingAtTheSameSlide()
+    {
+        LiveState live;
+        Song song = sample();
+        song.id = QUuid::createUuid();
+        live.show(libraryItem(song), 3);
+        Template t = builtInLyricsTemplate();
+        t.id = QUuid::createUuid();
+        t.regions[0].style.fontFamily = "Georgia";
+        song.defaultTemplate = t.id;
+        QSignalSpy spy(&live, &LiveState::changed);
+        QVERIFY(live.update(liveSong(song, {}, templateSet({t}))));
+        QCOMPARE(spy.count(), 1);
+        QCOMPARE(live.slideIndex(), 3);
+        QCOMPARE(live.content().regions["main"].style.fontFamily, QStringLiteral("Georgia"));
+
+        song.groups.removeLast();   // the chorus: 5 slides become 3
+        QVERIFY(live.update(libraryItem(song)));
+        QCOMPARE(live.slideIndex(), 2);   // clamped to the last one it has now
+        QCOMPARE(live.slideCount(), 3);
+
+        Song other = sample();
+        other.id = QUuid::createUuid();
+        QVERIFY(!live.update(libraryItem(other)));   // not what's live: nothing changes
+        QCOMPARE(live.songId(), song.id.toString(QUuid::WithoutBraces));
+    }
+
     void showTakesASongLive()
     {
         LiveState live;
         QSignalSpy spy(&live, &LiveState::changed);
-        QVERIFY(live.show(sample(), {}, 1));
+        QVERIFY(live.show(libraryItem(sample()), 1));
         QCOMPARE(spy.count(), 1);
         QCOMPARE(live.songTitle(), QStringLiteral("Joy to the World"));
         QCOMPARE(live.slideCount(), 5);
@@ -123,7 +173,7 @@ private slots:
     void goToGroupJumpsToTheNextOneAhead()
     {
         LiveState live;
-        live.show(arranged(), {}, 3);   // Verse 2
+        live.show(libraryItem(arranged()), 3);   // Verse 2
         QVERIFY(live.goToGroupStartingWith("c"));
         QCOMPARE(live.slideIndex(), 4);   // the Chorus after Verse 2, not the first one
         QVERIFY(live.goToGroupStartingWith("C"));
@@ -135,7 +185,7 @@ private slots:
     void goToGroupStepsThroughGroupsWithTheSameLetter()
     {
         LiveState live;
-        live.show(arranged(), {}, 0);
+        live.show(libraryItem(arranged()), 0);
         QVERIFY(live.goToGroupStartingWith("v"));
         QCOMPARE(live.groupLabel(), QStringLiteral("Verse 2"));
         QVERIFY(live.goToGroupStartingWith("v"));
@@ -146,7 +196,7 @@ private slots:
     void goToGroupFromTheMiddleOfAGroupGoesToTheNextStart()
     {
         LiveState live;
-        live.show(arranged(), {}, 1);   // second slide of Verse 1
+        live.show(libraryItem(arranged()), 1);   // second slide of Verse 1
         QVERIFY(live.goToGroupStartingWith("b"));
         QCOMPARE(live.slideIndex(), 5);
     }
@@ -154,7 +204,7 @@ private slots:
     void goToGroupNotInTheArrangementDoesNothing()
     {
         LiveState live;
-        live.show(arranged(), {}, 2);
+        live.show(libraryItem(arranged()), 2);
         QSignalSpy spy(&live, &LiveState::changed);
         QVERIFY(!live.goToGroupStartingWith("t"));   // Tag isn't arranged
         QVERIFY(!live.goToGroupStartingWith("x"));
@@ -166,7 +216,7 @@ private slots:
     void goToGroupBringsBackClearedText()
     {
         LiveState live;
-        live.show(arranged(), {}, 0);
+        live.show(libraryItem(arranged()), 0);
         live.clearText();
         QVERIFY(live.goToGroupStartingWith("c"));
         QVERIFY(!live.textCleared());
@@ -184,7 +234,7 @@ private slots:
     void commandsRunByName()
     {
         LiveState live;
-        live.show(arranged(), {}, 0);
+        live.show(libraryItem(arranged()), 0);
         QVERIFY(runCommand(live, "next_slide"));
         QCOMPARE(live.slideIndex(), 1);
         QVERIFY(runCommand(live, "prev_slide"));
@@ -205,7 +255,7 @@ private slots:
     void badCommandsAreRefused()
     {
         LiveState live;
-        live.show(arranged(), {}, 6);
+        live.show(libraryItem(arranged()), 6);
         QVERIFY(!runCommand(live, "next_slide"));       // already at the end
         QVERIFY(!runCommand(live, "goto_slide"));       // no index
         QVERIFY(!runCommand(live, "goto_slide", "x"));
@@ -220,14 +270,14 @@ private slots:
         QVERIFY(live.songId().isEmpty());
         Song s = sample();
         s.id = QUuid::createUuid();
-        live.show(s);
+        live.show(libraryItem(s));
         QCOMPARE(live.songId(), s.id.toString(QUuid::WithoutBraces));
     }
 
     void nextCrossesGroups()
     {
         LiveState live;
-        live.show(sample(), {}, 2);   // last verse slide
+        live.show(libraryItem(sample()), 2);   // last verse slide
         QVERIFY(live.next());
         QCOMPARE(live.slideIndex(), 3);
         QCOMPARE(live.groupLabel(), QStringLiteral("Chorus"));
@@ -240,7 +290,7 @@ private slots:
     void nextIntoARepeatOfTheSameGroup()
     {
         LiveState live;
-        live.show(sample(), {}, 3);
+        live.show(libraryItem(sample()), 3);
         QVERIFY(live.next());
         QCOMPARE(live.slideIndex(), 4);
         QCOMPARE(live.currentSlide()->step, 3);   // the second chorus, not the first
@@ -249,7 +299,7 @@ private slots:
     void stopsAtTheEnds()
     {
         LiveState live;
-        live.show(sample(), {}, 4);
+        live.show(libraryItem(sample()), 4);
         QSignalSpy spy(&live, &LiveState::changed);
         QVERIFY(!live.next());
         QCOMPARE(live.slideIndex(), 4);
@@ -265,7 +315,7 @@ private slots:
     void goToSlideRejectsOutOfRange()
     {
         LiveState live;
-        live.show(sample(), {}, 2);
+        live.show(libraryItem(sample()), 2);
         QVERIFY(!live.goToSlide(5));
         QVERIFY(!live.goToSlide(-1));
         QCOMPARE(live.slideIndex(), 2);
@@ -276,7 +326,7 @@ private slots:
     void clearTextKeepsThePosition()
     {
         LiveState live;
-        live.show(sample(), {}, 1);
+        live.show(libraryItem(sample()), 1);
         QSignalSpy spy(&live, &LiveState::changed);
         live.clearText();
         QVERIFY(live.textCleared());
@@ -291,7 +341,7 @@ private slots:
     void stepAfterClearTextShowsTheNextSlide()
     {
         LiveState live;
-        live.show(sample(), {}, 1);
+        live.show(libraryItem(sample()), 1);
         live.clearText();
         QVERIFY(live.next());
         QCOMPARE(live.slideIndex(), 2);
@@ -301,7 +351,7 @@ private slots:
     void goToTheCurrentSlideBringsTextBack()
     {
         LiveState live;
-        live.show(sample(), {}, 1);
+        live.show(libraryItem(sample()), 1);
         live.clearText();
         QVERIFY(live.goToSlide(1));
         QVERIFY(!live.textCleared());
@@ -310,7 +360,7 @@ private slots:
     void clearTextAtTheEndStaysCleared()
     {
         LiveState live;
-        live.show(sample(), {}, 4);
+        live.show(libraryItem(sample()), 4);
         live.clearText();
         QVERIFY(!live.next());
         QVERIFY(live.textCleared());
@@ -319,7 +369,7 @@ private slots:
     void clearBackgroundLeavesTheText()
     {
         LiveState live;
-        live.show(sample(), {}, 1);
+        live.show(libraryItem(sample()), 1);
         live.clearBackground();
         QVERIFY(live.backgroundCleared());
         QVERIFY(!live.textCleared());
@@ -331,7 +381,7 @@ private slots:
     void clearAllClearsBothAndKeepsThePosition()
     {
         LiveState live;
-        live.show(sample(), {}, 2);
+        live.show(libraryItem(sample()), 2);
         QSignalSpy spy(&live, &LiveState::changed);
         live.clearAll();
         QVERIFY(live.textCleared());
@@ -348,9 +398,9 @@ private slots:
     void showingANewSongBringsTextBack()
     {
         LiveState live;
-        live.show(sample(), {}, 1);
+        live.show(libraryItem(sample()), 1);
         live.clearText();
-        live.show(sample());
+        live.show(libraryItem(sample()));
         QVERIFY(!live.textCleared());
         QCOMPARE(live.slideIndex(), 0);
     }
@@ -358,7 +408,7 @@ private slots:
     void showWithABadIndexKeepsTheSongLiveWithNoSlide()
     {
         LiveState live;
-        QVERIFY(!live.show(sample(), {}, 9));
+        QVERIFY(!live.show(libraryItem(sample()), 9));
         QCOMPARE(live.songTitle(), QStringLiteral("Joy to the World"));
         QVERIFY(!live.hasSlide());
         QVERIFY(live.nextText().isEmpty());
@@ -371,7 +421,7 @@ private slots:
         Song s = sample();
         s.arrangements = {Arrangement{QUuid::createUuid(), "Empty", {}, {}}};
         LiveState live;
-        QVERIFY(!live.show(s));
+        QVERIFY(!live.show(libraryItem(s)));
         QCOMPARE(live.slideCount(), 0);
         QVERIFY(!live.hasSlide());
         QVERIFY(!live.next());
@@ -383,7 +433,7 @@ private slots:
         Song s = sample();
         s.arrangements << Arrangement{QUuid::createUuid(), "Chorus only", {s.groups[2].id}, {}};
         LiveState live;
-        QVERIFY(live.show(s, s.arrangements[1].id));
+        QVERIFY(live.show(libraryItem(s, s.arrangements[1].id)));
         QCOMPARE(live.slideCount(), 1);
         QCOMPARE(live.groupLabel(), QStringLiteral("Chorus"));
     }
@@ -466,7 +516,7 @@ private slots:
         LiveState live;
         live.setService(QUuid::createUuid(), service());
         QVERIFY(live.goToItem(1));
-        live.show(arranged(), {}, 6);
+        live.show(libraryItem(arranged()), 6);
         QCOMPARE(live.itemIndex(), -1);
         QVERIFY(live.itemIdString().isEmpty());
         QVERIFY(!live.next());   // stops at the song's end
@@ -500,12 +550,33 @@ private slots:
         QVERIFY(!live.previous());
     }
 
+    // #93: setService() after a song edit refreshes the live item too (it used to keep
+    // showing the old copy until the operator moved to another item).
+    void setServiceRefreshesTheLiveItem()
+    {
+        QList<LiveItem> items = service();
+        const QUuid id = QUuid::createUuid();
+        LiveState live;
+        live.setService(id, items);
+        QVERIFY(live.goToItem(3, 1));
+        const QString before = live.currentText();
+
+        items[3].slides[1].slide.text = "edited";
+        items[3].slides[1].content.regions["main"].text = "edited";
+        live.setService(id, items);
+        QCOMPARE(live.itemIndex(), 3);
+        QCOMPARE(live.slideIndex(), 1);
+        QVERIFY(live.currentText() != before);
+        QCOMPARE(live.currentText(), QStringLiteral("edited"));
+        QCOMPARE(live.content().regions["main"].text, QStringLiteral("edited"));
+    }
+
     void restoreThenSetServicePicksTheServiceBackUp()
     {
         const QList<LiveItem> items = service();
         const QUuid id = QUuid::createUuid();
         LiveState live;
-        live.restore(items[3].song, items[3].arrangement, 6, true, false, id, items[3].id);
+        live.restore(items[3], 6, true, false, id);
         QCOMPARE(live.itemIndex(), -1);   // the service isn't loaded yet
         QCOMPARE(live.itemIdString(), items[3].id.toString(QUuid::WithoutBraces));
         QVERIFY(!live.next());
@@ -599,7 +670,7 @@ private slots:
     void propertiesAreReadableByName()
     {
         LiveState live;
-        live.show(sample(), {}, 3);
+        live.show(libraryItem(sample()), 3);
         live.clearBackground();
         QCOMPARE(live.property("currentText").toString(), QStringLiteral("And heaven and nature sing"));
         QCOMPARE(live.property("groupLabel").toString(), QStringLiteral("Chorus"));
@@ -611,11 +682,11 @@ private slots:
     void anOversizedSongIsRefusedAndLiveStaysPut()
     {
         LiveState live;
-        QVERIFY(live.show(sample(), {}, 1));
+        QVERIFY(live.show(libraryItem(sample()), 1));
         QSignalSpy changed(&live, &LiveState::changed);
         QSignalSpy refused(&live, &LiveState::refused);
 
-        QVERIFY(!live.show(repeated(500, 1000)));
+        QVERIFY(!live.show(libraryItem(repeated(500, 1000))));
         QCOMPARE(refused.count(), 1);
         QVERIFY(refused.at(0).at(0).toString().contains("too many slides to play"));
         QCOMPARE(changed.count(), 0);
@@ -627,10 +698,10 @@ private slots:
     void anOversizedRestoreIsRefusedAndLiveStaysPut()
     {
         LiveState live;
-        QVERIFY(live.show(sample(), {}, 2));
+        QVERIFY(live.show(libraryItem(sample()), 2));
         QSignalSpy changed(&live, &LiveState::changed);
         QSignalSpy refused(&live, &LiveState::refused);
-        QVERIFY(!live.restore(repeated(10'000, 10'000), {}, 0, true, true, QUuid::createUuid(), QUuid::createUuid()));
+        QVERIFY(!live.restore(libraryItem(repeated(10'000, 10'000)), 0, true, true, QUuid::createUuid()));
         QCOMPARE(refused.count(), 1);
         QCOMPARE(changed.count(), 0);
         QCOMPARE(live.songTitle(), sample().title);

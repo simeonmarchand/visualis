@@ -153,7 +153,7 @@ private slots:
         const Song song = sample();
         LiveState live;
         QSignalSpy changed(&live, &LiveState::changed);
-        live.restore(song, song.arrangements[0].id, 2, true, true);
+        live.restore(liveSong(song, song.arrangements[0].id, templateSet({})), 2, true, true);
         QCOMPARE(changed.count(), 1);
         QCOMPARE(live.slideIndex(), 2);
         QCOMPARE(live.groupLabel(), QStringLiteral("Chorus"));
@@ -165,7 +165,7 @@ private slots:
     {
         const Song song = sample();
         LiveState live;
-        live.restore(song, song.arrangements[1].id, 0, false, false);
+        live.restore(liveSong(song, song.arrangements[1].id, templateSet({})), 0, false, false);
         QCOMPARE(live.slideCount(), 1);   // "Short": just the chorus
         QCOMPARE(live.currentText(), QStringLiteral("And heaven and nature sing"));
     }
@@ -174,7 +174,7 @@ private slots:
     {
         const Song song = sample();
         LiveState live;
-        live.restore(song, {}, 40, false, false);
+        live.restore(liveSong(song, {}, templateSet({})), 40, false, false);
         QCOMPARE(live.songTitle(), song.title);
         QVERIFY(!live.hasSlide());
     }

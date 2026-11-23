@@ -163,7 +163,7 @@ bool SongLibrary::goLive(int index)
     if (!m_selected || !engine)
         return false;
     auto *live = engine->singletonInstance<LiveState *>("Visualis.Ui", "LiveState");
-    return live && live->show(*m_selected, {}, index);
+    return live && live->show(liveSong(*m_selected, {}, templateSet({})), index);
 }
 
 bool SongLibrary::importProPresenter(const QUrl &folder)

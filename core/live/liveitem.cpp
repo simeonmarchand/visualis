@@ -72,8 +72,10 @@ LiveItem liveSong(const Song &song, const QUuid &arrangement, const TemplateSet 
 {
     LiveItem live;
     live.error = songLimitError(song);
-    if (!live.error.isEmpty())
+    if (!live.error.isEmpty()) {
+        live.song.title = song.title;   // for the refusal
         return live;
+    }
     live.song = song;
     live.arrangement = arrangement;
     render(live, templates, song.defaultTemplate, {});
@@ -93,8 +95,10 @@ LiveItem liveItem(const ServiceItem &item, const std::optional<Song> &song, cons
         live.error = songLimitError(*song);
         if (live.error.isEmpty() && item.customSequence.size() > songlimits::kSteps)
             live.error = limitError(QStringLiteral("steps in the sequence"), item.customSequence.size(), songlimits::kSteps);
-        if (!live.error.isEmpty())
+        if (!live.error.isEmpty()) {
+            live.song.title = song->title;   // for the refusal
             return live;
+        }
         live.song = *song;
         // Recovery passes the song this made last time; its order for the day is rebuilt.
         live.song.arrangements.removeIf([&](const Arrangement &a) { return a.id == item.id; });

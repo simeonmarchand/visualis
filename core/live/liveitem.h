@@ -6,6 +6,7 @@
 #include "template/template.h"
 
 #include <QHash>
+#include <QObject>
 
 #include <optional>
 
@@ -32,6 +33,9 @@ struct ContentRegion {
 // A slide's text layer (GLOSSARY.md "Content layer"): every region of the item's template,
 // by region id, with the text in "main", and the transition it changes with.
 struct Content {
+    Q_GADGET
+
+public:
     QHash<QString, ContentRegion> regions;
     Transition transition;
 

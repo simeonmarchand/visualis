@@ -15,6 +15,12 @@ using namespace visualis;
 
 namespace {
 
+// A song taken live from the library, through the built-in template.
+LiveItem libraryItem(const Song &song, const QUuid &arrangement = {})
+{
+    return liveSong(song, arrangement, templateSet({}));
+}
+
 Song sample()
 {
     Song s;
@@ -55,7 +61,7 @@ int crashLiveChild(char **argv)
     LiveState live;
     Recovery recovery;
     recovery.start(QString::fromLocal8Bit(argv[3]), &live, nullptr);
-    if (!song || !live.show(*song, {}, 1))
+    if (!song || !live.show(libraryItem(*song), 1))
         return 1;
     return childprocess::readyUntilParentGoes("live", songs.selectedId().toUtf8());
 }
@@ -84,7 +90,7 @@ private slots:
         LiveState live;
         Recovery recovery;
         recovery.start(m_path, &live, nullptr);
-        live.show(sample(), {}, 0);
+        live.show(libraryItem(sample()), 0);
         QCOMPARE(readJournal(m_path).snapshot->slideIndex, 0);
         live.next();
         QCOMPARE(readJournal(m_path).snapshot->slideIndex, 1);
@@ -98,7 +104,7 @@ private slots:
             LiveState live;
             Recovery recovery;
             recovery.start(m_path, &live, nullptr);
-            live.show(sample(), {}, 0);
+            live.show(libraryItem(sample()), 0);
             live.next();
             live.next();
             live.clearBackground();
@@ -197,7 +203,7 @@ private slots:
             LiveState live;
             Recovery recovery;
             recovery.start(m_path, &live, nullptr);
-            live.show(sample(), {}, 1);
+            live.show(libraryItem(sample()), 1);
             recovery.finish();
             live.next();   // after finish: no longer journaled
         }
@@ -250,7 +256,7 @@ private slots:
         LiveState live;
         Recovery recovery;
         QVERIFY(!recovery.start(m_path, &live, nullptr));
-        live.show(sample(), {}, 0);
+        live.show(libraryItem(sample()), 0);
         QVERIFY(readJournal(m_path).snapshot);
     }
 
@@ -259,7 +265,7 @@ private slots:
         LiveState live;
         Recovery recovery;
         QVERIFY(!recovery.start("/dev/null/cannot/live-journal.json", &live, nullptr));
-        QVERIFY(live.show(sample(), {}, 0));
+        QVERIFY(live.show(libraryItem(sample()), 0));
         QVERIFY(live.next());
     }
 
@@ -268,9 +274,9 @@ private slots:
         LiveState live;
         Recovery recovery;
         recovery.start(m_path, &live, nullptr);
-        live.show(sample(), {}, 0);
+        live.show(libraryItem(sample()), 0);
         QVERIFY(QFile::exists(m_path));
-        live.restore(Song{}, {}, -1, false, false);
+        live.restore(LiveItem{}, -1, false, false);
         QVERIFY(!QFile::exists(m_path));
     }
 

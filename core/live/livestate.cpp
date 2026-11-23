@@ -7,47 +7,36 @@ LiveState::LiveState(QObject *parent)
 {
 }
 
-std::optional<QList<SongSlide>> LiveState::slidesOrRefuse(const Song &song, const QUuid &arrangement)
+bool LiveState::acceptable(const LiveItem &item)
 {
-    QString error;
-    QList<SongSlide> slides = songSlides(song, arrangement, &error);
-    if (!error.isEmpty()) {
-        emit refused(QStringLiteral("\"%1\" can't be shown: %2.").arg(song.title, error));
-        return std::nullopt;
-    }
-    return slides;
+    if (item.error.isEmpty())
+        return true;
+    emit refused(QStringLiteral("\"%1\" can't be shown: %2.").arg(item.song.title, item.error));
+    return false;
 }
 
-bool LiveState::show(const Song &song, const QUuid &arrangement, int index)
+bool LiveState::show(const LiveItem &item, int index)
 {
-    std::optional<QList<SongSlide>> slides = slidesOrRefuse(song, arrangement);
-    if (!slides)
+    if (!acceptable(item))
         return false;
-    m_song = song;
-    m_arrangement = arrangement;
-    m_slides = std::move(*slides);
-    m_itemId = QUuid();
-    const bool valid = index >= 0 && index < m_slides.size();
+    m_live = item;
+    const bool valid = index >= 0 && index < m_live.slides.size();
     m_index = valid ? index : -1;
     m_textCleared = false;
     emit changed();
     return valid;
 }
 
-bool LiveState::restore(const Song &song, const QUuid &arrangement, int index, bool textCleared,
-                        bool backgroundCleared, const QUuid &service, const QUuid &item)
+bool LiveState::restore(const LiveItem &item, int index, bool textCleared, bool backgroundCleared,
+                        const QUuid &service)
 {
-    std::optional<QList<SongSlide>> slides = slidesOrRefuse(song, arrangement);
-    if (!slides)
+    if (!acceptable(item))
         return false;
     if (service != m_serviceId)
         m_items.clear();
     m_serviceId = service;
-    m_itemId = item;
-    m_song = song;
-    m_arrangement = arrangement;
-    m_slides = std::move(*slides);
-    m_index = index >= 0 && index < m_slides.size() ? index : -1;
+    m_live = item;
+    m_index = index >= 0 && index < m_live.slides.size() ? index : -1;
     m_textCleared = textCleared;
     m_backgroundCleared = backgroundCleared;
     emit changed();
@@ -58,15 +47,35 @@ void LiveState::setService(const QUuid &id, const QList<LiveItem> &items)
 {
     m_serviceId = id;
     m_items = items;
+    if (const int n = itemIndex(); n >= 0)
+        replaceLive(m_items[n]);   // its song or template may have changed
     emit changed();
+}
+
+bool LiveState::update(const LiveItem &item)
+{
+    const bool live = m_live.id.isNull() ? item.id.isNull() && !item.song.id.isNull() && item.song.id == m_live.song.id
+                                         : item.id == m_live.id;
+    if (!live)
+        return false;
+    replaceLive(item);
+    emit changed();
+    return true;
+}
+
+void LiveState::replaceLive(const LiveItem &item)
+{
+    m_live = item;
+    if (m_index >= m_live.slides.size())
+        m_index = int(m_live.slides.size()) - 1;
 }
 
 int LiveState::itemIndex() const
 {
-    if (m_itemId.isNull())
+    if (m_live.id.isNull())
         return -1;
     for (int i = 0; i < m_items.size(); ++i) {
-        if (m_items[i].id == m_itemId)
+        if (m_items[i].id == m_live.id)
             return i;
     }
     return -1;
@@ -87,13 +96,7 @@ bool LiveState::goToItem(int n, int slide)
 
 void LiveState::showItem(int n, int slide)
 {
-    const LiveItem &item = m_items[n];
-    m_song = item.song;
-    m_arrangement = item.arrangement;
-    m_slides.clear();
-    for (const LiveSlide &s : item.slides)
-        m_slides << s.slide;
-    m_itemId = item.id;
+    m_live = m_items[n];
     m_index = slide;
     m_textCleared = false;
     emit changed();
@@ -101,11 +104,11 @@ void LiveState::showItem(int n, int slide)
 
 bool LiveState::next()
 {
-    if (m_index + 1 < m_slides.size())
+    if (m_index + 1 < m_live.slides.size())
         return moveTo(m_index + 1);
     const int item = itemIndex();
     // Nothing live yet: Next starts the service.
-    if (item < 0 && (!m_itemId.isNull() || !m_slides.isEmpty()))
+    if (item < 0 && (!m_live.id.isNull() || !m_live.slides.isEmpty()))
         return false;
     for (int i = item + 1; i < m_items.size(); ++i) {
         if (!m_items[i].slides.isEmpty()) {
@@ -131,7 +134,7 @@ bool LiveState::previous()
 
 bool LiveState::goToSlide(int n)
 {
-    return n >= 0 && n < m_slides.size() && moveTo(n);
+    return n >= 0 && n < m_live.slides.size() && moveTo(n);
 }
 
 bool LiveState::moveTo(int n)
@@ -149,8 +152,8 @@ bool LiveState::goToGroupStartingWith(const QString &letter)
     // A group starts where its first slide is: indexInGroup 0. A repeated group starts
     // again at each step of the arrangement that uses it.
     QList<int> starts;
-    for (int i = 0; i < m_slides.size(); ++i) {
-        const SongSlide &s = m_slides[i];
+    for (int i = 0; i < m_live.slides.size(); ++i) {
+        const SongSlide &s = m_live.slides[i].slide;
         if (s.indexInGroup == 0 && s.groupLabel.startsWith(letter, Qt::CaseInsensitive))
             starts.append(i);
     }
@@ -198,7 +201,12 @@ void LiveState::clearAll()
 
 const SongSlide *LiveState::currentSlide() const
 {
-    return m_index >= 0 && m_index < m_slides.size() ? &m_slides[m_index] : nullptr;
+    return m_index >= 0 && m_index < m_live.slides.size() ? &m_live.slides[m_index].slide : nullptr;
+}
+
+Content LiveState::content() const
+{
+    return m_index >= 0 && m_index < m_live.slides.size() ? m_live.slides[m_index].content : Content();
 }
 
 QString LiveState::currentText() const
@@ -209,7 +217,7 @@ QString LiveState::currentText() const
 
 QString LiveState::nextText() const
 {
-    return m_index >= 0 && m_index + 1 < m_slides.size() ? m_slides[m_index + 1].text : QString();
+    return m_index >= 0 && m_index + 1 < m_live.slides.size() ? m_live.slides[m_index + 1].slide.text : QString();
 }
 
 QString LiveState::groupLabel() const
