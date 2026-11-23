@@ -454,19 +454,19 @@ bool PlanImporter::tryApply(int request)
     Service saved;
     const ServiceStore::Result result = store.applyWithoutWaiting(
         pending.serviceId,
-        [&](const Service &current) -> ServiceStore::Decision {
+        [&](const Service &current) -> std::optional<ServiceStore::Decision> {
             ReimportProposal now = proposeReimport(current, pending.fresh, pending.addBack, songs);
             if (now != pending.shown) {
                 changed = std::move(now);
-                return {std::nullopt, {}, tr("The service changed since the update was shown.")};
+                return std::nullopt;
             }
             applied = std::move(now);
-            return {applied.merge.service, linkWrites(applied.links.songs, &missing), {}};
+            return ServiceStore::Decision{applied.merge.service, linkWrites(applied.links.songs, &missing)};
         },
         &saved);
     if (result.busy)
         return false;
-    if (result.conflict && changed) {
+    if (changed) {
         // Nothing saved: show what applying would do now, for the operator to approve again.
         end();
         m_reimport->shown = std::move(*changed);

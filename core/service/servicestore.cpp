@@ -57,17 +57,34 @@ ServiceStore::ServiceStore(Library &library)
 
 ServiceStore::Result ServiceStore::save(Service &service)
 {
-    return save(service, Mode::Wait, {});
+    Service s = service;   // a failed save leaves the caller's service as it was
+    if (Result r = prepare(s); !r.ok)
+        return r;
+    Library::Transaction tx(m_library);
+    if (!tx.ok())
+        return {false, tx.error()};
+    if (Result r = finish(s, tx, {}); !r.ok)
+        return r;
+    service = s;
+    return {};
 }
 
 ServiceStore::Result ServiceStore::saveNewPlan(Service &service, const AlsoWrite &also)
 {
-    return save(service, Mode::NewPlan, also);
-}
-
-ServiceStore::Result ServiceStore::saveWithoutWaiting(Service &service, const AlsoWrite &also)
-{
-    return save(service, Mode::NoWait, also);
+    Service s = service;
+    if (Result r = prepare(s); !r.ok)
+        return r;
+    Library::Transaction tx(m_library, Library::Transaction::Lock::NowOrBusy);
+    if (!tx.ok())
+        return {false, tx.error(), tx.busy()};
+    // Under the lock, so the duplicate check holds until the commit.
+    if (const auto existing = findByPcoPlan(s.pcoPlanId))
+        return {false, QStringLiteral("This plan is already in the library as \"%1\".").arg(existing->title), false,
+                existing->title};
+    if (Result r = finish(s, tx, also); !r.ok)
+        return r;
+    service = s;
+    return {};
 }
 
 // Checks the service and fills in what saving gives it (ids, timestamps). Reads only.
@@ -105,25 +122,7 @@ ServiceStore::Result ServiceStore::prepare(Service &s) const
     return {};
 }
 
-// Takes the write lock. Mode::Wait waits for it (the library's busy timeout); the others
-// don't: another program holding it fails at once with `busy`.
-ServiceStore::Result ServiceStore::begin(Mode mode)
-{
-    QSqlDatabase db = m_library.database();
-    if (mode == Mode::Wait)
-        return db.transaction() ? Result{} : Result{false, db.lastError().text()};
-    QSqlQuery q(db);
-    q.exec("PRAGMA busy_timeout = 0");
-    const bool begun = q.exec("BEGIN IMMEDIATE");
-    const QSqlError error = q.lastError();
-    q.exec(QStringLiteral("PRAGMA busy_timeout = %1").arg(Library::kBusyTimeoutMs));
-    if (begun)
-        return {};
-    const bool busy = error.nativeErrorCode() == QLatin1String("5");   // SQLITE_BUSY
-    return {false, busy ? QStringLiteral("The library is in use by another program.") : error.text(), busy};
-}
-
-// Writes a prepared service, inside a transaction begin() opened. Returns why not.
+// Writes a prepared service, inside a transaction. Returns why not.
 QString ServiceStore::write(Service &s)
 {
     QSqlDatabase db = m_library.database();
@@ -199,62 +198,34 @@ QString ServiceStore::write(Service &s)
     return {};
 }
 
-ServiceStore::Result ServiceStore::save(Service &service, Mode mode, const AlsoWrite &also)
+ServiceStore::Result ServiceStore::finish(Service &s, Library::Transaction &tx, const AlsoWrite &also)
 {
-    Service s = service;   // a failed save leaves the caller's service as it was
-    if (Result r = prepare(s); !r.ok)
-        return r;
-    if (Result r = begin(mode); !r.ok)
-        return r;
-    QSqlDatabase db = m_library.database();
-    // A new plan's duplicate check holds until the commit.
-    if (const auto existing = mode == Mode::NewPlan ? findByPcoPlan(s.pcoPlanId) : std::nullopt) {
-        db.rollback();
-        return {false, QStringLiteral("This plan is already in the library as \"%1\".").arg(existing->title), false,
-                existing->title};
-    }
-    if (Result r = finish(s, also); !r.ok)
-        return r;
-    service = s;
-    return {};
-}
-
-ServiceStore::Result ServiceStore::finish(Service &s, const AlsoWrite &also)
-{
-    QSqlDatabase db = m_library.database();
     QString err = write(s);
     if (err.isEmpty() && also)
         err = also();
-    if (err.isEmpty() && !db.commit())
-        err = db.lastError().text();
+    if (err.isEmpty())
+        err = tx.commit();
     if (err.isEmpty())
         return {};
-    db.rollback();
     return {false, QStringLiteral("Couldn't save \"%1\": %2").arg(s.title, err)};
 }
 
 ServiceStore::Result ServiceStore::applyWithoutWaiting(const QUuid &id, const Decide &decide, Service *saved)
 {
-    if (Result r = begin(Mode::NoWait); !r.ok)
-        return r;
-    QSqlDatabase db = m_library.database();
+    Library::Transaction tx(m_library, Library::Transaction::Lock::NowOrBusy);
+    if (!tx.ok())
+        return {false, tx.error(), tx.busy()};
     // Read under the write lock: nothing can change it between here and the commit.
     const std::optional<Service> current = load(id);
-    if (!current) {
-        db.rollback();
+    if (!current)
         return {false, QStringLiteral("The service is gone from the library.")};
-    }
-    Decision d = decide(*current);
-    if (!d.service) {
-        db.rollback();
-        return {false, d.why, false, {}, true};
-    }
-    Service s = *d.service;
-    if (Result r = prepare(s); !r.ok) {
-        db.rollback();
+    std::optional<Decision> d = decide(*current);
+    if (!d)
+        return {false, {}};
+    Service s = d->service;
+    if (Result r = prepare(s); !r.ok)
         return r;
-    }
-    if (Result r = finish(s, d.also); !r.ok)
+    if (Result r = finish(s, tx, d->also); !r.ok)
         return r;
     if (saved)
         *saved = s;

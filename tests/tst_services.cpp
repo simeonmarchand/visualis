@@ -272,32 +272,6 @@ private slots:
         QCOMPARE(timeout.value(0).toInt(), Library::kBusyTimeoutMs);
     }
 
-    // A re-import's Apply (#56) saves an existing service the same way: never waiting.
-    void saveWithoutWaitingSaysBusyAndChangesNothing()
-    {
-        Service s;
-        s.title = "Sunday";
-        s.items = {item(Kind::Header, "Worship")};
-        QVERIFY(m_services->save(s).ok);
-        auto other = Library::open(m_library->folder()).library;
-        QSqlQuery lock(other->database());
-        QVERIFY(lock.exec("BEGIN IMMEDIATE"));
-
-        Service edited = s;
-        edited.items[0].title = "Praise";
-        QElapsedTimer took;
-        took.start();
-        const ServiceStore::Result r = m_services->saveWithoutWaiting(edited);
-        QVERIFY(!r.ok);
-        QVERIFY(r.busy);
-        QVERIFY2(took.elapsed() < Library::kBusyTimeoutMs / 2, qPrintable(QString("waited %1 ms").arg(took.elapsed())));
-        QCOMPARE(edited.items[0].title, QStringLiteral("Praise"));   // the caller's copy, untouched
-        QVERIFY(QSqlQuery(other->database()).exec("ROLLBACK"));
-        QCOMPARE(m_services->load(s.id)->items[0].title, QStringLiteral("Worship"));
-        QVERIFY(m_services->saveWithoutWaiting(edited).ok);
-        QCOMPARE(m_services->load(s.id)->items[0].title, QStringLiteral("Praise"));
-    }
-
     // Review of #103 (M6): a song's Planning Center link is saved with the service, or not at all.
     void writesInTheSameTransactionLandOrRollBackWithTheService()
     {
@@ -328,8 +302,12 @@ private slots:
         QSqlQuery lock(other->database());
         QVERIFY(lock.exec("BEGIN IMMEDIATE"));
         song.pcoSongId = "p-78";
-        s.title = "Imported again";
-        QVERIFY(m_services->saveWithoutWaiting(s, link).busy);
+        const ServiceStore::Result busy = m_services->applyWithoutWaiting(s.id, [&](const Service &current) {
+            Service next = current;
+            next.title = "Imported again";
+            return std::optional(ServiceStore::Decision{next, link});
+        });
+        QVERIFY(busy.busy);
         QVERIFY(QSqlQuery(other->database()).exec("ROLLBACK"));
         QCOMPARE(m_songs->load(m_songId)->pcoSongId, QStringLiteral("p-77"));
         QCOMPARE(m_services->load(s.id)->title, QStringLiteral("Imported"));
@@ -343,13 +321,11 @@ private slots:
         s.items = {item(Kind::Header, "Worship")};
         QVERIFY(m_services->save(s).ok);
 
-        // A refusal writes nothing, and says why.
-        const ServiceStore::Result refused = m_services->applyWithoutWaiting(s.id, [](const Service &) {
-            return ServiceStore::Decision{std::nullopt, {}, QStringLiteral("changed")};
-        });
+        // A refusal writes nothing; the caller knows why.
+        const ServiceStore::Result refused = m_services->applyWithoutWaiting(
+            s.id, [](const Service &) -> std::optional<ServiceStore::Decision> { return std::nullopt; });
         QVERIFY(!refused.ok);
-        QVERIFY(refused.conflict);
-        QCOMPARE(refused.error, QStringLiteral("changed"));
+        QVERIFY(refused.error.isEmpty());
 
         // `decide` sees the service as saved, and what it returns is saved with `also`.
         Service saved;
@@ -359,7 +335,7 @@ private slots:
             [&](const Service &current) {
                 Service next = current;
                 next.items[0].title = current.items[0].title + " Set";
-                return ServiceStore::Decision{next, [&] { alsoRan = true; return QString(); }, {}};
+                return std::optional(ServiceStore::Decision{next, [&] { alsoRan = true; return QString(); }});
             },
             &saved);
         QVERIFY2(ok.ok, qPrintable(ok.error));
@@ -371,26 +347,32 @@ private slots:
         const ServiceStore::Result rolled = m_services->applyWithoutWaiting(s.id, [](const Service &current) {
             Service next = current;
             next.title = "Renamed";
-            return ServiceStore::Decision{next, [] { return QStringLiteral("no"); }, {}};
+            return std::optional(ServiceStore::Decision{next, [] { return QStringLiteral("no"); }});
         });
         QVERIFY(!rolled.ok);
         QCOMPARE(m_services->load(s.id)->title, QStringLiteral("Sunday"));
 
-        // Busy: refused at once, before `decide` runs.
+        // Busy: refused at once, before `decide` runs, and nothing changes; free again, it saves.
         auto other = Library::open(m_library->folder()).library;
         QSqlQuery lock(other->database());
         QVERIFY(lock.exec("BEGIN IMMEDIATE"));
         bool decided = false;
         QElapsedTimer took;
         took.start();
-        const ServiceStore::Result busy = m_services->applyWithoutWaiting(s.id, [&](const Service &current) {
+        const ServiceStore::Decide rename = [&](const Service &current) {
             decided = true;
-            return ServiceStore::Decision{current, {}, {}};
-        });
+            Service next = current;
+            next.title = "Evening";
+            return std::optional(ServiceStore::Decision{next, {}});
+        };
+        const ServiceStore::Result busy = m_services->applyWithoutWaiting(s.id, rename);
         QVERIFY(busy.busy);
         QVERIFY(!decided);
-        QVERIFY(took.elapsed() < Library::kBusyTimeoutMs / 2);
+        QVERIFY2(took.elapsed() < Library::kBusyTimeoutMs / 2, qPrintable(QString("waited %1 ms").arg(took.elapsed())));
         QVERIFY(QSqlQuery(other->database()).exec("ROLLBACK"));
+        QCOMPARE(m_services->load(s.id)->title, QStringLiteral("Sunday"));
+        QVERIFY(m_services->applyWithoutWaiting(s.id, rename).ok);
+        QCOMPARE(m_services->load(s.id)->title, QStringLiteral("Evening"));
     }
 
     void aVersion3LibraryGainsThePlanLink()
