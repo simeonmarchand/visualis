@@ -60,3 +60,6 @@ spikes/midi/build/
 spikes/midi/out/
 spikes/powerpoint/fonts-download/
 spikes/powerpoint/build/
+
+# /improve advisor plans: local handoff documents for the implementing agent
+plans/
