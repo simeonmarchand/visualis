@@ -26,11 +26,11 @@ Dialog {
         case "removed": return "Removed in Planning Center: " + c.title + " (kept here, marked removed)"
         case "restored": return "Back in the plan: " + c.title
         case "moved": return "Moved: " + c.title
-        case "changed": return c.title + ": " + c.field + " " + c.detail
+        case "changed":
         case "keptEdit": return c.title + ": " + c.field + " " + c.detail
         case "keptPosition": return c.title + ": kept where you put it; Planning Center moved it"
         case "relink": return c.title + ": Planning Center has another song here, so it needs a song again"
-        case "changedButDeleted": return c.title + ": " + c.detail
+        case "changedButDeleted":
         case "linked": return c.title + ": " + c.detail
         case "unreadable": return c.title !== "" ? c.title + ": " + c.detail : c.detail.charAt(0).toUpperCase() + c.detail.slice(1)
         }

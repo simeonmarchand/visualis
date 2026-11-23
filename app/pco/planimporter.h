@@ -117,6 +117,10 @@ private:
     void begin();
     void end();
     void setStatus(const QString &status);
+    // Reads a plan, then its items, and hands both to `read`; a failure is the status. With
+    // `stillWanted`, an answer it turns down is dropped. Calls end() once the reads are done.
+    void readPlan(PcoClient *pco, const QString &typeId, const QString &planId, const std::function<bool()> &stillWanted,
+                  const std::function<void(const visualis::PcoPlan &, const visualis::PcoPlanItems &)> &read);
     void save(const visualis::PcoServiceType &type, const visualis::PcoPlan &plan,
               const visualis::PcoPlanItems &items, int library);
     // One attempt at saving; false if another program had the library locked. `library` is
@@ -126,14 +130,16 @@ private:
 
     // Calls `attempt` until it says it's done (true), every kLockRetryMs while it says the
     // library is busy (false), and `gaveUp` once `deadline` passes: never waiting on the lock.
+    // What to add to the status about songs: groups a song lacks, links that couldn't be saved.
+    static QString linkNotes(const visualis::SongLinkReport &links, const QStringList &missing);
     void whileBusy(QDeadlineTimer deadline, const std::function<bool()> &attempt, const std::function<void()> &gaveUp);
-    void offerReimport(const QUuid &serviceId, const visualis::PlanImport &fresh, int library,
-                       const QSet<QString> &addBack = {}, const QString &notice = {});
+    void offerReimport(const QUuid &serviceId, const visualis::PlanImport &fresh, int library);
     // One attempt at applying; false if another program had the library locked.
     bool tryApply(int request);
     // The library songs linkSongs() updated, to write in the service's transaction. A song
     // that's gone from the library is skipped and named in `missing`; any other failure is
-    // returned, so the whole save rolls back.
+    // returned, so the whole save rolls back. `missing` must outlive the save: ServiceStore
+    // runs the writes before it returns.
     std::function<QString()> linkWrites(const QList<visualis::Song> &linked, QStringList *missing);
 
     QPointer<PlanningCenter> m_pco;
@@ -155,5 +161,9 @@ private:
         QString notice;
     };
     std::optional<PendingReimport> m_reimport;
+    // What applying `pending` would do now, from the service as saved; nothing if it's gone.
+    std::optional<visualis::ReimportProposal> propose(const PendingReimport &pending);
+    // Works out what `pending` would do and offers it for Apply or Cancel.
+    void show(PendingReimport pending);
     int m_reimportRequest = 0;   // only the latest reimport() answer is offered
 };
