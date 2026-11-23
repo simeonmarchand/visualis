@@ -203,14 +203,11 @@ void PlanImporter::save(const PcoServiceType &type, const PcoPlan &plan, const P
     // The songs' Planning Center links are saved after the service, never before it: a
     // service that isn't saved leaves the library as it was.
     SongLinkReport links;
-    QList<Song> linked;
-    if (library == m_libraryChanges && m_songs && m_songs->library()) {
-        SongStore songStore(*m_songs->library());
-        links = linkSongs(r.service, songStore, &linked);
-    }
+    if (library == m_libraryChanges && m_songs && m_songs->library())
+        links = linkSongs(r.service, SongStore(*m_songs->library()));
     begin();
     const QString title = r.service.title;
-    whileBusy(QDeadlineTimer(m_lockWaitLimitMs), [this, r, links, linked, library] { return trySave(r, links, linked, library); },
+    whileBusy(QDeadlineTimer(m_lockWaitLimitMs), [this, r, links, library] { return trySave(r, links, library); },
               [this, title] {
                   end();
                   setStatus(tr("Couldn't save \"%1\": another program kept the library busy. Nothing was imported; "
@@ -237,7 +234,7 @@ void PlanImporter::whileBusy(QDeadlineTimer deadline, const std::function<bool()
     });
 }
 
-bool PlanImporter::trySave(const PlanImport &r, const SongLinkReport &links, const QList<Song> &linked, int library)
+bool PlanImporter::trySave(const PlanImport &r, const SongLinkReport &links, int library)
 {
     if (library != m_libraryChanges) {
         end();
@@ -255,7 +252,7 @@ bool PlanImporter::trySave(const PlanImport &r, const SongLinkReport &links, con
     QStringList unlinkedSongs;
     Service service = r.service;
     const ServiceStore::Result saved =
-        ServiceStore(*m_songs->library()).saveNewPlan(service, linkWrites(linked, &unlinkedSongs));
+        ServiceStore(*m_songs->library()).saveNewPlan(service, linkWrites(links.songs, &unlinkedSongs));
     if (saved.busy)
         return false;
     end();
@@ -464,7 +461,7 @@ bool PlanImporter::tryApply(int request)
                 return {std::nullopt, {}, tr("The service changed since the update was shown.")};
             }
             applied = std::move(now);
-            return {applied.merge.service, linkWrites(applied.linked, &missing), {}};
+            return {applied.merge.service, linkWrites(applied.links.songs, &missing), {}};
         },
         &saved);
     if (result.busy)

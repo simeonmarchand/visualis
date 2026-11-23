@@ -18,8 +18,7 @@ class SongStore;
 // applied, and applied only if it's the same.
 struct ReimportProposal {
     ReimportResult merge;
-    SongLinkReport links;
-    QList<Song> linked;               // library songs whose Planning Center link to save with the service
+    SongLinkReport links;             // `links.songs`: whose Planning Center link to save with the service
     QList<ReimportChange> changes;    // the merge's lines and a Linked line per link, in service order
 
     bool needsSave() const { return merge.needsSave || !links.items.isEmpty(); }
@@ -27,7 +26,7 @@ struct ReimportProposal {
     // The same service, links and lines: what the operator saw is what would be saved.
     bool operator==(const ReimportProposal &other) const
     {
-        return merge.service == other.merge.service && linked == other.linked && changes == other.changes;
+        return merge.service == other.merge.service && links.songs == other.links.songs && changes == other.changes;
     }
 };
 
@@ -35,6 +34,6 @@ struct ReimportProposal {
 // library only what came from Planning Center in this merge (ReimportResult::linkable).
 // Reads `songs`; writes nothing.
 ReimportProposal proposeReimport(const Service &local, const PlanImport &fresh, const QSet<QString> &addBack,
-                                 SongStore &songs);
+                                 const SongStore &songs);
 
 } // namespace visualis

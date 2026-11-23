@@ -744,7 +744,8 @@ private slots:
         Service s = serviceFromPlan({"900", "Sunday"}, p, plan, QDateTime::currentDateTimeUtc()).service;
         if (autoLink) {
             SongStore songs(*m_songs->library());
-            linkSongs(s, songs);   // as PlanImporter does
+            for (Song song : linkSongs(s, songs).songs)   // as PlanImporter does, with the service
+                songs.save(song);
         }
         if (!ServiceStore(*m_songs->library()).save(s).ok)
             qFatal("couldn't save the imported service");

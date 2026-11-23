@@ -122,8 +122,7 @@ private:
     // One attempt at saving; false if another program had the library locked. `library` is
     // m_libraryChanges when importPlan() was called: a library opened since isn't the one the
     // operator imported into.
-    bool trySave(const visualis::PlanImport &import, const visualis::SongLinkReport &links,
-                 const QList<visualis::Song> &linked, int library);
+    bool trySave(const visualis::PlanImport &import, const visualis::SongLinkReport &links, int library);
 
     // Calls `attempt` until it says it's done (true), every kLockRetryMs while it says the
     // library is busy (false), and `gaveUp` once `deadline` passes: never waiting on the lock.

@@ -83,7 +83,7 @@ QString SongLinkReport::summary() const
     return parts.join(QStringLiteral(", ")) + QLatin1Char('.');
 }
 
-SongLinkReport linkSongs(Service &service, SongStore &songs, QList<Song> *staged, const QSet<QUuid> *only)
+SongLinkReport linkSongs(Service &service, const SongStore &songs, const std::optional<QSet<QUuid>> &only)
 {
     SongLinkReport report;
     QList<SongCandidate> candidates = songs.matchCandidates();
@@ -98,28 +98,23 @@ SongLinkReport linkSongs(Service &service, SongStore &songs, QList<Song> *staged
             ++report.toConfirm;
             continue;
         }
-        std::optional<Song> song = m.kind == SongMatch::Kind::Linked ? songs.load(m.songId) : std::nullopt;
-        if (song && staged) {
-            for (const Song &s : std::as_const(*staged)) {
-                if (s.id == song->id)
-                    song = s;   // already updated for an earlier item, not saved yet
-            }
+        if (m.kind != SongMatch::Kind::Linked) {
+            ++report.placeholders;
+            continue;
         }
+        // A song updated for an earlier item is used as updated: it isn't saved yet.
+        const auto staged = std::find_if(report.songs.begin(), report.songs.end(),
+                                         [&](const Song &s) { return s.id == m.songId; });
+        std::optional<Song> song = staged != report.songs.end() ? std::optional<Song>(*staged) : songs.load(m.songId);
         if (!song) {
             ++report.placeholders;
             continue;
         }
-        const auto keep = [&](const Song &s) {
-            if (!staged)
-                return songs.save(*song).ok;
-            const auto at = std::find_if(staged->begin(), staged->end(), [&](const Song &x) { return x.id == s.id; });
-            if (at != staged->end())
-                *at = s;
+        if (rememberPcoSong(*song, *pco)) {
+            if (staged != report.songs.end())
+                *staged = *song;
             else
-                *staged << s;
-            return true;
-        };
-        if (rememberPcoSong(*song, *pco) && keep(*song)) {
+                report.songs << *song;
             for (SongCandidate &c : candidates) {
                 if (c.id == song->id)
                     c = SongCandidate{song->id, song->title, song->credits.ccliNumber, song->credits.authors, song->pcoSongId};

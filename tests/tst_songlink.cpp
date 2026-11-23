@@ -108,13 +108,16 @@ private slots:
         QCOMPARE(s.items[1].pcoItemId, QStringLiteral("1"));
     }
 
-    // Linking saves the Planning Center id, so next week matches at once, by id.
+    // Linking remembers the Planning Center id, so next week matches at once, by id.
     void nextWeekMatchesByPlanningCenterId()
     {
         Song grace = libSong("Amazing Grace", {group("Verse 1", "Amazing grace")});
         QVERIFY(m_songs->save(grace).ok);
         Service week1 = imported({songItem("1", "Amazing Grace", 1, {"Verse 1"}, {}, "p-grace")});
-        QCOMPARE(linkSongs(week1, *m_songs).byTitle, 1);
+        const SongLinkReport first = linkSongs(week1, *m_songs);
+        QCOMPARE(first.byTitle, 1);
+        for (Song song : first.songs)   // saved with the service, as the importer does
+            QVERIFY(m_songs->save(song).ok);
 
         const Song saved = *m_songs->load(grace.id);
         QCOMPARE(saved.pcoSongId, QStringLiteral("p-grace"));
@@ -129,19 +132,18 @@ private slots:
         QCOMPARE(week2.items[0].ref, grace.id);
     }
 
-    // Review of #103 (M6): staged, nothing is written until the caller saves it with the service.
-    void stagedLinksWaitForTheCaller()
+    // Review of #103 (M6): nothing is written; the caller saves the songs with the service.
+    void theSongsToSaveAreLeftToTheCaller()
     {
         Song grace = libSong("Amazing Grace", {group("Verse 1", "Amazing grace")});
         QVERIFY(m_songs->save(grace).ok);
         Service s = imported({songItem("1", "Amazing Grace", 1, {"Verse 1"}, {}, "p-grace"),
                               songItem("2", "Amazing Grace", 2, {"Verse 1"}, {}, "p-grace")});
-        QList<Song> staged;
-        const SongLinkReport r = linkSongs(s, *m_songs, &staged);
+        const SongLinkReport r = linkSongs(s, *m_songs);
         QCOMPARE(r.byTitle, 1);
         QCOMPARE(r.linked, 1);   // the second by the id the first remembered, unsaved
-        QCOMPARE(staged.size(), 1);
-        QCOMPARE(staged[0].pcoSongId, QStringLiteral("p-grace"));
+        QCOMPARE(r.songs.size(), 1);
+        QCOMPARE(r.songs[0].pcoSongId, QStringLiteral("p-grace"));
         QVERIFY(m_songs->load(grace.id)->pcoSongId.isEmpty());   // not written
     }
 
@@ -156,8 +158,7 @@ private slots:
         for (ServiceItem &it : s.items)
             it.id = QUuid::createUuid();
         const QSet<QUuid> only{s.items[1].id};
-        QList<Song> staged;
-        const SongLinkReport r = linkSongs(s, *m_songs, &staged, &only);
+        const SongLinkReport r = linkSongs(s, *m_songs, only);
         QCOMPARE(s.items[0].kind, Kind::Placeholder);   // left alone
         QCOMPARE(s.items[1].kind, Kind::Song);
         QCOMPARE(r.items, (QList<SongLinkReport::Linked>{{s.items[1].id, "Holy, Holy, Holy", true}}));
