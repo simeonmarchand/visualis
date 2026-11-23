@@ -7,6 +7,7 @@
 
 #include <QHash>
 #include <QObject>
+#include <QVariantMap>
 
 #include <optional>
 
@@ -24,6 +25,11 @@ namespace visualis {
 //  - a song over the size limits (songlimits.h) has no slides either, and `error` says why.
 // One region of a slide's content: its text and its style with overrides applied.
 struct ContentRegion {
+    Q_GADGET
+    Q_PROPERTY(QString text MEMBER text)
+    Q_PROPERTY(visualis::RegionStyle style MEMBER style)
+
+public:
     QString text;
     RegionStyle style;
 
@@ -34,12 +40,17 @@ struct ContentRegion {
 // by region id, with the text in "main", and the transition it changes with.
 struct Content {
     Q_GADGET
+    // For QML: content.regions.main.style.fontFamily.
+    Q_PROPERTY(QVariantMap regions READ regionMap)
+    Q_PROPERTY(visualis::Transition transition MEMBER transition)
 
 public:
     QHash<QString, ContentRegion> regions;
     Transition transition;
 
     bool operator==(const Content &) const = default;
+
+    QVariantMap regionMap() const;
 };
 
 // A slide as it will show (GLOSSARY.md "LiveSlide"): its place in the song plus its layers.

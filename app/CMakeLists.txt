@@ -1,5 +1,3 @@
-set_source_files_properties(qml/LyricsTemplate.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
-
 # The UI is a QML module library so tests can load it without the app executable.
 qt_add_library(visualis_ui STATIC)
 qt_add_qml_module(visualis_ui
@@ -12,7 +10,6 @@ qt_add_qml_module(visualis_ui
         qml/OutputWindow.qml
         qml/AudienceLyrics.qml
         qml/StageDisplay.qml
-        qml/LyricsTemplate.qml
         qml/OutputSettings.qml
         qml/PlanningCenterDialog.qml
         qml/PlanPickerDialog.qml

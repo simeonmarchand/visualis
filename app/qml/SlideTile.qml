@@ -2,11 +2,11 @@ import QtQuick
 import Visualis.Ui
 
 // One slide in the grid: its group's label on the group color, and a 16:9 preview drawn
-// by the audience's lyrics layer, so it looks like the output at a smaller size.
+// by the audience's lyrics layer from the slide's content, so it matches the output.
 Item {
     id: tile
 
-    property string text
+    property slideContent content
     property string groupLabel
     property string groupColor
     property bool isCurrent: false
@@ -44,12 +44,14 @@ Item {
         clip: true
 
         AudienceLyrics {
+            id: lyrics
             anchors.fill: parent
-            text: tile.text
+            content: tile.content
+            showsLive: false
         }
         Text {
             anchors.centerIn: parent
-            visible: tile.text.trim() === ""
+            visible: lyrics.text.trim() === ""
             text: "Blank"
             color: "#55595f"
             font.pixelSize: 13

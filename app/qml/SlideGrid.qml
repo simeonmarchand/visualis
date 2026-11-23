@@ -5,8 +5,8 @@ import QtQuick.Layouts
 import Visualis.Ui
 
 // Slides in play order: the library's selected song, or the selected service item (#51).
-// Each tile renders through the same lyrics template as the audience output, under its
-// group's label and color. Click a tile to take it live; the live slide and the next one
+// Each tile renders the slide's content, as the audience output does, under its group's
+// label and color. Click a tile to take it live; the live slide and the next one
 // are outlined.
 ColumnLayout {
     id: pane
@@ -58,7 +58,7 @@ ColumnLayout {
             required property var modelData
             objectName: "slideTile" + index
             width: grid.cellWidth - 12
-            text: modelData.text
+            content: modelData.content
             groupLabel: modelData.groupLabel
             groupColor: modelData.groupColor
             isCurrent: pane.showingLive && index === LiveState.slideIndex

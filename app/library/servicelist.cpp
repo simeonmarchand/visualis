@@ -466,7 +466,8 @@ QVariantList ServiceList::selectedSlides() const
         return list;
     for (const LiveSlide &l : m_liveItems[m_selected].slides) {
         const SongSlide &s = l.slide;
-        list.append(QVariantMap{{"text", s.text}, {"groupLabel", s.groupLabel}, {"groupColor", s.groupColor}});
+        list.append(QVariantMap{{"text", s.text}, {"groupLabel", s.groupLabel}, {"groupColor", s.groupColor},
+                                {"content", QVariant::fromValue(l.content)}});
     }
     return list;
 }

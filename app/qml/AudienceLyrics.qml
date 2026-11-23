@@ -2,14 +2,24 @@ import QtQuick
 import QtQuick.Effects
 import Visualis.Ui
 
-// Centered lyrics inside the safe area. Two Text items take turns, so with the "fade"
-// transition the new slide fades in on one while the old one fades out on the other;
-// with "cut" the swap is instant.
+// The text layer of a slide, drawn from its content (#93): the main region's text in the
+// template's frame and style, with the item's and the slide's overrides already applied.
+// Two Text items take turns, so with a "fade" transition the new slide fades in on one
+// while the old one fades out on the other; with "cut" the swap is instant.
 Item {
     id: root
 
+    // What to draw: the live slide's content by default; a preview passes its own.
+    property slideContent content: LiveState.content
+    // The output hides cleared text; a preview always shows its slide.
+    property bool showsLive: true
+
+    property contentRegion blank
+    readonly property contentRegion region: root.content.regions.main ?? root.blank
+    readonly property regionStyle textStyle: root.region.style
+    readonly property layerTransition transition: root.content.transition
     // What to show; empty clears the text (cleared text, no slide).
-    property string text: LiveState.hasSlide && !LiveState.textCleared ? LiveState.currentText : ""
+    readonly property string text: root.showsLive && LiveState.textCleared ? "" : root.region.text
     property bool showingA: true
 
     onTextChanged: {
@@ -21,52 +31,71 @@ Item {
     }
     Component.onCompleted: a.text = text
 
-    // Inline components can't see ids outside them, so sizes come in as properties.
+    // Inline components can't see ids outside them, so what they need comes in as properties.
     component LyricText: Text {
+        id: lyric
         required property real outputHeight
+        required property regionStyle textStyle
+        required property layerTransition transition
         anchors.fill: parent
-        horizontalAlignment: Text.AlignHCenter
-        verticalAlignment: Text.AlignVCenter
+        horizontalAlignment: textStyle.horizontalAlignment
+        verticalAlignment: textStyle.verticalAlignment
         textFormat: Text.PlainText   // lyrics are never markup
         wrapMode: Text.WordWrap
-        // Shrink to fit the safe area; at the smallest size, elide rather than overflow.
+        // Shrink to fit the frame; at the smallest size, elide rather than overflow.
         fontSizeMode: Text.Fit
-        font.pixelSize: Math.max(1, Math.round(outputHeight * LyricsTemplate.maxTextSize))
-        minimumPixelSize: Math.max(1, Math.round(outputHeight * LyricsTemplate.minTextSize))
+        font.pixelSize: Math.max(1, Math.round(outputHeight * textStyle.maxSize))
+        minimumPixelSize: Math.max(1, Math.round(outputHeight * textStyle.minSize))
         elide: Text.ElideRight
-        font.family: LyricsTemplate.fontFamily
-        font.weight: LyricsTemplate.fontWeight
-        lineHeight: LyricsTemplate.lineHeight
-        color: LyricsTemplate.textColor
+        font.family: textStyle.fontFamily
+        font.weight: textStyle.weight
+        lineHeight: textStyle.lineHeight
+        color: textStyle.color
+        // QML draws a 1 px outline; wider ones are left for later.
+        style: textStyle.outline.width > 0 ? Text.Outline : Text.Normal
+        styleColor: textStyle.outline.color
         Behavior on opacity {
-            enabled: LyricsTemplate.transition === "fade"
-            NumberAnimation { duration: LyricsTemplate.fadeMs }
+            enabled: lyric.transition.kind === "fade"
+            NumberAnimation { duration: lyric.transition.ms }
         }
     }
 
     Item {
-        id: safeArea
-        anchors.fill: parent
-        anchors.leftMargin: root.width * LyricsTemplate.safeAreaX
-        anchors.rightMargin: root.width * LyricsTemplate.safeAreaX
-        anchors.topMargin: root.height * LyricsTemplate.safeAreaY
-        anchors.bottomMargin: root.height * LyricsTemplate.safeAreaY
-        visible: !LyricsTemplate.shadow   // drawn through the shadow effect instead
+        id: frame
+        x: root.width * root.textStyle.frame.x
+        y: root.height * root.textStyle.frame.y
+        width: root.width * root.textStyle.frame.width
+        height: root.height * root.textStyle.frame.height
+        visible: !root.textStyle.shadow.enabled   // drawn through the shadow effect instead
 
-        LyricText { id: a; objectName: "lyricsA"; outputHeight: root.height; opacity: root.showingA ? 1 : 0 }
-        LyricText { id: b; objectName: "lyricsB"; outputHeight: root.height; opacity: root.showingA ? 0 : 1 }
+        LyricText {
+            id: a
+            objectName: "lyricsA"
+            outputHeight: root.height
+            textStyle: root.textStyle
+            transition: root.transition
+            opacity: root.showingA ? 1 : 0
+        }
+        LyricText {
+            id: b
+            objectName: "lyricsB"
+            outputHeight: root.height
+            textStyle: root.textStyle
+            transition: root.transition
+            opacity: root.showingA ? 0 : 1
+        }
     }
 
     MultiEffect {
-        visible: LyricsTemplate.shadow
-        source: safeArea
-        anchors.fill: safeArea
+        visible: root.textStyle.shadow.enabled
+        source: frame
+        anchors.fill: frame
         shadowEnabled: true
-        shadowColor: LyricsTemplate.shadowColor
-        shadowOpacity: LyricsTemplate.shadowOpacity
-        shadowBlur: LyricsTemplate.shadowBlur
-        shadowHorizontalOffset: root.height * LyricsTemplate.shadowOffset
-        shadowVerticalOffset: root.height * LyricsTemplate.shadowOffset
+        shadowColor: root.textStyle.shadow.color
+        shadowOpacity: root.textStyle.shadow.opacity
+        shadowBlur: root.textStyle.shadow.blur
+        shadowHorizontalOffset: root.height * root.textStyle.shadow.offset
+        shadowVerticalOffset: root.height * root.textStyle.shadow.offset
         autoPaddingEnabled: true
     }
 }

@@ -172,9 +172,11 @@ QVariantList SongLibrary::selectedSlides() const
     QVariantList list;
     if (!m_selected)
         return list;
-    // The same expansion LiveState uses, so grid index n is live slide n.
-    for (const SongSlide &s : songSlides(*m_selected)) {
-        list.append(QVariantMap{{"text", s.text}, {"groupLabel", s.groupLabel}, {"groupColor", s.groupColor}});
+    // What goLive() shows, so grid index n is live slide n and the tile matches the output.
+    for (const LiveSlide &l : liveSong(*m_selected, {}, templates()).slides) {
+        const SongSlide &s = l.slide;
+        list.append(QVariantMap{{"text", s.text}, {"groupLabel", s.groupLabel}, {"groupColor", s.groupColor},
+                                {"content", QVariant::fromValue(l.content)}});
     }
     return list;
 }

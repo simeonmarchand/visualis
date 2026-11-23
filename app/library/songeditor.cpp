@@ -1,6 +1,7 @@
 #include "library/songeditor.h"
 
 #include "library/songlibrary.h"
+#include "live/liveitem.h"
 #include "song/lyricspaste.h"
 #include "song/slidelist.h"
 #include "song/songtext.h"
@@ -178,9 +179,14 @@ QVariantList SongEditor::sequence() const
 
 QVariantList SongEditor::previewSlides() const
 {
+    // Through the song's template, as it will show (#93).
+    SongLibrary *songs = library();
     QVariantList list;
-    for (const SongSlide &s : songSlides(m_song, m_arrangement))
-        list.append(QVariantMap{{"text", s.text}, {"groupLabel", s.groupLabel}, {"groupColor", s.groupColor}});
+    for (const LiveSlide &l : liveSong(m_song, m_arrangement, songs ? songs->templates() : templateSet({})).slides) {
+        const SongSlide &s = l.slide;
+        list.append(QVariantMap{{"text", s.text}, {"groupLabel", s.groupLabel}, {"groupColor", s.groupColor},
+                                {"content", QVariant::fromValue(l.content)}});
+    }
     return list;
 }
 

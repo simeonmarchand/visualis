@@ -17,7 +17,7 @@ Item {
         fontSizeMode: Text.Fit
         minimumPixelSize: Math.max(1, Math.round(root.unit * 2.5))
         elide: Text.ElideRight
-        font.family: LyricsTemplate.fontFamily
+        font.family: "Helvetica Neue"   // the stage keeps its own layout; stage templates come later
         font.weight: Font.DemiBold
         verticalAlignment: Text.AlignTop
     }

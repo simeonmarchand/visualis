@@ -499,6 +499,57 @@ private slots:
         QVERIFY(!m_services->items()[0].toMap()["warnings"].toString().isEmpty());
     }
 
+    // #93: the grid's tiles draw the slide's content, so a preview matches the output.
+    void previewTilesRenderThroughTheSlidesTemplate()
+    {
+        auto *templates = m_engine->singletonInstance<TemplateLibrary *>("Visualis.Ui", "TemplateLibrary");
+        Template t = builtInLyricsTemplate();
+        t.id = QUuid();
+        t.name = "Ours";
+        t.regions[0].style.fontFamily = "Georgia";
+        t.regions[0].style.frame = QRectF(0.1, 0.6, 0.8, 0.3);
+        QVERIFY(templates->save(t));
+        const QStringList ids = makeSongs({"Amazing Grace"});
+        Song song = *m_songs->loadSong(QUuid::fromString(ids[0]));
+        song.defaultTemplate = t.id;
+        QString error;
+        QVERIFY2(m_songs->saveSong(song, &error), qPrintable(error));
+        m_songs->select(ids[0]);
+
+        QQuickWindow *window = loadOperatorWindow();
+        QQuickItem *preview = tile(window, 1);
+        QVERIFY(preview);
+        QQuickItem *text = findItem(preview, "lyricsA");
+        QVERIFY(text);
+        QTRY_VERIFY(!text->property("text").toString().isEmpty());
+        QCOMPARE(text->property("font").value<QFont>().family(), QStringLiteral("Georgia"));
+        // The frame sits where the template puts it, at the tile's scale.
+        auto *lyrics = text->parentItem()->parentItem();   // the frame's AudienceLyrics
+        QCOMPARE(text->parentItem()->y(), lyrics->height() * 0.6);
+
+        QVERIFY(m_songs->goLive(1));   // the output gets the same content
+        QCOMPARE(m_live->content(), m_songs->selectedSlides()[1].toMap()["content"].value<Content>());
+    }
+
+    // #93: an item that shows, but not as asked, is marked in the service list.
+    void anItemWhoseTemplateIsMissingIsMarked()
+    {
+        const QStringList ids = makeSongs({"Amazing Grace", "Holy Spirit"});
+        Song song = *m_songs->loadSong(QUuid::fromString(ids[0]));
+        song.defaultTemplate = QUuid::createUuid();   // a template that's gone
+        QString error;
+        QVERIFY2(m_songs->saveSong(song, &error), qPrintable(error));
+        QVERIFY(m_services->createService("Sunday"));
+        QVERIFY(m_services->addSong(ids[0]));
+        QVERIFY(m_services->addSong(ids[1]));
+        QQuickWindow *window = loadOperatorWindow();
+        QQuickItem *marked = findItem(window->contentItem(), "itemWarning0");
+        QVERIFY(marked);
+        QTRY_VERIFY(marked->isVisible());
+        QVERIFY(m_services->items()[0].toMap()["warnings"].toString().contains("built-in"));
+        QVERIFY(!findItem(window->contentItem(), "itemWarning1")->isVisible());
+    }
+
     void tileClicksOnAServiceItemAreCommands()
     {
         QQuickWindow *window = serviceOperatorWindow();

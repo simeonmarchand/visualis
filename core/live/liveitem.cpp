@@ -68,6 +68,14 @@ void render(LiveItem &live, const TemplateSet &templates, const QUuid &wanted, c
 
 } // namespace
 
+QVariantMap Content::regionMap() const
+{
+    QVariantMap out;
+    for (auto it = regions.cbegin(); it != regions.cend(); ++it)
+        out.insert(it.key(), QVariant::fromValue(it.value()));
+    return out;
+}
+
 LiveItem liveSong(const Song &song, const QUuid &arrangement, const TemplateSet &templates)
 {
     LiveItem live;

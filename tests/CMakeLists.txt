@@ -81,5 +81,4 @@ target_compile_definitions(tst_planimporter PRIVATE FIXTURES_DIR="${CMAKE_CURREN
 visualis_add_test(tst_reimporter Qt6::Network visualis_ui visualis_core)
 target_include_directories(tst_reimporter PRIVATE ${CMAKE_SOURCE_DIR}/app)
 target_compile_definitions(tst_reimporter PRIVATE FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
-# Links the UI module only to compare the built-in template with LyricsTemplate.qml.
-visualis_add_test(tst_template Qt6::Quick visualis_ui visualis_uiplugin visualis_core)
+visualis_add_test(tst_template visualis_core)

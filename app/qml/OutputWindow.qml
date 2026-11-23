@@ -26,7 +26,8 @@ Window {
         fillMode: VideoOutput.PreserveAspectCrop
         visible: root.showsBackground
         opacity: LiveState.backgroundCleared ? 0 : 1
-        Behavior on opacity { NumberAnimation { duration: LyricsTemplate.backgroundFadeMs } }
+        // The background layer and its transition come with #98/#99.
+        Behavior on opacity { NumberAnimation { duration: 600 } }
     }
 
     AudienceLyrics {
