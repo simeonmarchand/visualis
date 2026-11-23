@@ -44,6 +44,29 @@ void makeForeignDatabase(const QString &path)
     QSqlDatabase::removeDatabase("foreign");
 }
 
+// Every entry in `folder`, hidden ones too.
+QStringList listing(const QString &folder)
+{
+    return QDir(folder).entryList(QDir::AllEntries | QDir::Hidden | QDir::NoDotAndDotDot);
+}
+
+// This binary as a second Visualis process holding `folder`; true once it has it.
+bool holdLibrary(QProcess &process, const QString &folder)
+{
+    return childprocess::start(process, {"--hold-library", folder}, "locked").has_value();
+}
+
+// The child side of holdLibrary(): opens the library in argv[2] and keeps it.
+int holdLibraryChild(char **argv)
+{
+    auto r = Library::open(QString::fromLocal8Bit(argv[2]));
+    if (!r.library) {
+        std::fprintf(stderr, "%s\n", qPrintable(r.message));
+        return 1;
+    }
+    return childprocess::readyUntilParentGoes("locked");
+}
+
 const std::vector<Migration> v1 = {{1, {"CREATE TABLE note (id INTEGER PRIMARY KEY, text TEXT NOT NULL)"}}};
 const std::vector<Migration> v1v2 = {v1[0], {2, {"ALTER TABLE note ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0"}}};
 
@@ -52,12 +75,6 @@ const std::vector<Migration> v1v2 = {v1[0], {2, {"ALTER TABLE note ADD COLUMN pi
 class LibraryTest : public QObject
 {
     Q_OBJECT
-
-    // This binary as a second Visualis process holding `folder`; true once it has it.
-    static bool holdLibrary(QProcess &process, const QString &folder)
-    {
-        return childprocess::start(process, {"--hold-library", folder}, "locked").has_value();
-    }
 
 private slots:
     void createsANewLibrary()
@@ -264,12 +281,9 @@ private slots:
         QVERIFY(first.library);
         QVERIFY(QSqlQuery(first.library->database()).exec("INSERT INTO note (text) VALUES ('keep me')"));
         const QString db = tmp.filePath("library.sqlite");
-        QFile f(db);
-        QVERIFY(f.open(QIODevice::ReadOnly));
-        const QByteArray bytes = f.readAll();
-        f.close();
+        const QByteArray bytes = readAll(db);
         const QDateTime modified = QFileInfo(db).lastModified();
-        const QStringList listing = QDir(tmp.path()).entryList(QDir::AllEntries | QDir::Hidden | QDir::NoDotAndDotDot);
+        const QStringList entries = listing(tmp.path());
 
         // A newer schema, so a second open that got through would copy and migrate it.
         auto second = Library::open(tmp.path(), v1v2);
@@ -277,10 +291,9 @@ private slots:
         QVERIFY(!second.library);
         QCOMPARE(second.message, QStringLiteral("This library is open in another Visualis window."));
 
-        QVERIFY(f.open(QIODevice::ReadOnly));
-        QCOMPARE(f.readAll(), bytes);
+        QCOMPARE(readAll(db), bytes);
         QCOMPARE(QFileInfo(db).lastModified(), modified);
-        QCOMPARE(QDir(tmp.path()).entryList(QDir::AllEntries | QDir::Hidden | QDir::NoDotAndDotDot), listing);
+        QCOMPARE(listing(tmp.path()), entries);
         QCOMPARE(first.library->schemaVersion(), 1);
         QSqlQuery q(first.library->database());
         QVERIFY(q.exec("SELECT text FROM note") && q.next());
@@ -308,13 +321,11 @@ private slots:
         auto r = Library::open(tmp.path());
         QCOMPARE(r.error, E::InUse);
         QCOMPARE(r.message, QStringLiteral("This library is open in another Visualis window."));
-        other.kill();
-        other.waitForFinished();
     }
 
     // #109: a crash leaves the lock file behind. The next start takes it over, or crash
     // recovery (#25) couldn't open the library.
-    void aCrashedProcesssLockIsTakenOver()
+    void aCrashedProcessLockIsTakenOver()
     {
         QTemporaryDir tmp;
         QProcess crashed;
@@ -342,7 +353,8 @@ private slots:
 
         auto r = Library::open(tmp.path(), v1);
         QCOMPARE(r.error, E::InUse);
-        QCOMPARE(r.message, QStringLiteral("This library is open in Visualis on sanctuary-mac.local."));
+        QCOMPARE(r.message, QStringLiteral("This library is open in Visualis on sanctuary-mac.local. If that Mac isn't running "
+                                         "Visualis, delete library.lock in the library folder."));
         QVERIFY(lock.exists());   // left for that Mac
     }
 
@@ -426,21 +438,6 @@ private slots:
     }
 };
 
-// With --hold-library <folder>, this binary stands in for a second Visualis process (#109):
-// it opens the library and holds it until it's killed.
-int main(int argc, char **argv)
-{
-    QCoreApplication app(argc, argv);
-    if (argc == 3 && qstrcmp(argv[1], "--hold-library") == 0) {
-        auto r = Library::open(QString::fromLocal8Bit(argv[2]));
-        if (!r.library) {
-            std::fprintf(stderr, "%s\n", qPrintable(r.message));
-            return 1;
-        }
-        return childprocess::readyUntilParentGoes("locked");
-    }
-    LibraryTest test;
-    QTEST_SET_MAIN_SOURCE_PATH
-    return QTest::qExec(&test, argc, argv);
-}
+// With --hold-library <folder>, this binary stands in for a second Visualis process (#109).
+CHILDPROCESS_TEST_MAIN(LibraryTest, QTEST_QAPP_SETUP(QCoreApplication), "--hold-library", 1, holdLibraryChild)
 #include "tst_library.moc"

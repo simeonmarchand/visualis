@@ -5,7 +5,6 @@
 #include "video/videoengine.h"
 
 #include <QDir>
-#include <QGuiApplication>
 #include <QProcess>
 #include <QTemporaryDir>
 #include <QtTest>
@@ -44,6 +43,22 @@ Song repeated(int slides, int steps)
 
 // Two slides (public domain).
 const char *kLyrics = "Verse 1\nJoy to the world\n\nChorus\nAnd heaven and nature sing\n";
+
+// The child side of the --crash-live test: opens the library in argv[2], takes a song live
+// with the journal in argv[3] running, says "live <song id>", and waits to be killed.
+int crashLiveChild(char **argv)
+{
+    SongLibrary songs;
+    if (!songs.openLibrary(QString::fromLocal8Bit(argv[2])) || !songs.createFromPaste("Joy to the World", kLyrics))
+        return 1;
+    const std::optional<Song> song = songs.loadSong(QUuid::fromString(songs.selectedId()));
+    LiveState live;
+    Recovery recovery;
+    recovery.start(QString::fromLocal8Bit(argv[3]), &live, nullptr);
+    if (!song || !live.show(*song, {}, 1))
+        return 1;
+    return childprocess::readyUntilParentGoes("live", songs.selectedId().toUtf8());
+}
 
 } // namespace
 
@@ -140,7 +155,7 @@ private slots:
     {
         const QString folder = m_dir.filePath(QString("library-%1").arg(m_n));
         QProcess crashed;
-        const std::optional<QByteArray> live = childprocess::start(crashed, {"--crash-live", folder, m_path}, "live ");
+        const std::optional<QByteArray> live = childprocess::start(crashed, {"--crash-live", folder, m_path}, "live");
         QVERIFY(live);
         const QString songId = QString::fromUtf8(*live);
         crashed.kill();   // SIGKILL: no destructors, no unlock, no finish()
@@ -265,26 +280,7 @@ private:
     int m_n = 0;
 };
 
-// With --crash-live <library> <journal>, this binary stands in for a Visualis that goes on
-// to crash (#109): it opens the library, takes a song live with the journal running, prints
-// "live <song id>", and waits to be killed.
-int main(int argc, char **argv)
-{
-    QGuiApplication app(argc, argv);
-    if (argc == 4 && qstrcmp(argv[1], "--crash-live") == 0) {
-        SongLibrary songs;
-        if (!songs.openLibrary(QString::fromLocal8Bit(argv[2])) || !songs.createFromPaste("Joy to the World", kLyrics))
-            return 1;
-        const std::optional<Song> song = songs.loadSong(QUuid::fromString(songs.selectedId()));
-        LiveState live;
-        Recovery recovery;
-        recovery.start(QString::fromLocal8Bit(argv[3]), &live, nullptr);
-        if (!song || !live.show(*song, {}, 1))
-            return 1;
-        return childprocess::readyUntilParentGoes("live " + songs.selectedId().toUtf8());
-    }
-    RecoveryTest test;
-    QTEST_SET_MAIN_SOURCE_PATH
-    return QTest::qExec(&test, argc, argv);
-}
+// With --crash-live <library> <journal>, this binary stands in for a Visualis that goes on to
+// crash (#109).
+CHILDPROCESS_TEST_MAIN(RecoveryTest, QTEST_MAIN_SETUP(), "--crash-live", 2, crashLiveChild)
 #include "tst_recovery.moc"

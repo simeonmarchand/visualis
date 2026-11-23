@@ -239,7 +239,6 @@ private slots:
         SongLibrary songs;
         QVERIFY(songs.openLibrary(folder));
         OtherProgram other(folder);
-        QVERIFY(other.database().isOpen());
         QSqlQuery lock(other.database());
         QVERIFY(lock.exec("BEGIN IMMEDIATE"));
         bool held = true;
@@ -335,9 +334,9 @@ private slots:
         QVERIFY(ServiceStore(*songs.library()).list().isEmpty());
 
         QVERIFY(QSqlQuery(other.database()).exec("ROLLBACK"));
-        QSqlQuery services(other.database());   // nor in the first
-        QVERIFY(services.exec("SELECT count(*) FROM service") && services.next());
-        QCOMPARE(services.value(0).toInt(), 0);
+        auto reopened = Library::open(first);   // nor in the first, now that nothing has it open
+        QVERIFY(reopened.library);
+        QVERIFY(ServiceStore(*reopened.library).list().isEmpty());
     }
 
     void switchingLibrariesDuringTheReadsCancelsTheImport()
