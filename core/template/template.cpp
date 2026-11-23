@@ -85,6 +85,16 @@ bool isBuiltInTemplate(const QUuid &id)
     return builtInTemplate(id).has_value();
 }
 
+TemplateSet templateSet(const QList<Template> &stored)
+{
+    TemplateSet set;
+    for (const Template &t : stored)
+        set.insert(t.id, t);
+    for (const Template &t : builtInTemplates())
+        set.insert(t.id, t);
+    return set;
+}
+
 QUuid overrideTemplateId(const QJsonObject &overrides)
 {
     return QUuid::fromString(overrides.value("template").toString());

@@ -69,8 +69,8 @@ QList<LiveItem> service()
     b.id = QUuid::createUuid();
     ServiceItem missing = songItem(b);
     missing.kind = ServiceItem::Kind::Placeholder;
-    return {liveItem(header("Worship"), std::nullopt), liveItem(songItem(a), a), liveItem(missing, std::nullopt),
-            liveItem(songItem(b), b), liveItem(textItem("Welcome", "Welcome!"), std::nullopt)};
+    return {liveItem(header("Worship"), std::nullopt, templateSet({})), liveItem(songItem(a), a, templateSet({})), liveItem(missing, std::nullopt, templateSet({})),
+            liveItem(songItem(b), b, templateSet({})), liveItem(textItem("Welcome", "Welcome!"), std::nullopt, templateSet({}))};
 }
 
 
@@ -528,28 +528,31 @@ private slots:
                        Group{QUuid::createUuid(), "Chorus 1", "", {"c1", "c2"}}};
         ServiceItem item = songItem(song);
         item.customSequence = {"Intro", "Verse 1", "Pre Chorus 1", "Chorus", "Turnaround", "Bridge 2", "Chorus", "Ending"};
-        const LiveItem live = liveItem(item, song);
+        const LiveItem live = liveItem(item, song, templateSet({}));
         QStringList texts;
         QStringList labels;
-        for (const SongSlide &s : live.slides) {
+        QList<SongSlide> liveSlides;
+        for (const LiveSlide &l : live.slides) {
+            const SongSlide &s = l.slide;
+            liveSlides << s;
             texts << s.text;
             labels << s.groupLabel;
         }
         QCOMPARE(texts, (QStringList{"", "v1", "pc", "c1", "c2", "", "c1", "c2", ""}));
         QCOMPARE(labels, (QStringList{"Intro", "Verse 1", "PreChorus", "Chorus 1", "Chorus 1", "Turnaround", "Chorus 1",
                                       "Chorus 1", "Ending"}));
-        QCOMPARE(songSlides(live.song, live.arrangement), live.slides);   // what recovery does
-        QCOMPARE(liveItem(item, song), live);                              // same ids every load
+        QCOMPARE(songSlides(live.song, live.arrangement), liveSlides);    // what recovery does
+        QCOMPARE(liveItem(item, song, templateSet({})), live);                              // same ids every load
         QCOMPARE(live.song.groups.size(), 6);                              // three blanks added to the live copy
         QCOMPARE(song.groups.size(), 3);                                   // never to the library's song
 
         // A repeated lyric-less label reuses its one blank group.
         item.customSequence = {"Intro", "Verse 1", "Intro"};
-        QCOMPARE(liveItem(item, song).song.groups.size(), 4);
+        QCOMPARE(liveItem(item, song, templateSet({})).song.groups.size(), 4);
 
         // Only lyric-less labels: nothing names the song's own groups, so its arrangement stands.
         item.customSequence = {"Intro", "Ending"};
-        QCOMPARE(liveItem(item, song).song.groups.size(), 3);
+        QCOMPARE(liveItem(item, song, templateSet({})).song.groups.size(), 3);
     }
 
     void liveItemsForEachKind()
@@ -557,36 +560,39 @@ private slots:
         Song song = arranged();
         song.id = QUuid::createUuid();
         ServiceItem item = songItem(song);
-        QCOMPARE(liveItem(item, song).slides.size(), 7);
-        QVERIFY(liveItem(item, std::nullopt).slides.isEmpty());   // the song couldn't load
+        QCOMPARE(liveItem(item, song, templateSet({})).slides.size(), 7);
+        QVERIFY(liveItem(item, std::nullopt, templateSet({})).slides.isEmpty());   // the song couldn't load
 
         song.arrangements << Arrangement{QUuid::createUuid(), "Short", {song.groups[3].id}, {}};
         item.arrangement = song.arrangements[1].id;
-        QCOMPARE(liveItem(item, song).slides.size(), 1);
+        QCOMPARE(liveItem(item, song, templateSet({})).slides.size(), 1);
 
         // Planning Center's order for the day, by label. A lyric-less label with no group
         // ("Outro") is a blank slide (#55); another label naming no group is left out.
         item.customSequence = {"chorus", "Verse 2", "Outro", "Vamp", "Chorus"};
-        const LiveItem custom = liveItem(item, song);
+        const LiveItem custom = liveItem(item, song, templateSet({}));
         QStringList labels;
-        for (const SongSlide &s : custom.slides)
-            labels << s.groupLabel;
+        QList<SongSlide> customSlides;
+        for (const LiveSlide &l : custom.slides) {
+            labels << l.slide.groupLabel;
+            customSlides << l.slide;
+        }
         QCOMPARE(labels, (QStringList{"Chorus", "Verse 2", "Outro", "Chorus"}));
-        QVERIFY(custom.slides[2].isBlank());
+        QVERIFY(custom.slides[2].slide.isBlank());
         QCOMPARE(custom.arrangement, item.id);
-        QCOMPARE(songSlides(custom.song, custom.arrangement), custom.slides);   // the journal can rebuild it
+        QCOMPARE(songSlides(custom.song, custom.arrangement), customSlides);   // the journal can rebuild it
 
         item.customSequence = {"Outro"};   // nothing matches: the arrangement stands
-        QCOMPARE(liveItem(item, song).slides.size(), 1);
+        QCOMPARE(liveItem(item, song, templateSet({})).slides.size(), 1);
 
-        const LiveItem text = liveItem(textItem("Welcome", "Welcome!\nSit anywhere"), std::nullopt);
+        const LiveItem text = liveItem(textItem("Welcome", "Welcome!\nSit anywhere"), std::nullopt, templateSet({}));
         QCOMPARE(text.slides.size(), 1);
-        QCOMPARE(text.slides[0].text, QStringLiteral("Welcome!\nSit anywhere"));
+        QCOMPARE(text.slides[0].slide.text, QStringLiteral("Welcome!\nSit anywhere"));
         QCOMPARE(text.song.title, QStringLiteral("Welcome"));
-        const LiveItem blank = liveItem(textItem("Blank", ""), std::nullopt);
+        const LiveItem blank = liveItem(textItem("Blank", ""), std::nullopt, templateSet({}));
         QCOMPARE(blank.slides.size(), 1);
-        QVERIFY(blank.slides[0].isBlank());
-        QVERIFY(liveItem(header("Worship"), std::nullopt).slides.isEmpty());
+        QVERIFY(blank.slides[0].slide.isBlank());
+        QVERIFY(liveItem(header("Worship"), std::nullopt, templateSet({})).slides.isEmpty());
     }
 
     // Outputs bind to properties by name (QML); check they're readable through the meta-object.
@@ -638,7 +644,7 @@ private slots:
         ServiceItem item;
         item.id = QUuid::createUuid();
         item.kind = ServiceItem::Kind::Song;
-        const LiveItem l = liveItem(item, repeated(500, 1000));
+        const LiveItem l = liveItem(item, repeated(500, 1000), templateSet({}));
         QVERIFY(l.slides.isEmpty());
         QVERIFY(l.error.contains("too many slides to play"));
     }
@@ -649,7 +655,7 @@ private slots:
         item.id = QUuid::createUuid();
         item.kind = ServiceItem::Kind::Song;
         item.customSequence = QStringList(100'000, "Verse");
-        const LiveItem l = liveItem(item, repeated(1, 1));
+        const LiveItem l = liveItem(item, repeated(1, 1), templateSet({}));
         QVERIFY(l.slides.isEmpty());
         QCOMPARE(l.error, QStringLiteral("too many steps in the sequence: 100,000; the limit is 1,000"));
     }

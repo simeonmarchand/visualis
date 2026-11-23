@@ -90,7 +90,9 @@ void LiveState::showItem(int n, int slide)
     const LiveItem &item = m_items[n];
     m_song = item.song;
     m_arrangement = item.arrangement;
-    m_slides = item.slides;
+    m_slides.clear();
+    for (const LiveSlide &s : item.slides)
+        m_slides << s.slide;
     m_itemId = item.id;
     m_index = slide;
     m_textCleared = false;

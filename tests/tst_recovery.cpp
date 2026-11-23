@@ -124,7 +124,7 @@ private slots:
         second.title = "O Come All Ye Faithful";
         const ServiceItem a{QUuid::createUuid(), ServiceItem::Kind::Song, "Joy", {}, {}, {}, {}, {}, {}, {}, {}};
         const ServiceItem b{QUuid::createUuid(), ServiceItem::Kind::Song, "O Come", {}, {}, {}, {}, {}, {}, {}, {}};
-        const QList<LiveItem> items{liveItem(a, sample()), liveItem(b, second)};
+        const QList<LiveItem> items{liveItem(a, sample(), templateSet({})), liveItem(b, second, templateSet({}))};
         const QUuid service = QUuid::createUuid();
         {
             LiveState live;

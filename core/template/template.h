@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QDateTime>
+#include <QHash>
 #include <QJsonObject>
 #include <QList>
 #include <QRectF>
@@ -112,6 +113,11 @@ Template builtInLyricsTemplate();
 QList<Template> builtInTemplates();
 std::optional<Template> builtInTemplate(const QUuid &id);
 bool isBuiltInTemplate(const QUuid &id);
+
+// The templates an item can use, by id: a value snapshot, so rendering does no I/O (#93).
+using TemplateSet = QHash<QUuid, Template>;
+// `stored` and the built-ins; a stored template can't replace a built-in.
+TemplateSet templateSet(const QList<Template> &stored);
 
 // Overrides, as stored in ServiceItem::overrides and per slide (Group::slideOverrides):
 //

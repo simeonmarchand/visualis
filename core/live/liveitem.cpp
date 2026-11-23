@@ -38,11 +38,53 @@ QList<QUuid> customSteps(Song &song, const QUuid &itemId, const QStringList &lab
     return steps;
 }
 
+// The slides with their content layer, in template `wanted` (null: the built-in), with the
+// item's overrides and then each slide's applied.
+void render(LiveItem &live, const TemplateSet &templates, const QUuid &wanted, const QJsonObject &itemOverrides)
+{
+    const QUuid id = wanted.isNull() ? builtInLyricsTemplateId() : wanted;
+    const Template t = templates.value(id, builtInLyricsTemplate());
+    QStringList warnings;
+    if (!templates.contains(id)) {
+        live.templateFellBack = true;
+        warnings << QStringLiteral("Its template isn't in the library, so it shows with the built-in \"%1\" template.")
+                        .arg(t.name);
+    }
+    live.templateId = t.id;
+    for (const SongSlide &s : songSlides(live.song, live.arrangement, &live.error)) {
+        Content content;
+        content.transition = t.transitions.content;
+        const Group *group = live.song.group(s.groupId);
+        const QList<QJsonObject> layers{itemOverrides, group ? group->slideOverride(s.indexInGroup) : QJsonObject()};
+        for (const TextRegion &region : t.regions) {
+            content.regions.insert(region.id, {region.id == QStringLiteral("main") ? s.text : QString(),
+                                               effectiveStyle(t, region.id, layers, &warnings).value_or(region.style)});
+        }
+        live.slides << LiveSlide{s, content};
+    }
+    warnings.removeDuplicates();   // an item's bad override reads the same on every slide
+    live.warnings << warnings;
+}
+
 } // namespace
 
-LiveItem liveItem(const ServiceItem &item, const std::optional<Song> &song)
+LiveItem liveSong(const Song &song, const QUuid &arrangement, const TemplateSet &templates)
 {
-    LiveItem live{item.id, {}, {}, {}};
+    LiveItem live;
+    live.error = songLimitError(song);
+    if (!live.error.isEmpty())
+        return live;
+    live.song = song;
+    live.arrangement = arrangement;
+    render(live, templates, song.defaultTemplate, {});
+    return live;
+}
+
+LiveItem liveItem(const ServiceItem &item, const std::optional<Song> &song, const TemplateSet &templates)
+{
+    LiveItem live;
+    live.id = item.id;
+    live.source = item;
     switch (item.kind) {
     case ServiceItem::Kind::Song:
         if (!song)
@@ -54,6 +96,8 @@ LiveItem liveItem(const ServiceItem &item, const std::optional<Song> &song)
         if (!live.error.isEmpty())
             return live;
         live.song = *song;
+        // Recovery passes the song this made last time; its order for the day is rebuilt.
+        live.song.arrangements.removeIf([&](const Arrangement &a) { return a.id == item.id; });
         live.arrangement = item.arrangement;
         if (const QList<QUuid> custom = customSteps(live.song, item.id, item.customSequence); !custom.isEmpty()) {
             // The item's id names it: unique, and the same each time the service loads.
@@ -68,7 +112,11 @@ LiveItem liveItem(const ServiceItem &item, const std::optional<Song> &song)
     default:
         return live;
     }
-    live.slides = songSlides(live.song, live.arrangement, &live.error);
+    // The item's choice, else (for a song) the song's default.
+    QUuid wanted = overrideTemplateId(item.overrides);
+    if (wanted.isNull() && item.kind == ServiceItem::Kind::Song)
+        wanted = live.song.defaultTemplate;
+    render(live, templates, wanted, item.overrides);
     return live;
 }
 

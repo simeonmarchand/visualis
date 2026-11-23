@@ -332,7 +332,7 @@ void ServiceList::refresh()
         bool haveCandidates = false;
         for (const ServiceItem &item : std::as_const(m_open->items)) {
             const bool isSong = item.kind == ServiceItem::Kind::Song;
-            m_liveItems << liveItem(item, isSong && m_songs ? m_songs->loadSong(item.ref) : std::nullopt);
+            m_liveItems << liveItem(item, isSong && m_songs ? m_songs->loadSong(item.ref) : std::nullopt, templateSet({}));
             // What an unlinked imported song may be, for the operator to pick (#55).
             QVariantList suggestions;
             const std::optional<PcoSong> pco = snapshotSong(item.importSnapshot);
@@ -456,8 +456,10 @@ QVariantList ServiceList::selectedSlides() const
     QVariantList list;
     if (m_selected < 0 || m_selected >= m_liveItems.size())
         return list;
-    for (const SongSlide &s : m_liveItems[m_selected].slides)
+    for (const LiveSlide &l : m_liveItems[m_selected].slides) {
+        const SongSlide &s = l.slide;
         list.append(QVariantMap{{"text", s.text}, {"groupLabel", s.groupLabel}, {"groupColor", s.groupColor}});
+    }
     return list;
 }
 
