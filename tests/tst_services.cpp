@@ -199,10 +199,11 @@ private slots:
             auto v2 = Library::open(folder, {Library::migrations()[0], Library::migrations()[1]});
             QVERIFY2(v2.library, qPrintable(v2.message));
             QCOMPARE(v2.library->schemaVersion(), 2);
-            SongStore songs(*v2.library);
-            Song old;
-            old.title = "Holy, Holy, Holy";
-            QVERIFY(songs.save(old).ok);
+            // As v2 wrote it: today's SongStore writes columns a v2 library doesn't have yet.
+            QSqlQuery q(v2.library->database());
+            QVERIFY(q.exec("INSERT INTO song (id, title, created_at, updated_at) VALUES "
+                           "('2d6c8a0e-0000-4000-8000-000000000001', 'Holy, Holy, Holy', "
+                           "'2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')"));
         }
         auto now = Library::open(folder);
         QVERIFY2(now.library, qPrintable(now.message));

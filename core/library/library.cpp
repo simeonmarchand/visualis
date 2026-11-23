@@ -204,6 +204,16 @@ const std::vector<Migration> &Library::migrations()
              "CREATE INDEX service_item_pco ON service_item(pco_item_id)"}},
         // The plan's link back to Planning Center, for "Open in Planning Center" (#54).
         {4, {"ALTER TABLE service ADD COLUMN pco_plan_url TEXT NOT NULL DEFAULT ''"}},
+        // Templates (plan 5.4, #92). The body is the template's JSON (templatejson.h); name and
+        // kind are copied out for listing. Built-in templates live in code, not here. A song's
+        // default template is a plain id, not a foreign key: one that's gone falls back to the
+        // built-in for its kind. Slide overrides are a JSON array parallel to the group's slides.
+        {5, {"CREATE TABLE template ("
+             " id TEXT PRIMARY KEY, name TEXT NOT NULL, kind TEXT NOT NULL, body TEXT NOT NULL,"
+             " created_at TEXT NOT NULL, updated_at TEXT NOT NULL)",
+             "CREATE INDEX template_name ON template(name COLLATE NOCASE)",
+             "ALTER TABLE song ADD COLUMN default_template TEXT NOT NULL DEFAULT ''",
+             "ALTER TABLE song_group ADD COLUMN slide_overrides TEXT NOT NULL DEFAULT '[]'"}},
     };
     return all;
 }

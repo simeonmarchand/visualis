@@ -11,6 +11,8 @@
 #include <QSaveFile>
 #include <QSet>
 
+#include <algorithm>
+
 namespace visualis {
 
 namespace {
@@ -66,14 +68,44 @@ std::optional<QUuid> resolveGroup(const QString &ref, const QList<Group> &groups
     return std::nullopt;
 }
 
+// A group's slide overrides, one per slide. What can't be used is reported, not dropped silently.
+void readSlideOverrides(const QJsonValue &v, Group &group, QStringList &warnings)
+{
+    const QString name = group.label.isEmpty() ? QStringLiteral("a group without a label")
+                                               : QStringLiteral("group \"%1\"").arg(group.label);
+    if (!v.isUndefined() && !v.isNull() && !v.isArray())
+        warnings << QStringLiteral("%1: its slide overrides aren't a list, so they were ignored").arg(name);
+    const QJsonArray a = v.toArray();
+    for (qsizetype i = 0; i < a.size() && i < group.slides.size(); ++i) {
+        if (!a[i].isObject())
+            warnings << QStringLiteral("%1: the override for slide %2 isn't an object, so it was ignored").arg(name).arg(i + 1);
+        group.slideOverrides << a[i].toObject();
+    }
+    if (a.size() > group.slides.size())
+        warnings << QStringLiteral("%1 has %2 slide overrides for %3 slides; the extra ones were dropped")
+                        .arg(name).arg(a.size()).arg(group.slides.size());
+    group.fitSlideOverrides();
+}
+
 } // namespace
 
 QByteArray songToJson(const Song &s)
 {
     QJsonArray groups;
     for (const Group &g : s.groups) {
-        groups.append(QJsonObject{{"id", idText(g.id)}, {"label", g.label}, {"color", g.color},
-                                  {"slides", QJsonArray::fromStringList(g.slides)}});
+        QJsonObject group{{"id", idText(g.id)}, {"label", g.label}, {"color", g.color},
+                          {"slides", QJsonArray::fromStringList(g.slides)}};
+        // Only when there are some, so files without overrides read as they always have.
+        Group fitted = g;
+        fitted.fitSlideOverrides();
+        if (std::any_of(fitted.slideOverrides.cbegin(), fitted.slideOverrides.cend(),
+                        [](const QJsonObject &o) { return !o.isEmpty(); })) {
+            QJsonArray overrides;
+            for (const QJsonObject &o : std::as_const(fitted.slideOverrides))
+                overrides.append(o);
+            group["slideOverrides"] = overrides;
+        }
+        groups.append(group);
     }
     QJsonArray arrangements;
     for (const Arrangement &a : s.arrangements) {
@@ -95,6 +127,8 @@ QByteArray songToJson(const Song &s)
         {"arrangements", arrangements},
         {"defaultArrangement", idOrNull(s.defaultArrangement)},
     };
+    if (!s.defaultTemplate.isNull())
+        o["defaultTemplate"] = idText(s.defaultTemplate);
     if (s.created.isValid())
         o["created"] = time(s.created);
     if (s.updated.isValid())
@@ -136,6 +170,7 @@ SongJsonResult songFromJson(const QByteArray &json)
     s.credits = {credits.value("ccliNumber").toString(), credits.value("authors").toString(),
                  credits.value("copyright").toString()};
     s.pcoSongId = o.value("pcoSongId").toString();
+    s.defaultTemplate = QUuid::fromString(o.value("defaultTemplate").toString());
     s.created = QDateTime::fromString(o.value("created").toString(), Qt::ISODateWithMs);
     s.updated = QDateTime::fromString(o.value("updated").toString(), Qt::ISODateWithMs);
 
@@ -151,7 +186,9 @@ SongJsonResult songFromJson(const QByteArray &json)
         QStringList slides;
         for (const QJsonValue &slide : g.value("slides").toArray())
             slides << slide.toString();
-        s.groups << Group{id, g.value("label").toString(), g.value("color").toString(), slides};
+        Group group{id, g.value("label").toString(), g.value("color").toString(), slides};
+        readSlideOverrides(g.value("slideOverrides"), group, r.warnings);
+        s.groups << group;
     }
 
     for (const QJsonValue &v : o.value("arrangements").toArray()) {
@@ -252,6 +289,7 @@ ImportFile readSongFile(const QFileInfo &file)
         return out;
     }
     SongJsonResult r = songFromJson(bytes);
+    out.warnings = r.warnings;   // reported whatever happens to the file next
     if (!r.song) {
         out.error = r.error;
         return out;

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QDateTime>
+#include <QJsonObject>
 #include <QList>
 #include <QString>
 #include <QStringList>
@@ -14,8 +15,16 @@ struct Group {
     QString label;        // "Verse 1", "Chorus"; may be empty
     QString color;        // "#rrggbb", or empty for no color
     QStringList slides;   // one entry per slide; an empty string is a blank slide (Intro, Interlude)
+    // Per-slide template overrides (template.h), parallel to `slides`; {} for none. SongStore
+    // and songjson fit it to exactly as long as `slides`. Editing the text must remap it (#95).
+    QList<QJsonObject> slideOverrides;
 
-    bool operator==(const Group &) const = default;
+    // Overrides compare as fitted to the slides: a missing entry is the same as {}.
+    bool operator==(const Group &other) const;
+
+    QJsonObject slideOverride(qsizetype slide) const { return slideOverrides.value(slide); }
+    // One override per slide: pads with {} or drops the extras.
+    void fitSlideOverrides() { slideOverrides.resize(slides.size()); }
 };
 
 // An order to play a song's groups in. A group may appear more than once.
@@ -45,6 +54,7 @@ struct Song {
     QList<Group> groups;            // in display order
     QList<Arrangement> arrangements;
     QUuid defaultArrangement;       // null: the first arrangement, or groups in order
+    QUuid defaultTemplate;          // null: the built-in for the kind (plan 5.2)
     QDateTime created;              // set by SongStore, UTC
     QDateTime updated;
 

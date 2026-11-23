@@ -20,7 +20,9 @@ namespace visualis {
 //   "id": "…", "title": "Amazing Grace",
 //   "credits": {"ccliNumber": "", "authors": "John Newton", "copyright": "Public Domain"},
 //   "pcoSongId": "",
-//   "groups": [{"id": "…", "label": "Verse 1", "color": "#0078cc", "slides": ["line\nline", "…"]}],
+//   "groups": [{"id": "…", "label": "Verse 1", "color": "#0078cc", "slides": ["line\nline", "…"],
+//               "slideOverrides": [{}, {"regions": {"main": {"color": "#ffcc00"}}}]}],   // optional
+//   "defaultTemplate": "<template id>",                                                // optional
 //   "arrangements": [{"id": "…", "name": "Default", "sequence": ["<group id or label>", …],
 //                     "pcoArrangementId": ""}],
 //   "defaultArrangement": "<arrangement id or name>",
@@ -32,7 +34,8 @@ QByteArray songToJson(const Song &song);
 
 struct SongJsonResult {
     std::optional<Song> song;
-    QString error;   // set when the JSON can't be read as a song
+    QString error;          // set when the JSON can't be read as a song
+    QStringList warnings;   // what was read with problems and dropped, for the import report
 };
 SongJsonResult songFromJson(const QByteArray &json);
 

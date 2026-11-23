@@ -4,6 +4,7 @@
 
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QJsonObject>
 #include <QSet>
 #include <QSqlError>
 #include <QSqlQuery>
@@ -30,6 +31,22 @@ QStringList slidesFromJson(const QVariant &v)
     QStringList out;
     for (const QJsonValue &s : QJsonDocument::fromJson(v.toString().toUtf8()).array())
         out << s.toString();
+    return out;
+}
+
+QString overridesJson(const QList<QJsonObject> &overrides)
+{
+    QJsonArray a;
+    for (const QJsonObject &o : overrides)
+        a.append(o);
+    return QString::fromUtf8(QJsonDocument(a).toJson(QJsonDocument::Compact));
+}
+
+QList<QJsonObject> overridesFromJson(const QVariant &v)
+{
+    QList<QJsonObject> out;
+    for (const QJsonValue &o : QJsonDocument::fromJson(v.toString().toUtf8()).array())
+        out << o.toObject();
     return out;
 }
 
@@ -115,6 +132,7 @@ SongStore::Result SongStore::save(Song &song)
     for (Group &g : s.groups) {
         if (g.id.isNull())
             g.id = QUuid::createUuid();
+        g.fitSlideOverrides();   // exactly one per slide, whatever the caller left (#92)
     }
     for (Arrangement &a : s.arrangements) {
         if (a.id.isNull())
@@ -153,12 +171,14 @@ SongStore::Result SongStore::save(Song &song)
 
     QString err = run(db,
         "INSERT INTO song (id, title, ccli_number, authors, copyright, pco_song_id, default_arrangement, "
-        "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
+        "default_template, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
         "ON CONFLICT(id) DO UPDATE SET title = excluded.title, ccli_number = excluded.ccli_number, "
         "authors = excluded.authors, copyright = excluded.copyright, pco_song_id = excluded.pco_song_id, "
-        "default_arrangement = excluded.default_arrangement, updated_at = excluded.updated_at",
+        "default_arrangement = excluded.default_arrangement, default_template = excluded.default_template, "
+        "updated_at = excluded.updated_at",
         {songId, s.title, text(s.credits.ccliNumber), text(s.credits.authors), text(s.credits.copyright), text(s.pcoSongId),
          s.defaultArrangement.isNull() ? QVariant() : QVariant(key(s.defaultArrangement)),
+         s.defaultTemplate.isNull() ? QStringLiteral("") : key(s.defaultTemplate),
          timestamp(s.created), timestamp(s.updated)});
     if (!err.isEmpty())
         return fail(err);
@@ -179,10 +199,11 @@ SongStore::Result SongStore::save(Song &song)
     for (int i = 0; i < s.groups.size(); ++i) {
         const Group &g = s.groups[i];
         err = run(db,
-            "INSERT INTO song_group (id, song_id, position, label, color, slides) VALUES (?, ?, ?, ?, ?, ?) "
+            "INSERT INTO song_group (id, song_id, position, label, color, slides, slide_overrides) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(id) DO UPDATE SET position = excluded.position, label = excluded.label, "
-            "color = excluded.color, slides = excluded.slides",
-            {key(g.id), songId, i, text(g.label), text(g.color), slidesJson(g.slides)});
+            "color = excluded.color, slides = excluded.slides, slide_overrides = excluded.slide_overrides",
+            {key(g.id), songId, i, text(g.label), text(g.color), slidesJson(g.slides), overridesJson(g.slideOverrides)});
         if (!err.isEmpty())
             return fail(err);
     }
@@ -262,7 +283,7 @@ std::optional<Song> SongStore::load(const QUuid &id) const
     const QString songId = key(id);
     QSqlQuery q(db);
     q.prepare("SELECT title, ccli_number, authors, copyright, pco_song_id, default_arrangement, created_at, "
-              "updated_at FROM song WHERE id = ?");
+              "updated_at, default_template FROM song WHERE id = ?");
     q.addBindValue(songId);
     if (!q.exec() || !q.next())
         return std::nullopt;
@@ -275,13 +296,18 @@ std::optional<Song> SongStore::load(const QUuid &id) const
     s.defaultArrangement = q.value(5).isNull() ? QUuid() : uuid(q.value(5));
     s.created = fromTimestamp(q.value(6));
     s.updated = fromTimestamp(q.value(7));
+    s.defaultTemplate = uuid(q.value(8));
 
     QSqlQuery g(db);
-    g.prepare("SELECT id, label, color, slides FROM song_group WHERE song_id = ? ORDER BY position");
+    g.prepare("SELECT id, label, color, slides, slide_overrides FROM song_group WHERE song_id = ? ORDER BY position");
     g.addBindValue(songId);
     g.exec();
-    while (g.next())
-        s.groups << Group{uuid(g.value(0)), g.value(1).toString(), g.value(2).toString(), slidesFromJson(g.value(3))};
+    while (g.next()) {
+        Group group{uuid(g.value(0)), g.value(1).toString(), g.value(2).toString(), slidesFromJson(g.value(3))};
+        group.slideOverrides = overridesFromJson(g.value(4));
+        group.fitSlideOverrides();
+        s.groups << group;
+    }
 
     QSqlQuery a(db);
     a.prepare("SELECT id, name, pco_arrangement_id FROM arrangement WHERE song_id = ? ORDER BY position");
