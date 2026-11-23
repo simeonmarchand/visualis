@@ -2,7 +2,7 @@
 
 #include "pco/pcotypes.h"
 #include "pco/planimport.h"
-#include "pco/reimport.h"
+#include "pco/reimportproposal.h"
 #include "pco/songlink.h"
 #include "song/song.h"
 #include "service/service.h"
@@ -119,26 +119,19 @@ private:
     void setStatus(const QString &status);
     void save(const visualis::PcoServiceType &type, const visualis::PcoPlan &plan,
               const visualis::PcoPlanItems &items, int library);
-    // One attempt at saving. `library` is m_libraryChanges when importPlan() was called: a
-    // library opened since isn't the one the operator imported into.
-    void trySave(visualis::PlanImport import, visualis::SongLinkReport links, QList<visualis::Song> linked,
-                 QDeadlineTimer deadline,
-                 int library);
-    void gaveUpWaiting(const QString &title);
+    // One attempt at saving; false if another program had the library locked. `library` is
+    // m_libraryChanges when importPlan() was called: a library opened since isn't the one the
+    // operator imported into.
+    bool trySave(const visualis::PlanImport &import, const visualis::SongLinkReport &links,
+                 const QList<visualis::Song> &linked, int library);
 
-    // What applying a re-import would do: the merge, the links it makes, and the lines shown.
-    struct Proposal {
-        visualis::ReimportResult merge;
-        visualis::SongLinkReport links;
-        QList<visualis::Song> linked;           // library songs to update with the service
-        QList<visualis::ReimportChange> changes;   // the merge's lines and a "linked" line per link
-        bool same(const Proposal &other) const;
-    };
-    Proposal propose(const visualis::Service &local, const visualis::PlanImport &fresh,
-                     const QSet<QString> &addBack);
+    // Calls `attempt` until it says it's done (true), every kLockRetryMs while it says the
+    // library is busy (false), and `gaveUp` once `deadline` passes: never waiting on the lock.
+    void whileBusy(QDeadlineTimer deadline, const std::function<bool()> &attempt, const std::function<void()> &gaveUp);
     void offerReimport(const QUuid &serviceId, const visualis::PlanImport &fresh, int library,
                        const QSet<QString> &addBack = {}, const QString &notice = {});
-    void tryApply(QDeadlineTimer deadline, int request);
+    // One attempt at applying; false if another program had the library locked.
+    bool tryApply(int request);
     // The library songs linkSongs() updated, to write in the service's transaction. A song
     // that's gone from the library is skipped and named in `missing`; any other failure is
     // returned, so the whole save rolls back.
@@ -159,7 +152,7 @@ private:
         visualis::PlanImport fresh;   // the plan as read, as serviceFromPlan made it
         int library = 0;              // m_libraryChanges when read: only applied to that library
         QSet<QString> addBack;
-        Proposal shown;               // what the operator is looking at, and approves with Apply
+        visualis::ReimportProposal shown;   // what the operator is looking at, and approves with Apply
         QString notice;
     };
     std::optional<PendingReimport> m_reimport;

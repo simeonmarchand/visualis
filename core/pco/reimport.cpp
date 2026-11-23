@@ -115,17 +115,27 @@ std::pair<int, int> placeInPlan(const ServiceItem &item)
             item.importSnapshot.value(QStringLiteral("order")).toInt(INT_MAX)};
 }
 
+// What merging one of the operator's items gives: the item, its lines, and whether its song
+// placeholder is Planning Center's now (so linking it to the library undoes nothing of theirs).
+struct ItemMerge {
+    ServiceItem item;
+    QList<Change> changes;
+    bool linkable = false;
+};
+
+ItemMerge unchanged(const ServiceItem &local) { return {local, {}, false}; }
+
 // Merges one item Planning Center still has, with a known base. `local` is the operator's,
 // `fresh` the new import.
-ServiceItem mergeItem(const ServiceItem &local, const ServiceItem &fresh, QList<Change> &changes, bool *planLink)
+ItemMerge mergeItem(const ServiceItem &local, const ServiceItem &fresh)
 {
     const ServiceItem base = importedItem(local.pcoItemId, local.importSnapshot);
-    ServiceItem out = local;
+    ItemMerge m{local, {}, false};
+    ServiceItem &out = m.item;
     out.importSnapshot = fresh.importSnapshot;
     out.pcoRemoved = false;
-    QList<Change> mine;
     const auto add = [&](Change::Kind kind, const QString &field, const QString &detail) {
-        mine << Change{kind, out.id, {}, field, detail, {}};
+        m.changes << Change{kind, out.id, {}, field, detail, {}};
     };
     if (local.pcoRemoved)
         add(Change::Kind::Restored, {}, {});
@@ -135,19 +145,17 @@ ServiceItem mergeItem(const ServiceItem &local, const ServiceItem &fresh, QList<
     const QString songBefore = songId(local.importSnapshot);
     const QString songNow = songId(fresh.importSnapshot);
     const bool anotherSong = !songBefore.isEmpty() && !songNow.isEmpty() && songBefore != songNow;
-    const bool pcoChangedIt = !sameLink(base, fresh) || anotherSong;
-    *planLink = false;
     if (sameLink(local, base)) {
-        *planLink = true;
+        m.linkable = true;
         if (!sameLink(base, fresh)) {
             takeLink(out, fresh);
             add(Change::Kind::Changed, QStringLiteral("kind"), arrow(kindName(local.kind), kindName(fresh.kind)));
         }
     } else if (anotherSong && local.kind == ServiceItem::Kind::Song && !local.ref.isNull()) {
-        *planLink = true;
+        m.linkable = true;
         takeLink(out, fresh);
         add(Change::Kind::Relink, {}, {});
-    } else if (pcoChangedIt && !sameLink(local, fresh)) {
+    } else if ((anotherSong || !sameLink(base, fresh)) && !sameLink(local, fresh)) {
         add(Change::Kind::KeptEdit, QStringLiteral("kind"),
             anotherSong ? QStringLiteral("kept your %1; Planning Center has another song here").arg(kindName(local.kind))
                         : QStringLiteral("kept %1; Planning Center has %2").arg(kindName(local.kind), kindName(fresh.kind)));
@@ -164,35 +172,119 @@ ServiceItem mergeItem(const ServiceItem &local, const ServiceItem &fresh, QList<
                 QStringLiteral("kept “%1”; Planning Center has “%2”").arg(f.show(local), f.show(fresh)));
         }
     }
-    for (Change &c : mine)
+    for (Change &c : m.changes)
         c.title = out.title;
-    changes << mine;
-    return out;
+    return m;
 }
 
 // An item with no snapshot: what Planning Center said before is unknown, so every value is
 // the operator's. Differences are listed, and the fresh snapshot becomes the base from now on.
-ServiceItem mergeUnknown(const ServiceItem &local, const ServiceItem &fresh, QList<Change> &changes)
+ItemMerge mergeUnknown(const ServiceItem &local, const ServiceItem &fresh)
 {
-    ServiceItem out = local;
-    out.importSnapshot = fresh.importSnapshot;
-    out.pcoRemoved = false;
+    ItemMerge m{local, {}, false};
+    m.item.importSnapshot = fresh.importSnapshot;
+    m.item.pcoRemoved = false;
+    const auto add = [&](Change::Kind kind, const QString &field, const QString &detail) {
+        m.changes << Change{kind, local.id, local.title, field, detail, {}};
+    };
     if (local.pcoRemoved)
-        changes << Change{Change::Kind::Restored, out.id, out.title, {}, {}, {}};
+        add(Change::Kind::Restored, {}, {});
     if (!sameLink(local, fresh))
-        changes << Change{Change::Kind::KeptEdit, out.id, out.title, QStringLiteral("kind"),
-                          QStringLiteral("kept %1; Planning Center has %2").arg(kindName(local.kind), kindName(fresh.kind)), {}};
+        add(Change::Kind::KeptEdit, QStringLiteral("kind"),
+            QStringLiteral("kept %1; Planning Center has %2").arg(kindName(local.kind), kindName(fresh.kind)));
     for (const Field &f : kFields) {
         if (!f.same(local, fresh))
-            changes << Change{Change::Kind::KeptEdit, out.id, out.title, QString::fromLatin1(f.name),
-                              QStringLiteral("kept “%1”; Planning Center has “%2”").arg(f.show(local), f.show(fresh)), {}};
+            add(Change::Kind::KeptEdit, QString::fromLatin1(f.name),
+                QStringLiteral("kept “%1”; Planning Center has “%2”").arg(f.show(local), f.show(fresh)));
     }
-    return out;
+    return m;
+}
+
+bool byPcoId(const RemovedPcoItem &a, const RemovedPcoItem &b) { return a.pcoItemId < b.pcoItemId; }
+
+// The operator's items, read against the fresh import: which is each Planning Center id's
+// item, and what can be compared.
+struct Reading {
+    const Service &mine;
+    const Service &fresh;
+    const ReimportOptions &options;
+    QHash<QString, qsizetype> inFresh;   // pco id -> its first item in the fresh import
+    QHash<QString, qsizetype> owner;     // pco id -> the operator's item that is Planning Center's
+
+    Reading(const Service &m, const Service &f, const ReimportOptions &o)
+        : mine(m), fresh(f), options(o)
+    {
+        for (qsizetype i = 0; i < fresh.items.size(); ++i) {
+            if (!fresh.items[i].pcoItemId.isEmpty() && !inFresh.contains(fresh.items[i].pcoItemId))
+                inFresh.insert(fresh.items[i].pcoItemId, i);
+        }
+        // Of several with one id (a copy), the lowest item id: arbitrary, but it doesn't change
+        // when they're reordered. The rest are the operator's own.
+        for (qsizetype i = 0; i < mine.items.size(); ++i) {
+            const QString &id = mine.items[i].pcoItemId;
+            if (id.isEmpty())
+                continue;
+            if (const auto at = owner.constFind(id); at == owner.constEnd() || mine.items[i].id < mine.items[*at].id)
+                owner.insert(id, i);
+        }
+    }
+
+    bool isOwner(qsizetype i) const
+    {
+        const QString &id = mine.items[i].pcoItemId;
+        return !id.isEmpty() && owner.value(id) == i;
+    }
+    bool unreadable(const QString &id) const { return options.unreadable.contains(id); }
+    const ServiceItem &freshItem(const QString &id) const { return fresh.items[inFresh[id]]; }
+    // Still in the plan, read whole, with a known base: merged field by field.
+    bool comparable(qsizetype i) const
+    {
+        const QString &id = mine.items[i].pcoItemId;
+        return isOwner(i) && inFresh.contains(id) && !unreadable(id) && knownBase(mine.items[i]);
+    }
+};
+
+// Who reordered what since the last import, among the items that can be compared.
+struct Moves {
+    QSet<QString> unplaced;     // where they were last time can't be told: the operator's place stands
+    QSet<QString> byPco;
+    QSet<QString> byOperator;
+};
+
+Moves whoMoved(const Reading &r)
+{
+    Moves m;
+    QStringList localOrder;
+    QHash<std::pair<int, int>, int> atPlace;
+    for (qsizetype i = 0; i < r.mine.items.size(); ++i) {
+        if (r.comparable(i)) {
+            localOrder << r.mine.items[i].pcoItemId;
+            ++atPlace[placeInPlan(r.mine.items[i])];
+        }
+    }
+    const auto place = [&](const QString &id) { return placeInPlan(r.mine.items[r.owner[id]]); };
+    // Two with the same place (old snapshots with no `order`) can't be told apart.
+    for (const QString &id : std::as_const(localOrder)) {
+        if (atPlace.value(place(id)) > 1)
+            m.unplaced << id;
+    }
+    localOrder.removeIf([&](const QString &id) { return m.unplaced.contains(id); });
+    QStringList baseOrder = localOrder;
+    std::sort(baseOrder.begin(), baseOrder.end(), [&](const QString &a, const QString &b) { return place(a) < place(b); });
+    QStringList freshOrder;
+    for (const ServiceItem &f : r.fresh.items) {
+        if (localOrder.contains(f.pcoItemId) && !freshOrder.contains(f.pcoItemId))
+            freshOrder << f.pcoItemId;
+    }
+    m.byPco = movedBetween(freshOrder, baseOrder);
+    // A reorder that could be either side's is taken as the operator's, so it stands.
+    m.byOperator = movedBetween(localOrder, baseOrder, m.byPco);
+    return m;
 }
 
 } // namespace
 
-QString ReimportResult::summary() const
+QString reimportSummary(const QList<ReimportChange> &changes, bool needsSave)
 {
     if (changes.isEmpty())
         return needsSave ? QStringLiteral("Nothing to review. Apply saves Planning Center's latest details.")
@@ -236,101 +328,70 @@ ReimportResult mergeReimport(const Service &local, const Service &fresh, const R
         if (mine.items[i].id.isNull())   // so an item can be found after the reorder
             mine.items[i].id = QUuid::createUuidV5(space, QStringLiteral("item %1").arg(i));
     }
-    r.service = mine;
-    r.service.date = fresh.date;
-    r.service.pcoPlanId = fresh.pcoPlanId;
-    r.service.pcoServiceTypeId = fresh.pcoServiceTypeId;
-    r.service.pcoPlanUrl = fresh.pcoPlanUrl;
-    r.service.lastImportedAt = fresh.lastImportedAt;
-    const auto unreadable = [&](const QString &id) { return options.unreadable.contains(id); };
+    const Reading reading(mine, fresh, options);
+    const Moves moves = whoMoved(reading);
 
-    QHash<QString, qsizetype> inFresh;   // pco id -> its first item in the fresh import
-    for (qsizetype i = 0; i < fresh.items.size(); ++i) {
-        if (!fresh.items[i].pcoItemId.isEmpty() && !inFresh.contains(fresh.items[i].pcoItemId))
-            inFresh.insert(fresh.items[i].pcoItemId, i);
-    }
-
-    // Each Planning Center id's item: of several (a copy), the lowest item id, which doesn't
-    // change when they're reordered. The rest are the operator's own.
-    QHash<QString, qsizetype> owner;
+    // 1. Each of the operator's items, once: what it becomes, and whether it follows Planning
+    //    Center's order (placed) or keeps the operator's place.
+    QList<ItemMerge> merged;
+    QList<bool> placed;
     for (qsizetype i = 0; i < mine.items.size(); ++i) {
-        const QString &id = mine.items[i].pcoItemId;
-        if (id.isEmpty())
+        const ServiceItem &it = mine.items[i];
+        const QString &id = it.pcoItemId;
+        if (reading.comparable(i)) {
+            ItemMerge m = mergeItem(it, reading.freshItem(id));
+            const bool keepsPlace = moves.unplaced.contains(id) || moves.byOperator.contains(id);
+            if (moves.byOperator.contains(id))
+                r.movedByOperator << id;
+            if (moves.byPco.contains(id) && !moves.unplaced.contains(id))
+                m.changes.prepend(Change{keepsPlace ? Change::Kind::KeptPosition : Change::Kind::Moved, m.item.id,
+                                         m.item.title, {}, {}, {}});
+            merged << m;
+            placed << !keepsPlace;
             continue;
-        if (const auto at = owner.constFind(id); at == owner.constEnd() || mine.items[i].id < mine.items[*at].id)
-            owner.insert(id, i);
+        }
+        ItemMerge m = unchanged(it);
+        if (!reading.isOwner(i)) {
+            // The operator's own: added by them, or a copy.
+        } else if (reading.unreadable(id)) {
+            m.changes << Change{Change::Kind::Unreadable, it.id, it.title, {},
+                                QStringLiteral("couldn't be read from Planning Center; left as it was"), {}};
+        } else if (reading.inFresh.contains(id)) {
+            m = mergeUnknown(it, reading.freshItem(id));
+        } else if (!options.unreadableWithoutId && !it.pcoRemoved) {
+            m.item.pcoRemoved = true;   // gone from Planning Center: flagged, never deleted
+            m.changes << Change{Change::Kind::Removed, it.id, it.title, {}, {}, {}};
+        }
+        merged << m;
+        placed << false;
     }
-    // Owners merged field by field and placed by order: still in the plan, read whole, with
-    // a known base. Other owners in the plan keep their place.
-    const auto comparable = [&](const QString &id) {
-        return owner.contains(id) && inFresh.contains(id) && !unreadable(id) && knownBase(mine.items[owner[id]]);
-    };
+    for (const ItemMerge &m : std::as_const(merged)) {
+        if (m.linkable)
+            r.linkable << m.item.id;
+    }
 
-    // Who moved what, against the order Planning Center had last time.
-    QStringList localOrder;
-    for (qsizetype i = 0; i < mine.items.size(); ++i) {
-        const QString &id = mine.items[i].pcoItemId;
-        if (comparable(id) && owner[id] == i)
-            localOrder << id;
-    }
-    // Where each was last time. Two with the same place (old snapshots with no `order`) can't
-    // be told apart, so nobody's order of them is known: they keep the operator's place.
-    QHash<std::pair<int, int>, int> atPlace;
-    for (const QString &id : std::as_const(localOrder))
-        ++atPlace[placeInPlan(mine.items[owner[id]])];
-    QSet<QString> unplaced;
-    for (const QString &id : std::as_const(localOrder)) {
-        if (atPlace.value(placeInPlan(mine.items[owner[id]])) > 1)
-            unplaced << id;
-    }
-    localOrder.removeIf([&](const QString &id) { return unplaced.contains(id); });
-    const auto ordered = [&](const QString &id) { return comparable(id) && !unplaced.contains(id); };
-    QStringList baseOrder = localOrder;
-    std::sort(baseOrder.begin(), baseOrder.end(), [&](const QString &a, const QString &b) {
-        return placeInPlan(mine.items[owner[a]]) < placeInPlan(mine.items[owner[b]]);
-    });
-    QStringList freshOrder;
-    for (qsizetype i = 0; i < fresh.items.size(); ++i) {
-        const QString &id = fresh.items[i].pcoItemId;
-        if (ordered(id) && inFresh[id] == i)
-            freshOrder << id;
-    }
-    const QSet<QString> movedInPco = movedBetween(freshOrder, baseOrder);
-    // A reorder that could be either side's is taken as the operator's, so it stands.
-    const QSet<QString> movedLocally = movedBetween(localOrder, baseOrder, movedInPco);
-
+    // 2. Planning Center's order, with its new items, the operator's placed items, and what
+    //    they deleted kept out.
     QHash<QString, RemovedPcoItem> deleted;   // pco id -> record, of items the operator deleted
     for (const RemovedPcoItem &d : std::as_const(mine.removedPcoItems)) {
-        if (!owner.contains(d.pcoItemId))
+        if (!reading.owner.contains(d.pcoItemId))
             deleted.insert(d.pcoItemId, d);
     }
     QList<RemovedPcoItem> stillDeleted;
     QList<Change> planChanges;   // not about an item in the service
-
-    // The skeleton: Planning Center's new order, without what keeps the operator's place.
-    QList<ServiceItem> result;
-    QHash<QUuid, QList<Change>> changesFor;
+    QList<ItemMerge> order;
     for (qsizetype fi = 0; fi < fresh.items.size(); ++fi) {
         const ServiceItem &f = fresh.items[fi];
         const QString &id = f.pcoItemId;
-        if (inFresh.value(id, -1) != fi)
+        if (reading.inFresh.value(id, -1) != fi)
             continue;   // no id, or a second item with one: Planning Center doesn't make those
-        if (owner.contains(id)) {
-            if (!ordered(id) || movedLocally.contains(id))
-                continue;   // placed with the operator's order below
-            QList<Change> c;
-            bool planLink = false;
-            const ServiceItem merged = mergeItem(mine.items[owner[id]], f, c, &planLink);
-            if (planLink)
-                r.linkable << merged.id;
-            if (movedInPco.contains(id))
-                c.prepend(Change{Change::Kind::Moved, merged.id, merged.title, {}, {}, {}});
-            changesFor[merged.id] << c;
-            result << merged;
+        if (reading.owner.contains(id)) {
+            if (const qsizetype i = reading.owner[id]; placed[i])
+                order << merged[i];
             continue;
         }
         if (deleted.contains(id) && !options.addBack.contains(id)) {
-            if (unreadable(id)) {
+            if (reading.unreadable(id)) {
                 stillDeleted << deleted[id];   // can't tell what changed: as it was
                 continue;
             }
@@ -344,72 +405,53 @@ ReimportResult mergeReimport(const Service &local, const Service &fresh, const R
         added.id = QUuid::createUuidV5(space, QStringLiteral("pco %1").arg(id));
         r.linkable << added.id;
         // One the operator chose to add back says so, with its id, so they can change their mind.
-        changesFor[added.id] << (options.addBack.contains(id) && deleted.contains(id)
-                                     ? Change{Change::Kind::Added, added.id, added.title, {}, QStringLiteral("added back"), id}
-                                     : Change{Change::Kind::Added, added.id, added.title, {}, {}, {}});
-        result << added;
+        const bool back = options.addBack.contains(id) && deleted.contains(id);
+        order << ItemMerge{added,
+                           {Change{Change::Kind::Added, added.id, added.title, {}, back ? QStringLiteral("added back") : QString(),
+                                   back ? id : QString()}},
+                           true};
     }
     // A deleted item missing from the answer is forgotten, unless it may only have been unreadable.
     for (const RemovedPcoItem &d : std::as_const(mine.removedPcoItems)) {
-        if (deleted.contains(d.pcoItemId) && !inFresh.contains(d.pcoItemId)
-            && (unreadable(d.pcoItemId) || options.unreadableWithoutId))
+        if (deleted.contains(d.pcoItemId) && !reading.inFresh.contains(d.pcoItemId)
+            && (reading.unreadable(d.pcoItemId) || options.unreadableWithoutId))
             stillDeleted << d;
     }
 
-    // Then everything that keeps its place in the operator's list, right after the item
-    // before it there. In list order, so a run of them stays together.
+    // 3. Everything that keeps the operator's place goes right after the item before it in
+    //    their list. In list order, so a run of them stays together.
     for (qsizetype i = 0; i < mine.items.size(); ++i) {
-        const ServiceItem &it = mine.items[i];
-        const QString &id = it.pcoItemId;
-        const bool isOwner = !id.isEmpty() && owner.value(id) == i;
-        if (isOwner && ordered(id) && !movedLocally.contains(id))
-            continue;   // already in the skeleton
-        ServiceItem kept = it;
-        QList<Change> c;
-        if (isOwner && comparable(id)) {
-            bool planLink = false;
-            kept = mergeItem(it, fresh.items[inFresh[id]], c, &planLink);
-            if (planLink)
-                r.linkable << kept.id;
-            if (movedLocally.contains(id)) {
-                r.movedByOperator << id;
-                if (movedInPco.contains(id))
-                    c.prepend(Change{Change::Kind::KeptPosition, kept.id, kept.title, {}, {}, {}});
-            }
-        } else if (isOwner && unreadable(id)) {
-            c << Change{Change::Kind::Unreadable, kept.id, kept.title, {},
-                        QStringLiteral("couldn't be read from Planning Center; left as it was"), {}};
-        } else if (isOwner && inFresh.contains(id)) {
-            kept = mergeUnknown(it, fresh.items[inFresh[id]], c);
-        } else if (isOwner && !options.unreadableWithoutId && !it.pcoRemoved) {
-            kept.pcoRemoved = true;
-            c << Change{Change::Kind::Removed, kept.id, kept.title, {}, {}, {}};
-        }
-        changesFor[kept.id] << c;
+        if (placed[i])
+            continue;
         qsizetype at = 0;
         if (i > 0) {
             const QUuid before = mine.items[i - 1].id;
-            const auto found = std::find_if(result.cbegin(), result.cend(),
-                                            [&](const ServiceItem &x) { return x.id == before; });
-            at = found - result.cbegin() + 1;
+            at = std::find_if(order.cbegin(), order.cend(), [&](const ItemMerge &x) { return x.item.id == before; })
+                 - order.cbegin() + 1;
         }
-        result.insert(at, kept);
+        order.insert(at, merged[i]);
     }
     if (options.unreadableWithoutId)
         planChanges << Change{Change::Kind::Unreadable, {}, {}, {},
                               QStringLiteral("part of the plan couldn't be read, so nothing was taken as removed"), {}};
 
-    r.service.items = result;
-    std::sort(stillDeleted.begin(), stillDeleted.end(),
-              [](const RemovedPcoItem &a, const RemovedPcoItem &b) { return a.pcoItemId < b.pcoItemId; });
-    r.service.removedPcoItems = stillDeleted;   // what Planning Center removed too is forgotten
-    for (const ServiceItem &it : std::as_const(result))
-        r.changes << changesFor.value(it.id);
+    r.service = mine;
+    r.service.date = fresh.date;
+    r.service.pcoPlanId = fresh.pcoPlanId;
+    r.service.pcoServiceTypeId = fresh.pcoServiceTypeId;
+    r.service.pcoPlanUrl = fresh.pcoPlanUrl;
+    r.service.lastImportedAt = fresh.lastImportedAt;
+    r.service.items.clear();
+    for (const ItemMerge &m : std::as_const(order)) {
+        r.service.items << m.item;
+        r.changes << m.changes;
+    }
     r.changes << planChanges;
+    std::sort(stillDeleted.begin(), stillDeleted.end(), byPcoId);
+    r.service.removedPcoItems = stillDeleted;   // what Planning Center removed too is forgotten
 
     Service before = local;
-    std::sort(before.removedPcoItems.begin(), before.removedPcoItems.end(),
-              [](const RemovedPcoItem &a, const RemovedPcoItem &b) { return a.pcoItemId < b.pcoItemId; });
+    std::sort(before.removedPcoItems.begin(), before.removedPcoItems.end(), byPcoId);
     Service after = r.service;
     after.lastImportedAt = before.lastImportedAt;
     r.needsSave = after != before;

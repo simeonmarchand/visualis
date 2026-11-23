@@ -207,26 +207,30 @@ ServiceStore::Result ServiceStore::save(Service &service, Mode mode, const AlsoW
     if (Result r = begin(mode); !r.ok)
         return r;
     QSqlDatabase db = m_library.database();
-    const auto fail = [&](const QString &error) {
-        db.rollback();
-        return Result{false, QStringLiteral("Couldn't save \"%1\": %2").arg(s.title, error)};
-    };
     // A new plan's duplicate check holds until the commit.
     if (const auto existing = mode == Mode::NewPlan ? findByPcoPlan(s.pcoPlanId) : std::nullopt) {
         db.rollback();
         return {false, QStringLiteral("This plan is already in the library as \"%1\".").arg(existing->title), false,
                 existing->title};
     }
-    if (const QString err = write(s); !err.isEmpty())
-        return fail(err);
-    if (also) {
-        if (const QString alsoError = also(); !alsoError.isEmpty())
-            return fail(alsoError);
-    }
-    if (!db.commit())
-        return fail(db.lastError().text());
+    if (Result r = finish(s, also); !r.ok)
+        return r;
     service = s;
     return {};
+}
+
+ServiceStore::Result ServiceStore::finish(Service &s, const AlsoWrite &also)
+{
+    QSqlDatabase db = m_library.database();
+    QString err = write(s);
+    if (err.isEmpty() && also)
+        err = also();
+    if (err.isEmpty() && !db.commit())
+        err = db.lastError().text();
+    if (err.isEmpty())
+        return {};
+    db.rollback();
+    return {false, QStringLiteral("Couldn't save \"%1\": %2").arg(s.title, err)};
 }
 
 ServiceStore::Result ServiceStore::applyWithoutWaiting(const QUuid &id, const Decide &decide, Service *saved)
@@ -246,22 +250,12 @@ ServiceStore::Result ServiceStore::applyWithoutWaiting(const QUuid &id, const De
         return {false, d.why, false, {}, true};
     }
     Service s = *d.service;
-    const auto fail = [&](const QString &error) {
-        db.rollback();
-        return Result{false, QStringLiteral("Couldn't save \"%1\": %2").arg(s.title, error)};
-    };
     if (Result r = prepare(s); !r.ok) {
         db.rollback();
         return r;
     }
-    if (const QString err = write(s); !err.isEmpty())
-        return fail(err);
-    if (d.also) {
-        if (const QString alsoError = d.also(); !alsoError.isEmpty())
-            return fail(alsoError);
-    }
-    if (!db.commit())
-        return fail(db.lastError().text());
+    if (Result r = finish(s, d.also); !r.ok)
+        return r;
     if (saved)
         *saved = s;
     return {};

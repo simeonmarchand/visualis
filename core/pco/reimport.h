@@ -37,6 +37,10 @@ struct ReimportChange {
     bool operator==(const ReimportChange &) const = default;
 };
 
+// "1 added, 1 removed, 2 moved, 1 changed. Kept 2 of your edits." for these lines, or what to
+// say when there are none.
+QString reimportSummary(const QList<ReimportChange> &changes, bool needsSave);
+
 struct ReimportOptions {
     // Planning Center ids of items the operator deleted and wants back (ChangedButDeleted).
     QSet<QString> addBack;
@@ -59,9 +63,7 @@ struct ReimportResult {
     bool needsSave = false;
 
     bool upToDate() const { return changes.isEmpty() && !needsSave; }
-    // "1 added, 1 removed, 2 moved, 1 changed. Kept 2 of your edits." or "Up to date with
-    // Planning Center."
-    QString summary() const;
+    QString summary() const { return reimportSummary(changes, needsSave); }
 };
 
 // Merges a fresh import of a plan (serviceFromPlan) into the operator's copy of it (plan

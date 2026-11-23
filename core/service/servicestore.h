@@ -73,6 +73,8 @@ private:
     Result prepare(Service &service) const;
     Result begin(Mode mode);
     QString write(Service &service);
+    // write(), then `also`, then commit, inside a transaction begin() opened; rolls back on failure.
+    Result finish(Service &service, const AlsoWrite &also);
 
     Library &m_library;
 };
