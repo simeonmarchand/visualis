@@ -26,10 +26,7 @@ namespace visualis {
 struct PlanImport {
     Service service;
     QStringList notes;     // what the operator should know: records that couldn't be read
-    // From PcoPlanItems, for re-import: items left out or only partly read, by Planning
-    // Center id, and whether a record was left out without one.
-    QSet<QString> unreadable;
-    bool unreadableWithoutId = false;
+    PcoUnreadable unreadable;   // from PcoPlanItems, for re-import
 };
 
 PlanImport serviceFromPlan(const PcoServiceType &type, const PcoPlan &plan, const PcoPlanItems &items,

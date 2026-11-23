@@ -123,8 +123,7 @@ PlanImport serviceFromPlan(const PcoServiceType &type, const PcoPlan &plan, cons
         snapshot["order"] = int(i);
         s.items << importedItem(ordered[i].id, snapshot);
     }
-    r.unreadable = QSet<QString>(items.unreadableIds.cbegin(), items.unreadableIds.cend());
-    r.unreadableWithoutId = items.skippedWithoutId;
+    r.unreadable = items.unreadable;
     for (const QString &skipped : items.skipped)
         r.notes << QStringLiteral("Skipped from Planning Center: %1").arg(skipped);
     return r;

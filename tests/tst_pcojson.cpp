@@ -161,8 +161,8 @@ private slots:
         QCOMPARE(plan.items[0].type, PcoItemType::Item);   // an unknown kind reads as a plain item
         QCOMPARE(plan.skipped.size(), 1);
         QVERIFY(plan.skipped[0].contains("Broken"));
-        QVERIFY(plan.skippedWithoutId);   // so a re-import takes nothing as removed (#56)
-        QVERIFY(plan.unreadableIds.isEmpty());
+        QVERIFY(plan.unreadable.withoutId);   // so a re-import takes nothing as removed (#56)
+        QVERIFY(plan.unreadable.ids.isEmpty());
     }
 
     // Review of #103: a malformed section order of the item's own isn't quietly emptied.
@@ -186,14 +186,14 @@ private slots:
         const PcoPlanItems plan = planItemsFrom(parsePcoDocument(body).value);
         QCOMPARE(plan.items.size(), 1);
         QVERIFY(plan.items[0].customArrangementSequence.isEmpty());
-        QCOMPARE(plan.unreadableIds, QStringList{"9"});
+        QCOMPARE(plan.unreadable.ids, QSet<QString>{"9"});
         QCOMPARE(plan.skipped, QStringList{"Item 9 (\"Song\"): its section order is malformed"});
 
         attributes["custom_arrangement_sequence"] = QJsonArray{"Verse 1", "Chorus"};   // a good one still reads
         item["attributes"] = attributes;
         const PcoPlanItems good = planItemsFrom(parsePcoDocument(QJsonDocument(QJsonObject{{"data", QJsonArray{item}}}).toJson()).value);
         QCOMPARE(good.items[0].customArrangementSequence, (QStringList{"Verse 1", "Chorus"}));
-        QVERIFY(good.unreadableIds.isEmpty());
+        QVERIFY(good.unreadable.ids.isEmpty());
     }
 
     // #56: a re-import needs to know which items weren't read whole, by id.
@@ -206,8 +206,8 @@ private slots:
             {"type":"Item","id":"3","attributes":{"title":"Fine","item_type":"item","sequence":3}}]})";
         const PcoPlanItems plan = planItemsFrom(parsePcoDocument(body).value);
         QCOMPARE(plan.items.size(), 2);   // 1 is left out; 2 is kept, without its song
-        QCOMPARE(plan.unreadableIds, (QStringList{"1", "2"}));
-        QVERIFY(!plan.skippedWithoutId);
+        QCOMPARE(plan.unreadable.ids, (QSet<QString>{"1", "2"}));
+        QVERIFY(!plan.unreadable.withoutId);
     }
 
     // #79: every record that can't be used is named, never dropped silently.
@@ -353,7 +353,7 @@ private slots:
         QCOMPARE(plan.items.size(), 1);   // the item itself is fine
         QVERIFY(!plan.items[0].song && !plan.items[0].arrangement && !plan.items[0].key);
         QCOMPARE(plan.skipped, QStringList{"Item 9 (\"Song One\"): " + why});
-        QCOMPARE(plan.unreadableIds, QStringList{"9"});
+        QCOMPARE(plan.unreadable.ids, QSet<QString>{"9"});
     }
 
     void aNullArrangementSequenceIsJustEmpty()

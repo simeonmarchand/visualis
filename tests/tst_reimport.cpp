@@ -172,7 +172,7 @@ private slots:
         QCOMPARE(told.summary(), QStringLiteral("1 you removed changed in Planning Center."));
         QVERIFY(mergeReimport(told.service, import(changed)).upToDate());   // said once
 
-        const ReimportResult back = mergeReimport(mine, import(changed), ReimportOptions{{"2"}, {}, false});
+        const ReimportResult back = mergeReimport(mine, import(changed), ReimportOptions{{"2"}, {}});
         QCOMPARE(titles(back.service), (QStringList{"Welcome", "Amazing Grace", "Sermon"}));
         QVERIFY(back.service.removedPcoItems.isEmpty());
         QCOMPARE(kinds(back), QList<CK>{CK::Added});
@@ -200,7 +200,7 @@ private slots:
         PcoItem noSong = song("1", "Amazing Grace");
         noSong.song.reset();   // its song record was missing from the answer
         ReimportOptions o;
-        o.unreadable = {"1", "2", "3"};   // 2 and 3 were left out altogether
+        o.unreadable.ids = {"1", "2", "3"};   // 2 and 3 were left out altogether
         const ReimportResult r = mergeReimport(mine, import({noSong}), o);
         QCOMPARE(r.service.items, mine.items);
         QCOMPARE(r.service.removedPcoItems, mine.removedPcoItems);
@@ -208,7 +208,7 @@ private slots:
 
         // A record with no id: anything missing may be it, so nothing is taken as removed.
         ReimportOptions noId;
-        noId.unreadableWithoutId = true;
+        noId.unreadable.withoutId = true;
         const ReimportResult unsure = mergeReimport(mine, import({plan[0]}), noId);
         QVERIFY(!unsure.service.items[1].pcoRemoved);
         QCOMPARE(unsure.service.removedPcoItems, mine.removedPcoItems);

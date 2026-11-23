@@ -291,9 +291,9 @@ PcoPlanItems planItemsFrom(const PcoDocument &doc)
         if (!r) {
             const QString id = doc.data[i].isObject() ? idOf(doc.data[i].toObject().value("id")) : QString();
             if (id.isEmpty())
-                out.skippedWithoutId = true;
+                out.unreadable.withoutId = true;
             else
-                out.unreadableIds << id;
+                out.unreadable.ids << id;
             continue;
         }
         const QJsonObject &a = r->attributes;
@@ -304,7 +304,7 @@ PcoPlanItems planItemsFrom(const PcoDocument &doc)
         // blank item first.
         if (!isNumber(a.value("sequence")) || !a.value("item_type").isString() || !a.value("title").isString()) {
             out.skipped << QStringLiteral("%1: is missing its position, kind, or title").arg(itemName(item));
-            out.unreadableIds << item.id;
+            out.unreadable.ids << item.id;
             continue;
         }
         item.type = itemType(str(a, "item_type"));
@@ -318,8 +318,7 @@ PcoPlanItems planItemsFrom(const PcoDocument &doc)
         // A broken link keeps the item, without what it pointed at, and says so.
         const auto problem = [&](const QString &what) {
             out.skipped << QStringLiteral("%1: %2").arg(itemName(item), what);
-            if (!out.unreadableIds.contains(item.id))
-                out.unreadableIds << item.id;
+            out.unreadable.ids << item.id;
         };
         // Its own section order, checked like an arrangement's: emptying a malformed one
         // would quietly change what's sung (#103 review).

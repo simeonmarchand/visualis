@@ -1,5 +1,6 @@
 #pragma once
 
+#include "pco/pcotypes.h"
 #include "service/service.h"
 
 #include <QList>
@@ -44,10 +45,8 @@ QString reimportSummary(const QList<ReimportChange> &changes, bool needsSave);
 struct ReimportOptions {
     // Planning Center ids of items the operator deleted and wants back (ChangedButDeleted).
     QSet<QString> addBack;
-    // From PlanImport: items Planning Center listed but that couldn't be read whole, and
-    // whether a record couldn't be read at all, so nothing missing can be taken as removed.
-    QSet<QString> unreadable;
-    bool unreadableWithoutId = false;
+    // From PlanImport: what couldn't be read, so it isn't taken as changed or removed.
+    PcoUnreadable unreadable;
 };
 
 struct ReimportResult {

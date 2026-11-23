@@ -234,20 +234,20 @@ Run generate(quint32 seed)
     for (const PcoItem &p : std::as_const(run.after)) {
         const int roll = rng.bounded(14);
         if (roll == 0) {
-            run.options.unreadable << p.id;   // left out, but its id is known
+            run.options.unreadable.ids << p.id;   // left out, but its id is known
             run.log << "unreadable " + p.title;
             continue;
         }
         PcoItem got = p;
         if (roll == 1 && got.song) {
             got.song.reset();   // its song record missing
-            run.options.unreadable << p.id;
+            run.options.unreadable.ids << p.id;
             run.log << "no song record " + p.title;
         }
         run.answer << got;
     }
     if (rng.bounded(20) == 0) {
-        run.options.unreadableWithoutId = true;
+        run.options.unreadable.withoutId = true;
         if (!run.answer.isEmpty() && rng.bounded(2) == 0)
             run.answer.removeAt(pick(run.answer.size()));
         run.log << "a record without an id";
@@ -320,7 +320,7 @@ QString check(Run run, ServiceStore &store)
     }
     const auto isOwner = [&](const ServiceItem &it) { return !it.pcoItemId.isEmpty() && owner.value(it.pcoItemId) == it.id; };
     const auto comparable = [&](const ServiceItem &it) {
-        return isOwner(it) && inAnswer.contains(it.pcoItemId) && !o.unreadable.contains(it.pcoItemId)
+        return isOwner(it) && inAnswer.contains(it.pcoItemId) && !o.unreadable.ids.contains(it.pcoItemId)
                && !it.importSnapshot.isEmpty();
     };
     // Where an item was last time; items sharing one can't be ordered, so keep the operator's place.
@@ -366,13 +366,13 @@ QString check(Run run, ServiceStore &store)
             CHECK(m == mine, "an item of the operator's own changed: " + mine.title);   // added, or a copy
             continue;
         }
-        if (o.unreadable.contains(mine.pcoItemId)) {
+        if (o.unreadable.ids.contains(mine.pcoItemId)) {
             CHECK(m == mine, "an unreadable item changed: " + mine.title);
             CHECK(has(mine.id, CK::Unreadable), "no Unreadable line for " + mine.title);
             continue;
         }
         if (!inAnswer.contains(mine.pcoItemId)) {
-            if (o.unreadableWithoutId) {
+            if (o.unreadable.withoutId) {
                 CHECK(m == mine, "taken as removed though part of the plan couldn't be read: " + mine.title);
                 continue;
             }
@@ -428,12 +428,12 @@ QString check(Run run, ServiceStore &store)
         const QString &id = it.key();
         const ServiceItem *now = byPco(fresh, id);
         if (!now) {
-            if (o.unreadable.contains(id) || o.unreadableWithoutId)
+            if (o.unreadable.ids.contains(id) || o.unreadable.withoutId)
                 expectDeleted.insert(id, it.value());
             continue;
         }
         CHECK(!byPco(r.service, id), "a deleted item came back: " + now->title);
-        if (o.unreadable.contains(id)) {
+        if (o.unreadable.ids.contains(id)) {
             expectDeleted.insert(id, it.value());
             continue;
         }
@@ -483,7 +483,7 @@ QString check(Run run, ServiceStore &store)
           "Added lines");
     CHECK(std::any_of(r.changes.cbegin(), r.changes.cend(), [](const ReimportChange &c) {
               return c.kind == CK::Unreadable && c.itemId.isNull();
-          }) == o.unreadableWithoutId,
+          }) == o.unreadable.withoutId,
           "the line saying part of the plan couldn't be read");
 
     CHECK(r.linkable == expectLinkable, "which items may be linked to the library");

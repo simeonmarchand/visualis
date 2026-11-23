@@ -11,7 +11,7 @@ ReimportProposal proposeReimport(const Service &local, const PlanImport &fresh, 
                                  const SongStore &songs)
 {
     ReimportProposal p;
-    p.merge = mergeReimport(local, fresh.service, ReimportOptions{addBack, fresh.unreadable, fresh.unreadableWithoutId});
+    p.merge = mergeReimport(local, fresh.service, ReimportOptions{addBack, fresh.unreadable});
     p.links = linkSongs(p.merge.service, songs, p.merge.linkable);
     p.changes = p.merge.changes;
     QHash<QUuid, qsizetype> at;   // each item's place, for the lines' order
