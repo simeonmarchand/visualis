@@ -50,7 +50,7 @@ void render(LiveItem &live, const TemplateSet &templates, const QUuid &wanted, c
         warnings << QStringLiteral("Its template isn't in the library, so it shows with the built-in \"%1\" template.")
                         .arg(t.name);
     }
-    live.templateId = t.id;
+    live.tmpl = t;
     for (const SongSlide &s : songSlides(live.song, live.arrangement, &live.error)) {
         Content content;
         content.transition = t.transitions.content;

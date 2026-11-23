@@ -68,13 +68,15 @@ struct LiveItem {
     QUuid arrangement;
     QList<LiveSlide> slides;
     QString error;
-    QUuid templateId;              // the template it renders with
+    Template tmpl;                 // the template it renders with, kept for the journal
     bool templateFellBack = false; // the one it asked for wasn't available
     // What went wrong rendering it (a missing template, bad override values), each once,
     // for the operator. The item still shows.
     QStringList warnings;
 
     bool operator==(const LiveItem &) const = default;
+
+    QUuid templateId() const { return tmpl.id; }
 };
 
 // `song` is the item's song from the library, for song items; without it a song item has

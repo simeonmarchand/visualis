@@ -65,7 +65,7 @@ private slots:
     {
         const LiveItem live = liveSong(sample(), {}, templateSet({}));
         QCOMPARE(live.slides.size(), 3);
-        QCOMPARE(live.templateId, builtInLyricsTemplateId());
+        QCOMPARE(live.templateId(), builtInLyricsTemplateId());
         QVERIFY(!live.templateFellBack);
         const Template builtIn = builtInLyricsTemplate();
         for (const LiveSlide &s : live.slides) {
@@ -86,12 +86,12 @@ private slots:
 
         song.defaultTemplate = avenir.id;
         LiveItem live = liveItem(songItem(song), song, set);
-        QCOMPARE(live.templateId, avenir.id);
+        QCOMPARE(live.templateId(), avenir.id);
         QCOMPARE(fontOf(live), QStringLiteral("Avenir"));
         QCOMPARE(fontOf(liveSong(song, {}, set)), QStringLiteral("Avenir"));   // from the library too
 
         live = liveItem(songItem(song, pick(georgia)), song, set);
-        QCOMPARE(live.templateId, georgia.id);
+        QCOMPARE(live.templateId(), georgia.id);
         QCOMPARE(fontOf(live), QStringLiteral("Georgia"));
         QVERIFY(!live.templateFellBack);
     }
@@ -106,11 +106,11 @@ private slots:
         text.title = "Welcome";
         text.body = "Welcome!";
         LiveItem live = liveItem(text, std::nullopt, set);
-        QCOMPARE(live.templateId, builtInLyricsTemplateId());
+        QCOMPARE(live.templateId(), builtInLyricsTemplateId());
         QCOMPARE(live.slides[0].content.regions["main"].text, QStringLiteral("Welcome!"));
         text.overrides = pick(georgia);
         live = liveItem(text, std::nullopt, set);
-        QCOMPARE(live.templateId, georgia.id);
+        QCOMPARE(live.templateId(), georgia.id);
         QCOMPARE(fontOf(live), QStringLiteral("Georgia"));
     }
 
@@ -167,7 +167,7 @@ private slots:
         song.defaultTemplate = QUuid::createUuid();   // deleted, or never loaded
         const LiveItem live = liveItem(songItem(song), song, templateSet({}));
         QCOMPARE(live.slides.size(), 3);   // never a blank output
-        QCOMPARE(live.templateId, builtInLyricsTemplateId());
+        QCOMPARE(live.templateId(), builtInLyricsTemplateId());
         QVERIFY(live.templateFellBack);
         QCOMPARE(fontOf(live), builtInLyricsTemplate().regions[0].style.fontFamily);
         QCOMPARE(live.warnings.size(), 1);   // one for the item, not one per slide

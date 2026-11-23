@@ -1,6 +1,7 @@
 #include "live/livejournal.h"
 #include "live/livestate.h"
 #include "library/songlibrary.h"
+#include "template/templatejson.h"
 #include "live/recovery.h"
 #include "video/videoengine.h"
 
@@ -33,6 +34,17 @@ Song sample()
     return s;
 }
 
+
+// A stored template, as TemplateLibrary loads it.
+Template stored(const QString &font)
+{
+    Template t = builtInLyricsTemplate();
+    t.id = QUuid::createUuid();
+    t.name = font;
+    t.regions[0].style.fontFamily = font;
+    t.transitions.content = {TransitionKind::Fade, 250};
+    return *templateFromJson(templateToJson(t)).tmpl;
+}
 
 // One group of `slides` slides, played `steps` times: structurally small, huge expanded.
 Song repeated(int slides, int steps)
@@ -177,6 +189,55 @@ private slots:
         songs.select(restored.songId());
         QCOMPARE(songs.selectedId(), songId);
         QCOMPARE(songs.selectedSlides().size(), 2);
+    }
+
+    // #93: what comes back is what was on screen, rendered again from the journal alone (the
+    // library may not open): the item, its overrides, its template.
+    void recoveryRendersTheSameItemFromTheJournalAlone()
+    {
+        const Template t = stored("Georgia");
+        ServiceItem item{QUuid::createUuid(), ServiceItem::Kind::Song, "Joy", {}, {}, {}, {}, {}, {}, {}, {}};
+        item.overrides = {{"template", t.id.toString(QUuid::WithoutBraces)},
+                          {"regions", QJsonObject{{"main", QJsonObject{{"weight", 800}}}}}};
+        item.customSequence = {"Intro", "Verse 1", "Chorus"};
+        Song song = sample();
+        song.groups[1].slideOverrides = {QJsonObject{{"regions", QJsonObject{{"main", QJsonObject{{"color", "#ffcc00"}}}}}}};
+        const LiveItem shown = liveItem(item, song, templateSet({t}));
+        const QUuid service = QUuid::createUuid();
+        {
+            LiveState live;
+            Recovery recovery;
+            recovery.start(m_path, &live, nullptr);
+            live.setService(service, {shown});
+            QVERIFY(live.goToItem(0, 2));
+        }   // no finish(): the process died
+
+        LiveState live;
+        Recovery recovery;
+        QVERIFY(recovery.start(m_path, &live, nullptr));
+        QCOMPARE(live.item(), shown);
+        QCOMPARE(live.slideIndex(), 2);
+        QCOMPARE(live.serviceId(), service);
+        QCOMPARE(live.content().regions["main"].style.fontFamily, QStringLiteral("Georgia"));
+    }
+
+    void aLibrarySongComesBackInItsTemplate()
+    {
+        const Template t = stored("Avenir");
+        Song song = sample();
+        song.defaultTemplate = t.id;
+        const LiveItem shown = liveSong(song, {}, templateSet({t}));
+        {
+            LiveState live;
+            Recovery recovery;
+            recovery.start(m_path, &live, nullptr);
+            live.show(shown, 1);
+        }
+        LiveState live;
+        Recovery recovery;
+        QVERIFY(recovery.start(m_path, &live, nullptr));
+        QCOMPARE(live.item(), shown);
+        QCOMPARE(live.content().regions["main"].style.fontFamily, QStringLiteral("Avenir"));
     }
 
     void theBackgroundComesBackToo()

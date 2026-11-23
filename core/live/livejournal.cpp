@@ -1,6 +1,8 @@
 #include "live/livejournal.h"
 
+#include "service/servicejson.h"
 #include "song/songjson.h"
+#include "template/templatejson.h"
 
 #include <QFile>
 #include <QJsonDocument>
@@ -32,6 +34,10 @@ QByteArray snapshotToJson(const LiveSnapshot &s)
         o["service"] = s.service.toString(QUuid::WithoutBraces);
     if (!s.item.isNull())
         o["item"] = s.item.toString(QUuid::WithoutBraces);
+    if (s.serviceItem)
+        o["serviceItem"] = serviceItemToJson(*s.serviceItem);
+    if (s.tmpl)
+        o["template"] = QJsonDocument::fromJson(templateToJson(*s.tmpl)).object();
     return QJsonDocument(o).toJson(QJsonDocument::Compact);
 }
 
@@ -61,6 +67,11 @@ SnapshotResult snapshotFromJson(const QByteArray &json)
     s.background = o.value("background").toString();
     s.service = QUuid::fromString(o.value("service").toString());
     s.item = QUuid::fromString(o.value("item").toString());
+    if (o.contains("serviceItem"))
+        s.serviceItem = serviceItemFromJson(o.value("serviceItem").toObject());
+    // A template that can't be read leaves the item on the built-in, as a missing one does.
+    if (o.contains("template"))
+        s.tmpl = templateFromJson(QJsonDocument(o.value("template").toObject()).toJson()).tmpl;
     s.savedAt = QDateTime::fromString(o.value("savedAt").toString(), Qt::ISODateWithMs);
     return {s, {}};
 }

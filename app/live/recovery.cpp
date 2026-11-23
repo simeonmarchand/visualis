@@ -41,8 +41,12 @@ bool Recovery::start(const QString &journalPath, LiveState *live, VideoEngine *v
             QString refusal;
             const auto onRefused = connect(live, &LiveState::refused, this, [&refusal](const QString &r) { refusal = r; });
             if (s.song) {
-                LiveItem item = liveSong(*s.song, s.arrangement, templateSet({}));
-                item.id = s.item;
+                // Rendered again the way it was: the same expansion, with the journal's template.
+                const TemplateSet templates = templateSet(s.tmpl ? QList<Template>{*s.tmpl} : QList<Template>{});
+                LiveItem item = s.serviceItem ? liveItem(*s.serviceItem, s.song, templates)
+                                              : liveSong(*s.song, s.arrangement, templates);
+                if (!s.serviceItem)
+                    item.id = s.item;   // a journal from before #93
                 live->restore(item, s.slideIndex, s.textCleared, s.backgroundCleared, s.service);
             }
             else if (s.backgroundCleared)
@@ -89,6 +93,10 @@ void Recovery::write()
     s.background = m_video ? m_video->source().toString() : QString();
     s.service = m_live->serviceId();
     s.item = m_live->itemId();
+    if (!m_live->itemId().isNull())
+        s.serviceItem = m_live->item().source;
+    if (s.song && !isBuiltInTemplate(m_live->item().templateId()))
+        s.tmpl = m_live->item().tmpl;
     s.savedAt = QDateTime::currentDateTimeUtc();
 
     if (s.isEmpty() && !s.backgroundCleared) {
