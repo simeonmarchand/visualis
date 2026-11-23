@@ -31,6 +31,7 @@ ServiceList::ServiceList(SongLibrary *songs, LiveState *live, QObject *parent)
 {
     if (m_songs) {
         connect(m_songs, &SongLibrary::libraryChanged, this, &ServiceList::libraryChanged);
+        connect(m_songs, &SongLibrary::templatesChanged, this, &ServiceList::refresh);
         // A song edited or deleted changes the items that use it.
         connect(m_songs, &SongLibrary::songsChanged, this, [this] {
             if (m_open)
@@ -332,7 +333,13 @@ void ServiceList::refresh()
         bool haveCandidates = false;
         for (const ServiceItem &item : std::as_const(m_open->items)) {
             const bool isSong = item.kind == ServiceItem::Kind::Song;
-            m_liveItems << liveItem(item, isSong && m_songs ? m_songs->loadSong(item.ref) : std::nullopt, templateSet({}));
+            m_liveItems << liveItem(item, isSong && m_songs ? m_songs->loadSong(item.ref) : std::nullopt,
+                                    m_songs ? m_songs->templates() : templateSet({}));
+            for (const QString &w : std::as_const(m_liveItems.last().warnings)) {
+                if (!m_loggedWarnings.value(item.id).contains(w))
+                    qCWarning(lcServices).noquote() << QStringLiteral("\"%1\":").arg(item.title) << w;
+            }
+            m_loggedWarnings[item.id] = m_liveItems.last().warnings;   // each logged once, not on every refresh
             // What an unlinked imported song may be, for the operator to pick (#55).
             QVariantList suggestions;
             const std::optional<PcoSong> pco = snapshotSong(item.importSnapshot);
@@ -432,6 +439,7 @@ QVariantList ServiceList::items() const
         const bool songPlaceholder = it.kind == ServiceItem::Kind::Placeholder && snapshotSong(it.importSnapshot);
         list.append(QVariantMap{{"id", braceless(it.id)}, {"kind", kindName(it.kind)}, {"title", it.title},
                                 {"hasSlides", !m_liveItems.value(i).slides.isEmpty()},
+                                {"warnings", m_liveItems.value(i).warnings.join('\n')},
                                 {"songPlaceholder", songPlaceholder}, {"suggestions", m_suggestions.value(i)},
                                 {"pcoRemoved", it.pcoRemoved}});
     }

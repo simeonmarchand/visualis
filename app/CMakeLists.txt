@@ -44,6 +44,8 @@ qt_add_qml_module(visualis_ui
         library/songlibrary.h library/songlibrary.cpp
         library/songeditor.h library/songeditor.cpp
         library/servicelist.h library/servicelist.cpp
+        library/templatelibrary.cpp
+        library/templatelibrary.h
         media/mediaprobe.cpp
         media/mediaprobe.h
 )

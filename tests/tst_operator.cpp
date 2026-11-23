@@ -1,6 +1,7 @@
 #include "library/medialibrary.h"
 #include "library/servicelist.h"
 #include "library/songlibrary.h"
+#include "library/templatelibrary.h"
 #include "library/library.h"
 #include "pco/planimport.h"
 #include "pco/songlink.h"
@@ -452,6 +453,50 @@ private slots:
             QTest::qWait(300);
             window->grabWindow().save(dir + "/operator-service.png");
         }
+    }
+
+    // #93: editing a template in the library shows at once in the open service and on what's
+    // live, at the same slide; deleting it falls back to the built-in with a warning.
+    void aTemplateEditReachesTheServiceAndWhatsLive()
+    {
+        auto *templates = m_engine->singletonInstance<TemplateLibrary *>("Visualis.Ui", "TemplateLibrary");
+        QVERIFY(templates);
+        Template t = builtInLyricsTemplate();
+        t.id = QUuid();
+        t.name = "Ours";
+        t.regions[0].style.fontFamily = "Avenir";
+        QVERIFY(templates->save(t));
+        QVERIFY(templates->templates().contains(t.id));
+
+        const QStringList ids = makeSongs({"Amazing Grace", "Holy Spirit"});
+        Song song = *m_songs->loadSong(QUuid::fromString(ids[0]));
+        song.defaultTemplate = t.id;
+        QString error;
+        QVERIFY2(m_songs->saveSong(song, &error), qPrintable(error));
+        QVERIFY(m_services->createService("Sunday"));
+        QVERIFY(m_services->addSong(ids[0]));
+        QVERIFY(m_live->goToItem(0, 1));
+        auto mainFont = [this] { return m_live->content().regions.value("main").style.fontFamily; };
+        QCOMPARE(mainFont(), QStringLiteral("Avenir"));
+
+        t.regions[0].style.fontFamily = "Georgia";
+        QVERIFY(templates->save(t));
+        QCOMPARE(mainFont(), QStringLiteral("Georgia"));
+        QCOMPARE(m_live->itemIndex(), 0);
+        QCOMPARE(m_live->slideIndex(), 1);
+        QVERIFY(m_services->items()[0].toMap()["warnings"].toString().isEmpty());
+
+        // A song taken live from the library follows too.
+        m_songs->select(ids[0]);
+        QVERIFY(m_songs->goLive(2));
+        t.regions[0].style.fontFamily = "Menlo";
+        QVERIFY(templates->save(t));
+        QCOMPARE(mainFont(), QStringLiteral("Menlo"));
+        QCOMPARE(m_live->slideIndex(), 2);
+
+        QVERIFY(templates->remove(t.id));   // gone: never a blank output
+        QCOMPARE(mainFont(), builtInLyricsTemplate().regions[0].style.fontFamily);
+        QVERIFY(!m_services->items()[0].toMap()["warnings"].toString().isEmpty());
     }
 
     void tileClicksOnAServiceItemAreCommands()

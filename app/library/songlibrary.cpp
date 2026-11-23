@@ -2,6 +2,7 @@
 
 #include "import/propresenter.h"
 #include "library/library.h"
+#include "library/templatelibrary.h"
 #include "live/livestate.h"
 #include "song/lyricspaste.h"
 #include "song/slidelist.h"
@@ -51,6 +52,28 @@ SongLibrary::SongLibrary(QObject *parent)
 {
     m_importSave.setInterval(10);
     connect(&m_importSave, &QTimer::timeout, this, &SongLibrary::saveImported);
+    m_templates = new TemplateLibrary(this);
+    connect(m_templates, &TemplateLibrary::templatesChanged, this, [this] {
+        emit templatesChanged();
+        emit selectionChanged();   // the grid's previews
+        refreshLive();
+    });
+}
+
+const TemplateSet &SongLibrary::templates() const
+{
+    return m_templates->templates();
+}
+
+// Only for a template change: an edit to the song itself waits for the next go-live (#44).
+void SongLibrary::refreshLive()
+{
+    QQmlEngine *engine = qmlEngine(this);
+    auto *live = engine ? engine->singletonInstance<LiveState *>("Visualis.Ui", "LiveState") : nullptr;
+    if (!live || !live->itemId().isNull() || live->song().id.isNull())
+        return;   // nothing from the library is live
+    if (const std::optional<Song> song = loadSong(live->song().id))
+        live->update(liveSong(*song, live->arrangementId(), templates()));
 }
 
 SongLibrary::~SongLibrary()
@@ -163,7 +186,7 @@ bool SongLibrary::goLive(int index)
     if (!m_selected || !engine)
         return false;
     auto *live = engine->singletonInstance<LiveState *>("Visualis.Ui", "LiveState");
-    return live && live->show(liveSong(*m_selected, {}, templateSet({})), index);
+    return live && live->show(liveSong(*m_selected, {}, templates()), index);
 }
 
 bool SongLibrary::importProPresenter(const QUrl &folder)
@@ -425,7 +448,7 @@ bool SongLibrary::saveSong(Song &song, QString *error)
         m_selected = song;
         emit selectionChanged();
     }
-    return true;
+    return true;   // what's live stays as shown until the next go-live (#44)
 }
 
 void SongLibrary::setReport(const QString &report)

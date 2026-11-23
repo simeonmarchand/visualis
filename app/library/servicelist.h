@@ -6,6 +6,7 @@
 #include <QObject>
 #include <QPointer>
 #include <QUrl>
+#include <QHash>
 #include <QVariantList>
 #include <QtQml/qqmlregistration.h>
 
@@ -123,6 +124,7 @@ private:
     std::unique_ptr<visualis::ServiceStore> m_store;
     std::optional<visualis::Service> m_open;
     QList<visualis::LiveItem> m_liveItems;   // one per item of m_open
+    QHash<QUuid, QStringList> m_loggedWarnings;   // each item's rendering warnings, as last logged
     QList<QVariantList> m_suggestions;       // one per item of m_open
     int m_selected = -1;
     bool m_inGrid = false;
