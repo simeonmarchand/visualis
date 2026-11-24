@@ -4,6 +4,9 @@
 #include <QTemporaryDir>
 #include <QtTest>
 
+#include <algorithm>
+#include <limits>
+
 using namespace visualis;
 
 namespace {
@@ -103,21 +106,26 @@ private slots:
     }
 
     // Written on the GUI thread on every slide change, so it must stay cheap.
+    // A shared CI runner can stall one run (#108), so the whole run gets three tries. Each
+    // run is a mean over 100 writes, so a cost that only some writes pay still fails all three.
     void writingIsCheap()
     {
         QTemporaryDir dir;
         LiveSnapshot s;
         s.song = sample();
-        QElapsedTimer timer;
-        timer.start();
         constexpr int writes = 100;
-        for (int i = 0; i < writes; ++i) {
-            s.slideIndex = i % 3;
-            QVERIFY(writeJournal(dir.filePath("live.json"), s));
+        double best = std::numeric_limits<double>::max();
+        for (int run = 0; run < 3 && best >= 5; ++run) {
+            QElapsedTimer timer;
+            timer.start();
+            for (int i = 0; i < writes; ++i) {
+                s.slideIndex = i % 3;
+                QVERIFY(writeJournal(dir.filePath("live.json"), s));
+            }
+            best = std::min(best, timer.nsecsElapsed() / 1e6 / writes);
         }
-        const double msEach = timer.nsecsElapsed() / 1e6 / writes;
-        qInfo() << "journal write:" << msEach << "ms";
-        QVERIFY2(msEach < 5, qPrintable(QString::number(msEach)));
+        qInfo() << "journal write:" << best << "ms";
+        QVERIFY2(best < 5, qPrintable(QString::number(best)));
     }
 
     void badJournalsAreRefusedNotFatal_data()
