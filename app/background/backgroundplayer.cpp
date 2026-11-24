@@ -241,7 +241,7 @@ void BackgroundPlayer::retire(int n)
     Slot &s = *m_slots[n];
     s.video->stop();
     s.still->stop();
-    s.asset = {};
+    s.asset = QUuid();
     s.opacity = 0;
 }
 
