@@ -3,6 +3,7 @@
 #include "media/mediaasset.h"
 
 #include <QList>
+#include <QSet>
 #include <QStringList>
 #include <optional>
 
@@ -44,6 +45,9 @@ public:
     Result remove(const QUuid &id);
     // Whether any row stores this file (relative to media/).
     bool isReferenced(const QString &file) const;
+    // Every row's content hash, or nothing if the database couldn't be read: a sweep given a
+    // partial set would delete files that are in use (#114).
+    std::optional<QSet<QString>> contentHashes() const;
 
     // Absolute paths inside the media folder, or empty when the row's file isn't valid or
     // would resolve outside it (containedPath). Checked again on every call: the folders can

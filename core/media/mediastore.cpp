@@ -144,6 +144,19 @@ bool MediaStore::isReferenced(const QString &file) const
     return q.exec() && q.next();
 }
 
+std::optional<QSet<QString>> MediaStore::contentHashes() const
+{
+    QSqlQuery q(m_library.database());
+    if (!q.exec("SELECT content_hash FROM media_asset"))
+        return std::nullopt;
+    QSet<QString> out;
+    while (q.next())
+        out.insert(q.value(0).toString());
+    if (q.lastError().isValid())   // a read that stopped part way
+        return std::nullopt;
+    return out;
+}
+
 MediaStore::Result MediaStore::remove(const QUuid &id)
 {
     const std::optional<MediaAsset> asset = load(id);

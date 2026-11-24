@@ -2,6 +2,7 @@
 
 #include "media/mediaasset.h"
 
+#include <QSet>
 #include <QString>
 #include <atomic>
 #include <chrono>
@@ -74,5 +75,12 @@ Publish publishPartial(const QString &partialPath, const QString &mediaFolder, c
 // Removes partial copies not written to for `olderThan`: those a crash left. A copy in
 // progress, by this or another Visualis, is written to every few milliseconds.
 void removeStalePartialCopies(const QString &mediaFolder, std::chrono::seconds olderThan);
+
+// Removes published files and thumbnails whose hash isn't in `inUse` (every row's content
+// hash): those a crash left between publishing a copy and saving its row (#114). Only names
+// Visualis gives files are touched ("ab/<hash>[.ext]", "thumbs/<hash>.jpg"). Links, and
+// anything a link points at, are left alone, as is everything else in the folder. The caller
+// must pass every hash in the library: a missing one deletes that asset's file.
+void removeUnusedMediaFiles(const QString &mediaFolder, const QSet<QString> &inUse);
 
 } // namespace visualis
