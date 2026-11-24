@@ -4,6 +4,7 @@
 #include <QDateTime>
 #include <QJsonObject>
 #include <QList>
+#include <QMap>
 #include <QString>
 #include <QStringList>
 #include <QUuid>
@@ -26,6 +27,7 @@ struct ServiceItem {
     QString pcoItemId;          // Planning Center link, if imported
     QJsonObject overrides;      // template, background, slide edits (plan 5.2; shaped in Phase 3)
     QJsonObject importSnapshot; // Planning Center's fields at the last import, for re-import
+    bool pcoRemoved = false;    // gone from the plan at the last re-import: flagged, not deleted (#56)
 
     bool operator==(const ServiceItem &) const = default;
 };
@@ -39,6 +41,10 @@ struct Service {
     QString pcoPlanUrl;         // the plan in Planning Center's web app (P3 finding 7)
     QDateTime lastImportedAt;   // UTC; invalid if never imported
     QList<ServiceItem> items;   // in order
+    // Imported items the operator deleted (#56), by Planning Center id, with what Planning
+    // Center said when each was last merged: a re-import doesn't bring them back unless they
+    // ask. Kept by ServiceStore when an imported item is deleted.
+    QMap<QString, QJsonObject> removedPcoItems;
     QDateTime created;          // set by ServiceStore, UTC
     QDateTime updated;
 

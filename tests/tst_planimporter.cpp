@@ -4,8 +4,14 @@
 #include "pco/pcoclient.h"
 #include "pco/planimporter.h"
 #include "service/servicestore.h"
+#include "song/songstore.h"
+
+#include "fakeplanningcenter.h"
 
 #include <QFile>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QNetworkAccessManager>
 #include <QSignalSpy>
 #include <QSqlQuery>
@@ -19,104 +25,7 @@
 #include <QtTest>
 
 using namespace visualis;
-using Kind = ServiceItem::Kind;
-
-namespace {
-
-// A stand-in for Planning Center on localhost: each path (query ignored) answers from a
-// queue of bodies, the last one repeating; 404 otherwise. tst_pcoclient has the full one.
-class FakePlanningCenter : public QObject
-{
-public:
-    FakePlanningCenter()
-    {
-        m_server.listen(QHostAddress::LocalHost);
-        connect(&m_server, &QTcpServer::newConnection, this, [this] {
-            while (QTcpSocket *s = m_server.nextPendingConnection())
-                connect(s, &QTcpSocket::readyRead, s, [this, s] { answer(s); });
-        });
-    }
-
-    QUrl url() const { return QUrl(QStringLiteral("http://127.0.0.1:%1/services/v2/").arg(m_server.serverPort())); }
-    void on(const QByteArray &path, const QStringList &fixtures, int delayMs = 0)
-    {
-        for (const QString &name : fixtures) {
-            QFile f(QStringLiteral(FIXTURES_DIR "/pco/") + name);
-            if (!f.open(QIODevice::ReadOnly))
-                qFatal("missing fixture %s", qPrintable(name));
-            onBody(path, f.readAll(), delayMs);
-        }
-    }
-    // A reply written here, answered after `delayMs`.
-    void onBody(const QByteArray &path, const QByteArray &body, int delayMs = 0)
-    {
-        m_routes[path] << Reply{QByteArray(body).replace("{{BASE}}", url().toString().toUtf8()), delayMs};
-    }
-    void clear(const QByteArray &path) { m_routes.remove(path); }
-    // A reply held back until release(), so a test decides the order answers arrive in.
-    void onHeld(const QByteArray &path, const QString &fixture)
-    {
-        on(path, {fixture});
-        m_routes[path].last().held = true;
-    }
-    void release()
-    {
-        for (const auto &send : std::exchange(m_held, {}))
-            send();
-    }
-    int requests = 0;
-
-private:
-    void answer(QTcpSocket *s)
-    {
-        const QByteArray head = s->readAll();
-        if (!head.contains("\r\n\r\n"))
-            return;
-        ++requests;
-        QByteArray path = head.split(' ').value(1);
-        path = path.left(path.indexOf('?') < 0 ? path.size() : path.indexOf('?'));
-        QByteArray status = "200 OK";
-        Reply reply{R"({"errors":[{"status":"404"}]})", 0};
-        if (auto it = m_routes.find(path); it != m_routes.end() && !it->isEmpty())
-            reply = it->size() > 1 ? it->takeFirst() : it->first();
-        else
-            status = "404 Not Found";
-        const QPointer<QTcpSocket> socket(s);
-        auto send = [socket, status, body = reply.body] {
-            if (!socket)
-                return;
-            socket->write("HTTP/1.1 " + status + "\r\nContent-Type: application/json\r\nContent-Length: "
-                          + QByteArray::number(body.size()) + "\r\nConnection: close\r\n\r\n" + body);
-            socket->disconnectFromHost();
-        };
-        if (reply.held)
-            m_held << send;
-        else
-            QTimer::singleShot(reply.delayMs, s, send);
-    }
-
-    struct Reply {
-        QByteArray body;
-        int delayMs = 0;
-        bool held = false;
-    };
-    QList<std::function<void()>> m_held;
-    QTcpServer m_server;
-    QHash<QByteArray, QList<Reply>> m_routes;
-};
-
-class FixedToken : public PcoAuthorizer
-{
-public:
-    QByteArray authorization() const override { return "Basic dGVzdDp0ZXN0"; }
-};
-
-constexpr char kTypes[] = "/services/v2/service_types";
-constexpr char kPlans[] = "/services/v2/service_types/1001/plans";
-constexpr char kPlan[] = "/services/v2/service_types/1001/plans/5001";
-constexpr char kItems[] = "/services/v2/service_types/1001/plans/5001/items";
-
-} // namespace
+using namespace visualis::testing;
 
 // #54: the picker's model against a fake Planning Center, saving into a real library.
 class PlanImporterTest : public QObject
@@ -127,22 +36,8 @@ class PlanImporterTest : public QObject
     QTemporaryDir m_dir;
     int m_n = 0;
 
-    std::unique_ptr<PcoClient> client(const QUrl &url)
-    {
-        auto c = std::make_unique<PcoClient>(&m_network, url, [] { return std::make_unique<FixedToken>(); });
-        c->setTransferTimeoutMs(2000);
-        return c;
-    }
-
-    void serve(FakePlanningCenter &server)
-    {
-        server.on(kTypes, {"service_types.json"});
-        server.on(kPlans, {"plans.json"});
-        server.on(kPlan, {"plan.json"});
-        server.on(kItems, {"items_page1.json", "items_page2.json"});
-    }
-
-    static bool idle(PlanImporter &importer) { return QTest::qWaitFor([&] { return !importer.busy(); }, 5000); }
+    std::unique_ptr<PcoClient> client(const QUrl &url) { return fakeClient(m_network, url); }
+    static void serve(FakePlanningCenter &server) { serveFixtures(server); }
 
 private slots:
     void initTestCase() { QVERIFY(m_dir.isValid()); }
@@ -326,12 +221,11 @@ private slots:
         QVERIFY(idle(importer));
         QCOMPARE(imported.size(), 1);
 
-        const int before = server.requests;
+        // Picked again: it's re-imported into its service (#56), not imported twice.
         importer.importPlan("1001", "5001");
         QVERIFY(idle(importer));
         QCOMPARE(imported.size(), 1);
-        QCOMPARE(server.requests, before);   // refused before asking Planning Center
-        QVERIFY(importer.status().contains("already in the library"));
+        QCOMPARE(importer.reimportServiceId(), imported[0][0].toString());
         QCOMPARE(ServiceStore(*songs.library()).list().size(), 1);
     }
 
@@ -494,6 +388,26 @@ private slots:
         QCOMPARE(imported.size(), 0);
         QVERIFY2(importer.status().contains("another program kept the library busy"), qPrintable(importer.status()));
         QVERIFY(ServiceStore(*songs.library()).list().isEmpty());
+    }
+
+    // Review of #103 (M6): the songs' Planning Center links are saved, with the service.
+    void importingRemembersEachSongsPlanningCenterLink()
+    {
+        SongLibrary songs;
+        QVERIFY(songs.openLibrary(m_dir.filePath(QString::number(++m_n))));
+        QVERIFY(songs.createFromPaste("Example Song One", "[Verse 1]\nSynthetic words"));
+        const QUuid one = QUuid::fromString(songs.selectedId());
+        FakePlanningCenter server;
+        serve(server);
+        PlanImporter importer;
+        importer.setSongLibrary(&songs);
+        importer.setClient(client(server.url()));
+        QSignalSpy imported(&importer, &PlanImporter::imported);
+        importer.importPlan("1001", "5001");
+        QVERIFY(idle(importer));
+        QCOMPARE(imported.size(), 1);
+        QCOMPARE(SongStore(*songs.library()).load(one)->pcoSongId, QStringLiteral("7001"));
+        QVERIFY(importer.status().contains("1 by title"));
     }
 
     void aFailedReadLeavesTheLibraryAlone()

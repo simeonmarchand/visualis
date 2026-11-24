@@ -5,6 +5,7 @@
 
 #include <QDateTime>
 #include <QList>
+#include <QSet>
 #include <QStringList>
 
 namespace visualis {
@@ -20,11 +21,12 @@ namespace visualis {
 //  - A plain item whose title holds a scripture reference ("Scripture Reading: Acts 2:38")
 //    becomes a scripture item with the reference as its body, for Phase 4 to fill.
 //  - Other plain items (Welcome, Sermon) are placeholders with their title.
-//  - Every item keeps its `pcoItemId` and a snapshot of what Planning Center said, for
-//    re-import (#56).
+//  - Every item keeps its `pcoItemId` and a snapshot of what Planning Center said, with its
+//    place in the plan as `order`, for re-import (#56).
 struct PlanImport {
     Service service;
     QStringList notes;     // what the operator should know: records that couldn't be read
+    PcoUnreadable unreadable;   // from PcoPlanItems, for re-import
 };
 
 PlanImport serviceFromPlan(const PcoServiceType &type, const PcoPlan &plan, const PcoPlanItems &items,
@@ -33,6 +35,10 @@ PlanImport serviceFromPlan(const PcoServiceType &type, const PcoPlan &plan, cons
 // What's kept of an item in `ServiceItem::importSnapshot`. Only the plan's content (titles,
 // order, songs, keys); never people or notes (plan 7.2).
 QJsonObject importSnapshot(const PcoItem &item);
+
+// The item an import makes from a snapshot: what Planning Center's fields alone give. A
+// re-import compares it with the operator's item to see what the operator changed (#56).
+ServiceItem importedItem(const QString &pcoItemId, const QJsonObject &snapshot);
 
 // Plans for the picker: upcoming ones first, soonest first, then past ones, latest first.
 // A plan counts as upcoming through the whole of its day (`today` is the operator's date).

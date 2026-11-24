@@ -2,6 +2,7 @@
 
 #include <QDateTime>
 #include <QList>
+#include <QSet>
 #include <QString>
 #include <QStringList>
 #include <QUrl>
@@ -96,11 +97,22 @@ struct PcoItem
     }
 };
 
+// What of a plan couldn't be read, for re-import (#56): the ids of items left out or only partly
+// read, so a merge can leave the operator's copies alone, and whether a record was left out
+// without an id (then any item missing from the answer may only have been unreadable).
+struct PcoUnreadable
+{
+    QSet<QString> ids;
+    bool withoutId = false;
+    bool operator==(const PcoUnreadable &) const = default;
+};
+
 // A plan with its items in plan order.
 struct PcoPlanItems
 {
     QList<PcoItem> items;
     QStringList skipped;        // records left out or only partly read; also in PcoResult::skipped
+    PcoUnreadable unreadable;
 };
 
 // Why a read failed. The message is written for the operator.

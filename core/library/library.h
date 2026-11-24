@@ -66,6 +66,32 @@ public:
     QString setting(const QString &key, const QString &fallback = {}) const;
     bool setSetting(const QString &key, const QString &value);
 
+    // A transaction on the library's connection that rolls back unless commit() is called, so
+    // every early return leaves the library as it was. With Lock::NowOrBusy it takes the write
+    // lock up front without waiting: if another program holds it, ok() is false and busy() true,
+    // so the caller can try again later instead of holding up the operator window (#76).
+    class Transaction
+    {
+    public:
+        enum class Lock { Wait, NowOrBusy };
+        explicit Transaction(Library &library, Lock lock = Lock::Wait);
+        ~Transaction();
+        Transaction(const Transaction &) = delete;
+        Transaction &operator=(const Transaction &) = delete;
+
+        bool ok() const { return m_open; }
+        bool busy() const { return m_busy; }
+        QString error() const { return m_error; }
+        // Empty when committed; otherwise why not, rolled back.
+        QString commit();
+
+    private:
+        QSqlDatabase m_db;
+        bool m_open = false;
+        bool m_busy = false;
+        QString m_error;
+    };
+
 private:
     explicit Library(const QString &folder, const QString &connectionName);
 

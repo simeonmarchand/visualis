@@ -214,6 +214,13 @@ const std::vector<Migration> &Library::migrations()
              "CREATE INDEX template_name ON template(name COLLATE NOCASE)",
              "ALTER TABLE song ADD COLUMN default_template TEXT NOT NULL DEFAULT ''",
              "ALTER TABLE song_group ADD COLUMN slide_overrides TEXT NOT NULL DEFAULT '[]'"}},
+        // Re-import (#56): items Planning Center took out stay, flagged, until the operator
+        // removes them; imported items the operator deleted are remembered, so they stay deleted.
+        {6, {"ALTER TABLE service_item ADD COLUMN pco_removed INTEGER NOT NULL DEFAULT 0",
+             "CREATE TABLE service_removed_pco_item ("
+             " service_id TEXT NOT NULL REFERENCES service(id) ON DELETE CASCADE,"
+             " pco_item_id TEXT NOT NULL, import_snapshot TEXT NOT NULL DEFAULT '{}',"
+             " PRIMARY KEY (service_id, pco_item_id))"}},
     };
     return all;
 }
@@ -333,6 +340,44 @@ bool Library::setSetting(const QString &key, const QString &value)
     q.addBindValue(key);
     q.addBindValue(value.isNull() ? QStringLiteral("") : value);   // Qt binds a null QString as NULL
     return q.exec();
+}
+
+Library::Transaction::Transaction(Library &library, Lock lock)
+    : m_db(library.database())
+{
+    if (lock == Lock::Wait) {
+        m_open = m_db.transaction();
+        if (!m_open)
+            m_error = m_db.lastError().text();
+        return;
+    }
+    QSqlQuery q(m_db);
+    q.exec(QStringLiteral("PRAGMA busy_timeout = 0"));
+    m_open = q.exec(QStringLiteral("BEGIN IMMEDIATE"));
+    const QSqlError error = q.lastError();
+    q.exec(QStringLiteral("PRAGMA busy_timeout = %1").arg(kBusyTimeoutMs));
+    if (!m_open) {
+        m_busy = error.nativeErrorCode() == QLatin1String("5");   // SQLITE_BUSY
+        m_error = m_busy ? QStringLiteral("The library is in use by another program.") : error.text();
+    }
+}
+
+Library::Transaction::~Transaction()
+{
+    if (m_open)
+        m_db.rollback();
+}
+
+QString Library::Transaction::commit()
+{
+    if (!m_open)
+        return m_error.isEmpty() ? QStringLiteral("no transaction") : m_error;
+    m_open = false;
+    if (m_db.commit())
+        return {};
+    const QString error = m_db.lastError().text();
+    m_db.rollback();
+    return error;
 }
 
 } // namespace visualis

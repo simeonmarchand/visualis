@@ -432,7 +432,8 @@ QVariantList ServiceList::items() const
         const bool songPlaceholder = it.kind == ServiceItem::Kind::Placeholder && snapshotSong(it.importSnapshot);
         list.append(QVariantMap{{"id", braceless(it.id)}, {"kind", kindName(it.kind)}, {"title", it.title},
                                 {"hasSlides", !m_liveItems.value(i).slides.isEmpty()},
-                                {"songPlaceholder", songPlaceholder}, {"suggestions", m_suggestions.value(i)}});
+                                {"songPlaceholder", songPlaceholder}, {"suggestions", m_suggestions.value(i)},
+                                {"pcoRemoved", it.pcoRemoved}});
     }
     return list;
 }

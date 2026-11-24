@@ -4,6 +4,8 @@
 #include "song/slidelist.h"
 #include "song/songstore.h"
 
+#include <algorithm>
+
 namespace visualis {
 
 ServiceItem linkedItem(ServiceItem item, const Song &song)
@@ -81,12 +83,12 @@ QString SongLinkReport::summary() const
     return parts.join(QStringLiteral(", ")) + QLatin1Char('.');
 }
 
-SongLinkReport linkSongs(Service &service, SongStore &songs)
+SongLinkReport linkSongs(Service &service, const SongStore &songs, const std::optional<QSet<QUuid>> &only)
 {
     SongLinkReport report;
     QList<SongCandidate> candidates = songs.matchCandidates();
     for (ServiceItem &item : service.items) {
-        if (item.kind != ServiceItem::Kind::Placeholder)
+        if (item.kind != ServiceItem::Kind::Placeholder || (only && !only->contains(item.id)))
             continue;
         const std::optional<PcoSong> pco = snapshotSong(item.importSnapshot);
         if (!pco)
@@ -96,12 +98,23 @@ SongLinkReport linkSongs(Service &service, SongStore &songs)
             ++report.toConfirm;
             continue;
         }
-        std::optional<Song> song = m.kind == SongMatch::Kind::Linked ? songs.load(m.songId) : std::nullopt;
+        if (m.kind != SongMatch::Kind::Linked) {
+            ++report.placeholders;
+            continue;
+        }
+        // A song updated for an earlier item is used as updated: it isn't saved yet.
+        const auto staged = std::find_if(report.songs.begin(), report.songs.end(),
+                                         [&](const Song &s) { return s.id == m.songId; });
+        std::optional<Song> song = staged != report.songs.end() ? std::optional<Song>(*staged) : songs.load(m.songId);
         if (!song) {
             ++report.placeholders;
             continue;
         }
-        if (rememberPcoSong(*song, *pco) && songs.save(*song).ok) {
+        if (rememberPcoSong(*song, *pco)) {
+            if (staged != report.songs.end())
+                *staged = *song;
+            else
+                report.songs << *song;
             for (SongCandidate &c : candidates) {
                 if (c.id == song->id)
                     c = SongCandidate{song->id, song->title, song->credits.ccliNumber, song->credits.authors, song->pcoSongId};
@@ -109,6 +122,7 @@ SongLinkReport linkSongs(Service &service, SongStore &songs)
         }
         item = linkedItem(item, *song);
         ++(m.by == SongMatch::By::Title ? report.byTitle : report.linked);
+        report.items << SongLinkReport::Linked{item.id, song->title, m.by == SongMatch::By::Title};
         if (const QStringList missing = unmatchedLabels(item, *song); !missing.isEmpty())
             report.unmatched << QStringLiteral("%1: %2").arg(song->title, missing.join(QStringLiteral(", ")));
     }

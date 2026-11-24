@@ -16,6 +16,7 @@ qt_add_qml_module(visualis_ui
         qml/OutputSettings.qml
         qml/PlanningCenterDialog.qml
         qml/PlanPickerDialog.qml
+        qml/ReimportDialog.qml
         qml/SongListPane.qml
         qml/ServicePane.qml
         qml/NameDialog.qml

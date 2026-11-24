@@ -57,17 +57,39 @@ ServiceStore::ServiceStore(Library &library)
 
 ServiceStore::Result ServiceStore::save(Service &service)
 {
-    return save(service, false);
-}
-
-ServiceStore::Result ServiceStore::saveNewPlan(Service &service)
-{
-    return save(service, true);
-}
-
-ServiceStore::Result ServiceStore::save(Service &service, bool newPlan)
-{
     Service s = service;   // a failed save leaves the caller's service as it was
+    if (Result r = prepare(s); !r.ok)
+        return r;
+    Library::Transaction tx(m_library);
+    if (!tx.ok())
+        return {false, tx.error()};
+    if (Result r = finish(s, tx, {}); !r.ok)
+        return r;
+    service = s;
+    return {};
+}
+
+ServiceStore::Result ServiceStore::saveNewPlan(Service &service, const AlsoWrite &also)
+{
+    Service s = service;
+    if (Result r = prepare(s); !r.ok)
+        return r;
+    Library::Transaction tx(m_library, Library::Transaction::Lock::NowOrBusy);
+    if (!tx.ok())
+        return {false, tx.error(), tx.busy()};
+    // Under the lock, so the duplicate check holds until the commit.
+    if (const auto existing = findByPcoPlan(s.pcoPlanId))
+        return {false, QStringLiteral("This plan is already in the library as \"%1\".").arg(existing->title), false,
+                existing->title};
+    if (Result r = finish(s, tx, also); !r.ok)
+        return r;
+    service = s;
+    return {};
+}
+
+// Checks the service and fills in what saving gives it (ids, timestamps). Reads only.
+ServiceStore::Result ServiceStore::prepare(Service &s) const
+{
     if (s.title.trimmed().isEmpty())
         return {false, QStringLiteral("A service needs a title.")};
     if (s.id.isNull())
@@ -97,31 +119,17 @@ ServiceStore::Result ServiceStore::save(Service &service, bool newPlan)
             return {false, QStringLiteral("\"%1\" uses an item that belongs to another service.").arg(s.title)};
     }
 
-    if (newPlan) {
-        // Take the write lock now, without waiting for it, so the duplicate check below
-        // holds until the commit.
-        QSqlQuery q(db);
-        q.exec("PRAGMA busy_timeout = 0");
-        const bool begun = q.exec("BEGIN IMMEDIATE");
-        const QSqlError error = q.lastError();
-        q.exec(QStringLiteral("PRAGMA busy_timeout = %1").arg(Library::kBusyTimeoutMs));
-        if (!begun) {
-            const bool busy = error.nativeErrorCode() == QLatin1String("5");   // SQLITE_BUSY
-            return {false, busy ? QStringLiteral("The library is in use by another program.") : error.text(), busy};
-        }
-        if (const auto existing = findByPcoPlan(s.pcoPlanId)) {
-            db.rollback();
-            return {false, QStringLiteral("This plan is already in the library as \"%1\".").arg(existing->title), false,
-                    existing->title};
-        }
-    } else if (!db.transaction()) {
-        return {false, db.lastError().text()};
-    }
-    auto fail = [&](const QString &error) {
-        db.rollback();
-        return Result{false, QStringLiteral("Couldn't save \"%1\": %2").arg(s.title, error)};
-    };
+    return {};
+}
 
+// Writes a prepared service, inside a transaction. Returns why not.
+QString ServiceStore::write(Service &s)
+{
+    QSqlDatabase db = m_library.database();
+    const QString serviceId = key(s.id);
+    QSet<QUuid> itemIds;
+    for (const ServiceItem &item : std::as_const(s.items))
+        itemIds.insert(item.id);
     QString err = run(db,
         "INSERT INTO service (id, title, date, pco_plan_id, pco_service_type_id, pco_plan_url, last_imported_at, created_at, "
         "updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET title = excluded.title, date = excluded.date, "
@@ -130,21 +138,31 @@ ServiceStore::Result ServiceStore::save(Service &service, bool newPlan)
         {serviceId, s.title, s.date.isValid() ? s.date.toString(Qt::ISODate) : QStringLiteral(""), text(s.pcoPlanId),
          text(s.pcoServiceTypeId), text(s.pcoPlanUrl), timestamp(s.lastImportedAt), timestamp(s.created), timestamp(s.updated)});
     if (!err.isEmpty())
-        return fail(err);
+        return err;
 
     {
         QSqlQuery q(db);
-        q.prepare("SELECT id FROM service_item WHERE service_id = ?");
+        q.prepare("SELECT id, pco_item_id, import_snapshot, pco_removed FROM service_item WHERE service_id = ?");
         q.addBindValue(serviceId);
         q.exec();
+        QSet<QString> stillThere;
+        for (const ServiceItem &it : std::as_const(s.items))
+            stillThere << it.pcoItemId;
         QList<QUuid> gone;
         while (q.next()) {
-            if (!itemIds.contains(uuid(q.value(0))))
-                gone << uuid(q.value(0));
+            if (itemIds.contains(uuid(q.value(0))))
+                continue;
+            gone << uuid(q.value(0));
+            // Deleting an imported item is an edit a re-import must keep (#56). One Planning
+            // Center already took out needs no record.
+            const QString pcoId = q.value(1).toString();
+            if (!pcoId.isEmpty() && q.value(3).toInt() == 0 && !stillThere.contains(pcoId)
+                && !s.removedPcoItems.contains(pcoId))
+                s.removedPcoItems.insert(pcoId, objectFrom(q.value(2)));
         }
         for (const QUuid &id : gone) {
             if (!(err = run(db, "DELETE FROM service_item WHERE id = ?", {key(id)})).isEmpty())
-                return fail(err);
+                return err;
         }
     }
 
@@ -152,21 +170,60 @@ ServiceStore::Result ServiceStore::save(Service &service, bool newPlan)
         const ServiceItem &it = s.items[i];
         err = run(db,
             "INSERT INTO service_item (id, service_id, position, kind, title, ref_id, arrangement_id, custom_sequence, "
-            "body, service_position, pco_item_id, overrides, import_snapshot) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "body, service_position, pco_item_id, overrides, import_snapshot, pco_removed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(id) DO UPDATE SET position = excluded.position, kind = excluded.kind, title = excluded.title, "
             "ref_id = excluded.ref_id, arrangement_id = excluded.arrangement_id, custom_sequence = excluded.custom_sequence, "
             "body = excluded.body, service_position = excluded.service_position, pco_item_id = excluded.pco_item_id, "
-            "overrides = excluded.overrides, import_snapshot = excluded.import_snapshot",
+            "overrides = excluded.overrides, import_snapshot = excluded.import_snapshot, pco_removed = excluded.pco_removed",
             {key(it.id), serviceId, i, kindName(it.kind), text(it.title), key(it.ref), key(it.arrangement),
              json(it.customSequence), text(it.body), text(it.servicePosition), text(it.pcoItemId), json(it.overrides),
-             json(it.importSnapshot)});
+             json(it.importSnapshot), it.pcoRemoved ? 1 : 0});
         if (!err.isEmpty())
-            return fail(err);
+            return err;
     }
 
-    if (!db.commit())
-        return fail(db.lastError().text());
-    service = s;
+    if (!(err = run(db, "DELETE FROM service_removed_pco_item WHERE service_id = ?", {serviceId})).isEmpty())
+        return err;
+    for (auto r = s.removedPcoItems.cbegin(); r != s.removedPcoItems.cend(); ++r) {
+        if (!(err = run(db, "INSERT INTO service_removed_pco_item (service_id, pco_item_id, import_snapshot) "
+                            "VALUES (?, ?, ?)", {serviceId, r.key(), json(r.value())})).isEmpty())
+            return err;
+    }
+
+    return {};
+}
+
+ServiceStore::Result ServiceStore::finish(Service &s, Library::Transaction &tx, const AlsoWrite &also)
+{
+    QString err = write(s);
+    if (err.isEmpty() && also)
+        err = also();
+    if (err.isEmpty())
+        err = tx.commit();
+    if (err.isEmpty())
+        return {};
+    return {false, QStringLiteral("Couldn't save \"%1\": %2").arg(s.title, err)};
+}
+
+ServiceStore::Result ServiceStore::applyWithoutWaiting(const QUuid &id, const Decide &decide, Service *saved)
+{
+    Library::Transaction tx(m_library, Library::Transaction::Lock::NowOrBusy);
+    if (!tx.ok())
+        return {false, tx.error(), tx.busy()};
+    // Read under the write lock: nothing can change it between here and the commit.
+    const std::optional<Service> current = load(id);
+    if (!current)
+        return {false, QStringLiteral("The service is gone from the library.")};
+    std::optional<Decision> d = decide(*current);
+    if (!d)
+        return {false, {}};
+    Service s = d->service;
+    if (Result r = prepare(s); !r.ok)
+        return r;
+    if (Result r = finish(s, tx, d->also); !r.ok)
+        return r;
+    if (saved)
+        *saved = s;
     return {};
 }
 
@@ -193,7 +250,7 @@ std::optional<Service> ServiceStore::load(const QUuid &id) const
 
     QSqlQuery items(db);
     items.prepare("SELECT id, kind, title, ref_id, arrangement_id, custom_sequence, body, service_position, "
-                  "pco_item_id, overrides, import_snapshot FROM service_item WHERE service_id = ? ORDER BY position");
+                  "pco_item_id, overrides, import_snapshot, pco_removed FROM service_item WHERE service_id = ? ORDER BY position");
     items.addBindValue(key(id));
     items.exec();
     while (items.next()) {
@@ -209,6 +266,7 @@ std::optional<Service> ServiceStore::load(const QUuid &id) const
         it.pcoItemId = items.value(8).toString();
         it.overrides = objectFrom(items.value(9));
         it.importSnapshot = objectFrom(items.value(10));
+        it.pcoRemoved = items.value(11).toInt() != 0;
         if (it.kind == ServiceItem::Kind::Song && !songExists(db, it.ref)) {
             // The song was deleted from the library: keep the place, ask for a song again.
             it.kind = ServiceItem::Kind::Placeholder;
@@ -217,6 +275,12 @@ std::optional<Service> ServiceStore::load(const QUuid &id) const
         }
         s.items << it;
     }
+    QSqlQuery removed(db);
+    removed.prepare("SELECT pco_item_id, import_snapshot FROM service_removed_pco_item WHERE service_id = ?");
+    removed.addBindValue(key(id));
+    removed.exec();
+    while (removed.next())
+        s.removedPcoItems.insert(removed.value(0).toString(), objectFrom(removed.value(1)));
     return s;
 }
 

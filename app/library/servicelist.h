@@ -33,9 +33,12 @@ class ServiceList : public QObject
     Q_PROPERTY(QVariantList services READ services NOTIFY servicesChanged)
     Q_PROPERTY(QString openId READ openId NOTIFY serviceChanged)
     Q_PROPERTY(QString openTitle READ openTitle NOTIFY serviceChanged)
-    // {id, kind, title, hasSlides, songPlaceholder, suggestions} per item of the open
-    // service, in order. `songPlaceholder`: an imported song not linked to the library yet;
-    // `suggestions`: [{id, title}] of library songs it may be (#55).
+    // Whether the open service came from a Planning Center plan, so it can be re-imported.
+    Q_PROPERTY(bool openImported READ openImported NOTIFY serviceChanged)
+    // {id, kind, title, hasSlides, songPlaceholder, suggestions, pcoRemoved} per item of the
+    // open service, in order. `songPlaceholder`: an imported song not linked to the library
+    // yet; `suggestions`: [{id, title}] of library songs it may be (#55); `pcoRemoved`: taken
+    // out of the plan in Planning Center (#56).
     Q_PROPERTY(QVariantList items READ items NOTIFY serviceChanged)
     Q_PROPERTY(int selectedIndex READ selectedIndex NOTIFY selectionChanged)
     Q_PROPERTY(QString selectedTitle READ selectedTitle NOTIFY selectionChanged)
@@ -91,6 +94,7 @@ public:
     QVariantList services() const;
     QString openId() const;
     QString openTitle() const;
+    bool openImported() const { return m_open && !m_open->pcoPlanId.isEmpty(); }
     QVariantList items() const;
     int selectedIndex() const { return m_selected; }
     QString selectedTitle() const;
