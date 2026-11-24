@@ -297,6 +297,13 @@ private slots:
         Song regrouped = s;
         regrouped.groups << Group{QUuid::createUuid(), "Tag", {}, {"new"}};
         QVERIFY(!store.saveSlideOverrides(regrouped).ok);   // a group the library doesn't have
+        Song stale = s;   // the slides changed in the library since this copy was loaded
+        Song moved = s;
+        moved.groups[1].slides.swapItemsAt(0, 1);
+        SAVE_OK(store, moved);
+        stale.groups[1].slideOverrides = {{{"regions", QJsonObject{{"main", QJsonObject{{"weight", 700}}}}}}, {}};
+        QVERIFY(store.saveSlideOverrides(stale).error.contains("changed in the library"));
+        s = moved;
         Song big = s;
         big.groups[0].slideOverrides = {{{"later", QString(songlimits::kSlideOverrideBytes, 'x')}}};
         const SongStore::Result r = store.saveSlideOverrides(big);

@@ -138,10 +138,12 @@ LyricsEdit applyLyricsText(const Song &song, const QString &text)
             g.color = was.color;
             // A group whose text wasn't touched keeps its slides exactly as they were (the parser
             // would trim them).
+            // Remapped first, so parsed text is compared with parsed text.
             const QStringList wasEdited = slidesAsEdited(was);
+            const int lost = remapSlideOverrides(was, wasEdited, g);
             if (g.slides == wasEdited)
                 g.slides = was.slides;
-            if (const int lost = remapSlideOverrides(was, wasEdited, g); lost > 0)
+            if (lost > 0)
                 out.warnings << QStringLiteral("\"%1\"'s slides changed, so the style changes of %2 %3 were dropped.")
                                     .arg(g.label).arg(lost).arg(lost == 1 ? QStringLiteral("slide") : QStringLiteral("slides"));
         } else if (!song.arrangements.isEmpty()) {

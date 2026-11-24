@@ -318,6 +318,17 @@ private slots:
         QVERIFY(more.warnings.isEmpty());
     }
 
+    // Thermo review: stored text the parser would trim still matches its own slide.
+    void anUntouchedGroupWithUntrimmedRepeatsKeepsItsOverrides()
+    {
+        Song s = withGroups({Group{QUuid::createUuid(), "Chorus", {}, {"sing ", "sing"}}});
+        s.groups[0].slideOverrides = {styled("#000001"), styled("#000002")};
+        const LyricsEdit e = applyLyricsText(s, lyricsText(s));
+        QCOMPARE(e.song.groups[0].slides, s.groups[0].slides);
+        QCOMPARE(e.song.groups[0].slideOverrides, s.groups[0].slideOverrides);
+        QVERIFY2(e.warnings.isEmpty(), qPrintable(e.warnings.join('\n')));
+    }
+
     void aRenamedGroupCarriesItsOverrides()
     {
         Song s = withGroups({Group{QUuid::createUuid(), "Verse 1", {}, {"one", "two"}}});

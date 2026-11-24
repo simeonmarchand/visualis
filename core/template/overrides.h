@@ -35,6 +35,9 @@ QJsonValue propertyValue(const QJsonObject &region, const QString &path);
 // The region properties `overrides` sets for `regionId`, as sorted paths.
 QStringList overriddenProperties(const QJsonObject &overrides, const QString &regionId);
 
+// How many region properties `overrides` sets, in every region.
+int propertyCount(const QJsonObject &overrides);
+
 // Sets one region property. Empty when set; otherwise why not, and `overrides` is unchanged:
 // an unknown path, or a value that isn't valid for it (the rules templates are read with).
 // Rules between properties (minSize at most maxSize, the frame on the output) depend on the
@@ -46,8 +49,7 @@ void resetProperty(QJsonObject &overrides, const QString &regionId, const QStrin
 // Visualis doesn't know stay.
 void resetAll(QJsonObject &overrides);
 
-// A service item's template. Empty when set; a null id is refused (reset instead).
-QString setTemplate(QJsonObject &overrides, const QUuid &templateId);
-void resetTemplate(QJsonObject &overrides);
+// A service item's template; a null id removes the choice.
+void setTemplate(QJsonObject &overrides, const QUuid &templateId);
 
 } // namespace visualis::overrides

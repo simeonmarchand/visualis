@@ -77,8 +77,8 @@ private slots:
         QJsonObject o = parse("{'later': 1, 'regions': {'main': {'glow': true, 'shadow': {'spread': 2}}, 'other': {'x': 1}}}");
         QCOMPARE(overrides::setProperty(o, "main", "shadow.opacity", 0.5), QString());
         overrides::resetProperty(o, "main", "shadow.opacity");
-        QCOMPARE(overrides::setTemplate(o, QUuid::createUuid()), QString());
-        overrides::resetTemplate(o);
+        overrides::setTemplate(o, QUuid::createUuid());
+        overrides::setTemplate(o, QUuid());
         QCOMPARE(o, parse("{'later': 1, 'regions': {'main': {'glow': true, 'shadow': {'spread': 2}}, 'other': {'x': 1}}}"));
         overrides::resetAll(o);
         QCOMPARE(o, parse("{'later': 1}"));
@@ -94,6 +94,7 @@ private slots:
         overrides::setProperty(o, "other", "weight", 300);
         QCOMPARE(overrides::overriddenProperties(o, "main"), (QStringList{"color", "frame.x", "shadow.opacity"}));
         QCOMPARE(overrides::overriddenProperties(o, "other"), QStringList{"weight"});
+        QCOMPARE(overrides::propertyCount(o), 4);   // in every region
         // Unknown keys stored alongside aren't properties.
         o = parse("{'regions': {'main': {'glow': true, 'shadow': {'spread': 2, 'blur': 0.1}}}}");
         QCOMPARE(overrides::overriddenProperties(o, "main"), QStringList{"shadow.blur"});
@@ -103,10 +104,9 @@ private slots:
     {
         QJsonObject o = parse("{'regions': {'main': {'color': '#ffcc00'}}}");
         const QUuid id = QUuid::createUuid();
-        QCOMPARE(overrides::setTemplate(o, id), QString());
+        overrides::setTemplate(o, id);
         QCOMPARE(overrideTemplateId(o), id);
-        QVERIFY(!overrides::setTemplate(o, QUuid()).isEmpty());   // reset instead
-        overrides::resetTemplate(o);
+        overrides::setTemplate(o, QUuid());   // none: back to the default
         QCOMPARE(o, parse("{'regions': {'main': {'color': '#ffcc00'}}}"));
     }
 

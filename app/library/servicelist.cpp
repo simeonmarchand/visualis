@@ -260,10 +260,7 @@ bool ServiceList::setItemTemplate(int index, const QString &templateId)
             for (ServiceItem &item : s.items) {
                 if (item.id != itemId)
                     continue;
-                if (chosen.isNull())
-                    overrides::resetTemplate(item.overrides);
-                else
-                    overrides::setTemplate(item.overrides, chosen);
+                overrides::setTemplate(item.overrides, chosen);
                 return ServiceStore::Decision{s, {}};
             }
             return std::nullopt;

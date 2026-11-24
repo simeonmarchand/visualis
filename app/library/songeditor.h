@@ -8,6 +8,8 @@
 #include <QTimer>
 #include <QVariantList>
 #include <QVariantMap>
+
+#include <functional>
 #include <QtQml/qqmlregistration.h>
 
 class SongLibrary;
@@ -42,17 +44,18 @@ class SongEditor : public QObject
     // template properties it overrides.
     Q_PROPERTY(QVariantList previewSlides READ previewSlides NOTIFY changed)
     // Per-slide style (#95, plan 5.4): the slides selected, by key, and the region edited.
-    Q_PROPERTY(QStringList selectedKeys READ selectedKeys NOTIFY changed)
+    // selectionChanged also follows every `changed`.
+    Q_PROPERTY(QStringList selectedKeys READ selectedKeys NOTIFY selectionChanged)
     // {id, name} per region of the song's template.
     Q_PROPERTY(QVariantList regions READ regions NOTIFY changed)
-    Q_PROPERTY(QString regionId READ regionId WRITE selectRegion NOTIFY changed)
+    Q_PROPERTY(QString regionId READ regionId WRITE selectRegion NOTIFY selectionChanged)
     // The first selected slide's style in that region, as it shows, with the template JSON's
     // keys (as TemplateEditor::style).
-    Q_PROPERTY(QVariantMap slideStyle READ slideStyle NOTIFY changed)
+    Q_PROPERTY(QVariantMap slideStyle READ slideStyle NOTIFY selectionChanged)
     // The paths ("color", "shadow.opacity") any selected slide overrides, and those whose
     // value differs between the selected slides.
-    Q_PROPERTY(QStringList overriddenProperties READ overriddenProperties NOTIFY changed)
-    Q_PROPERTY(QStringList mixedProperties READ mixedProperties NOTIFY changed)
+    Q_PROPERTY(QStringList overriddenProperties READ overriddenProperties NOTIFY selectionChanged)
+    Q_PROPERTY(QStringList mixedProperties READ mixedProperties NOTIFY selectionChanged)
     // The template it shows with (#94); the built-in's id when it has none of its own.
     Q_PROPERTY(QString templateId READ templateId WRITE setTemplateId NOTIFY changed)
     Q_PROPERTY(QStringList warnings READ warnings NOTIFY changed)
@@ -80,7 +83,7 @@ public:
     QVariantList previewSlides() const;
     QString templateId() const;
     void setTemplateId(const QString &id);
-    QStringList selectedKeys() const { return m_selected; }
+    QStringList selectedKeys() const;
     QVariantList regions() const;
     QString regionId() const { return m_regionId; }
     void selectRegion(const QString &id);
@@ -118,26 +121,39 @@ public:
     // isn't valid (alone, or with the rest of a slide's style), no slide changes and
     // `warnings` says why. Style edits save on their own, at most every kSaveDelayMs.
     Q_INVOKABLE void setSlideProperty(const QString &path, const QVariant &value);
-    // Back to the template's value, on every selected slide.
+    // Back to the template's value, on every selected slide; refused like a set when that
+    // would break a rule between properties.
     Q_INVOKABLE void resetSlideProperty(const QString &path);
     Q_INVOKABLE void resetSlides();
-    // Saves a style edit that's waiting to. False if it couldn't be saved; the edit then stays,
-    // and a busy library is tried again.
+    // Saves a style edit that's waiting to. False if it couldn't be saved: a busy library keeps
+    // the edit and is tried again; any other failure goes back to what's stored.
     Q_INVOKABLE bool flush();
 
 signals:
     void changed();
     void lyricsReset();
+    void selectionChanged();
 
 private:
     SongLibrary *library() const;
     visualis::Arrangement *shownArrangement(bool create);
     void save();
     visualis::Template songTemplate() const;
-    // The selected slides as (group, index in group), for keys whose slide is still there.
-    QList<std::pair<visualis::Group *, int>> selectedSlides();
+    // A slide by its group and place in it, so a group's repeats in the play order are one.
+    struct SlideRef {
+        QUuid group;
+        int index = 0;
+        bool operator==(const SlideRef &) const = default;
+    };
+    // The group holding the slide, or null if the slide is gone.
+    const visualis::Group *groupOf(const SlideRef &slide) const;
     QList<QJsonObject> selectedOverrides() const;
-    void pruneSelection();   // keys whose slide is gone
+    void pruneSelection();   // slides that are gone
+    // Applies `edit` to every selected slide's override, or to none: refused when `edit`
+    // returns a reason, or when a slide's style would break a rule between properties it
+    // didn't break before.
+    void editSelected(const std::function<QString(QJsonObject &)> &edit);
+    void fitRegion();        // m_regionId to one the song's template has
     void styleEdited();
     void discardPendingStyle();
 
@@ -147,7 +163,7 @@ private:
     QString m_error;
     bool m_followsTemplates = false;   // connected to the library's templatesChanged
     QPointer<SongLibrary> m_library;   // for the last save, after the QML engine is gone
-    QStringList m_selected;            // slide keys
+    QList<SlideRef> m_selected;
     QString m_regionId = QStringLiteral("main");
     bool m_stylePending = false;       // a style edit waits to be saved
     QTimer m_styleSave;                // when it will be; backs off while the library is busy

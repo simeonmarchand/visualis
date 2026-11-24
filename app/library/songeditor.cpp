@@ -24,28 +24,10 @@ QString idText(const QUuid &id)
     return id.isNull() ? QString() : id.toString(QUuid::WithoutBraces);
 }
 
-// A slide by its group and place in it, so a group's repeats in the play order are one slide.
+// "groupId/index", for QML.
 QString slideKey(const QUuid &group, int index)
 {
     return idText(group) + QLatin1Char('/') + QString::number(index);
-}
-
-std::pair<QUuid, int> fromSlideKey(const QString &key)
-{
-    const QStringList parts = key.split(QLatin1Char('/'));
-    bool ok = false;
-    const int index = parts.value(1).toInt(&ok);
-    return {parts.size() == 2 && ok ? QUuid::fromString(parts[0]) : QUuid(), index};
-}
-
-// How many template properties an override sets, in every region.
-int overrideCount(const QJsonObject &o)
-{
-    int n = 0;
-    const QJsonObject regions = o.value("regions").toObject();
-    for (auto it = regions.begin(); it != regions.end(); ++it)
-        n += overrides::overriddenProperties(o, it.key()).size();
-    return n;
 }
 
 } // namespace
@@ -56,6 +38,7 @@ SongEditor::SongEditor(QObject *parent)
     m_styleSave.setSingleShot(true);
     m_styleSave.setInterval(kSaveDelayMs);
     connect(&m_styleSave, &QTimer::timeout, this, &SongEditor::flush);
+    connect(this, &SongEditor::changed, this, &SongEditor::selectionChanged);
 }
 
 // At quit the outputs are closing too, so the last style edit waits out another program's
@@ -65,9 +48,10 @@ SongEditor::~SongEditor()
     if (!m_stylePending)
         return;
     discardPendingStyle();
-    QString error = QStringLiteral("the library isn't open");
-    if (!m_library || !m_library->saveSong(m_song, &error))
-        qCWarning(lcSongEditor).noquote() << QStringLiteral("the last style edit to \"%1\" was not saved: %2").arg(m_song.title, error);
+    const SongStore::Result r = m_library ? m_library->saveSlideOverrides(m_song, Library::Transaction::Lock::Wait)
+                                          : SongStore::Result{false, QStringLiteral("the library isn't open")};
+    if (!r.ok)
+        qCWarning(lcSongEditor).noquote() << QStringLiteral("the last style edit to \"%1\" was not saved: %2").arg(m_song.title, r.error);
 }
 
 SongLibrary *SongEditor::library() const
@@ -86,16 +70,20 @@ void SongEditor::setSongId(const QString &id)
     SongLibrary *lib = library();
     // Here, not in the constructor: the library comes from the QML engine, set after it.
     if (lib && !m_followsTemplates) {
-        connect(lib, &SongLibrary::templatesChanged, this, &SongEditor::changed);   // the preview
+        connect(lib, &SongLibrary::templatesChanged, this, [this] {   // the preview, and the region edited
+            fitRegion();
+            emit changed();
+        });
         m_followsTemplates = true;
         m_library = lib;
     }
-    if (!flush())
-        return;   // stay with the style edit that didn't save
+    flush();
+    if (m_stylePending)
+        return;   // stay with the style edit the busy library hasn't taken yet
     const std::optional<Song> song = lib ? lib->loadSong(QUuid::fromString(id)) : std::nullopt;
     m_song = song.value_or(Song{});
     m_selected.clear();
-    m_regionId = QStringLiteral("main");
+    fitRegion();
     m_arrangement = m_song.defaultArrangement.isNull() && !m_song.arrangements.isEmpty()
         ? m_song.arrangements.first().id : m_song.defaultArrangement;
     m_warnings.clear();
@@ -254,7 +242,7 @@ QVariantList SongEditor::previewSlides() const
         const Group *g = m_song.group(s.groupId);
         QVariantMap map = list[i].toMap();
         map.insert("key", slideKey(s.groupId, s.indexInGroup));
-        map.insert("overrides", g ? overrideCount(g->slideOverride(s.indexInGroup)) : 0);
+        map.insert("overrides", g ? overrides::propertyCount(g->slideOverride(s.indexInGroup)) : 0);
         list[i] = map;
     }
     return list;
@@ -279,22 +267,42 @@ void SongEditor::selectRegion(const QString &id)
     if (id == m_regionId || !songTemplate().region(id))
         return;
     m_regionId = id;
-    m_warnings.clear();
-    emit changed();
+    emit selectionChanged();
+}
+
+void SongEditor::fitRegion()
+{
+    const Template t = songTemplate();
+    if (!t.region(m_regionId))
+        m_regionId = t.regions.value(0).id;
+}
+
+QStringList SongEditor::selectedKeys() const
+{
+    QStringList keys;
+    for (const SlideRef &s : m_selected)
+        keys << slideKey(s.group, s.index);
+    return keys;
+}
+
+const Group *SongEditor::groupOf(const SlideRef &slide) const
+{
+    const Group *g = m_song.group(slide.group);
+    return g && slide.index >= 0 && slide.index < g->slides.size() ? g : nullptr;
 }
 
 void SongEditor::selectSlide(const QString &key, bool extend)
 {
-    const auto [group, index] = fromSlideKey(key);
-    const Group *g = m_song.group(group);
-    if (!g || index < 0 || index >= g->slides.size())
+    const QStringList parts = key.split(QLatin1Char('/'));
+    bool ok = false;
+    const SlideRef slide{QUuid::fromString(parts.value(0)), parts.value(1).toInt(&ok)};
+    if (parts.size() != 2 || !ok || !groupOf(slide))
         return;
     if (!extend)
-        m_selected = {key};
-    else if (!m_selected.removeOne(key))
-        m_selected << key;
-    m_warnings.clear();
-    emit changed();
+        m_selected = {slide};
+    else if (!m_selected.removeOne(slide))
+        m_selected << slide;
+    emit selectionChanged();
 }
 
 void SongEditor::clearSelection()
@@ -302,39 +310,20 @@ void SongEditor::clearSelection()
     if (m_selected.isEmpty())
         return;
     m_selected.clear();
-    emit changed();
+    emit selectionChanged();
 }
 
 void SongEditor::pruneSelection()
 {
-    m_selected.removeIf([this](const QString &key) {
-        const auto [group, index] = fromSlideKey(key);
-        const Group *g = m_song.group(group);
-        return !g || index >= g->slides.size();
-    });
-}
-
-QList<std::pair<Group *, int>> SongEditor::selectedSlides()
-{
-    QList<std::pair<Group *, int>> out;
-    for (const QString &key : std::as_const(m_selected)) {
-        const auto [group, index] = fromSlideKey(key);
-        Group *g = m_song.group(group);
-        if (g && index >= 0 && index < g->slides.size()) {
-            g->fitSlideOverrides();
-            out.append({g, index});
-        }
-    }
-    return out;
+    m_selected.removeIf([this](const SlideRef &s) { return !groupOf(s); });
 }
 
 QList<QJsonObject> SongEditor::selectedOverrides() const
 {
     QList<QJsonObject> out;
-    for (const QString &key : m_selected) {
-        const auto [group, index] = fromSlideKey(key);
-        if (const Group *g = m_song.group(group))
-            out << g->slideOverride(index);
+    for (const SlideRef &s : m_selected) {
+        if (const Group *g = groupOf(s))
+            out << g->slideOverride(s.index);
     }
     return out;
 }
@@ -378,21 +367,22 @@ QStringList SongEditor::mixedProperties() const
     return out;
 }
 
-void SongEditor::setSlideProperty(const QString &path, const QVariant &value)
+void SongEditor::editSelected(const std::function<QString(QJsonObject &)> &edit)
 {
-    const QList<std::pair<Group *, int>> slides = selectedSlides();
-    if (!loaded() || slides.isEmpty())
+    if (!loaded())
         return;
     const Template t = songTemplate();
-    const QJsonValue v = QJsonValue::fromVariant(value);
-    QList<QJsonObject> edited;
+    QList<std::pair<SlideRef, QJsonObject>> edited;
     QStringList problems;
-    for (const auto &[group, index] : slides) {
-        const QJsonObject &was = group->slideOverrides[index];
+    for (const SlideRef &s : std::as_const(m_selected)) {
+        const Group *g = groupOf(s);
+        if (!g)
+            continue;
+        const QJsonObject was = g->slideOverride(s.index);
         QJsonObject next = was;
-        if (const QString why = overrides::setProperty(next, m_regionId, path, v); !why.isEmpty()) {
+        if (const QString why = edit(next); !why.isEmpty()) {
             problems << why;
-            break;
+            continue;
         }
         // Rules between properties, on the style it would show with. A problem it already had
         // (an imported override) isn't this edit's.
@@ -403,9 +393,8 @@ void SongEditor::setSlideProperty(const QString &path, const QVariant &value)
             if (!before.contains(w))
                 problems << w;
         }
-        if (!problems.isEmpty())
-            break;
-        edited << next;
+        if (next != was)
+            edited.append({s, next});
     }
     if (!problems.isEmpty()) {
         problems.removeDuplicates();
@@ -413,23 +402,36 @@ void SongEditor::setSlideProperty(const QString &path, const QVariant &value)
         emit changed();   // a control showing the refused value goes back
         return;
     }
-    for (int i = 0; i < slides.size(); ++i)
-        slides[i].first->slideOverrides[slides[i].second] = edited[i];
+    if (edited.isEmpty())
+        return;
+    for (const auto &[slide, next] : std::as_const(edited)) {
+        Group *g = m_song.group(slide.group);
+        g->fitSlideOverrides();
+        g->slideOverrides[slide.index] = next;
+    }
     styleEdited();
+}
+
+void SongEditor::setSlideProperty(const QString &path, const QVariant &value)
+{
+    const QJsonValue v = QJsonValue::fromVariant(value);
+    editSelected([&](QJsonObject &o) { return overrides::setProperty(o, m_regionId, path, v); });
 }
 
 void SongEditor::resetSlideProperty(const QString &path)
 {
-    for (const auto &[group, index] : selectedSlides())
-        overrides::resetProperty(group->slideOverrides[index], m_regionId, path);
-    styleEdited();
+    editSelected([&](QJsonObject &o) {
+        overrides::resetProperty(o, m_regionId, path);
+        return QString();
+    });
 }
 
 void SongEditor::resetSlides()
 {
-    for (const auto &[group, index] : selectedSlides())
-        overrides::resetAll(group->slideOverrides[index]);
-    styleEdited();
+    editSelected([](QJsonObject &o) {
+        overrides::resetAll(o);
+        return QString();
+    });
 }
 
 void SongEditor::styleEdited()
@@ -494,6 +496,7 @@ void SongEditor::setTemplateId(const QString &id)
     if (!loaded() || uuid == m_song.defaultTemplate)
         return;
     m_song.defaultTemplate = uuid;
+    fitRegion();
     save();
 }
 

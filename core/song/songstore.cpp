@@ -229,11 +229,13 @@ SongStore::Result SongStore::save(Song &song)
     return {};
 }
 
-SongStore::Result SongStore::saveSlideOverrides(Song &song)
+SongStore::Result SongStore::saveSlideOverrides(Song &song, Library::Transaction::Lock lock)
 {
     if (QString tooBig = songLimitError(song); !tooBig.isEmpty())
         return {false, tooBig};
-    Library::Transaction t(m_library, Library::Transaction::Lock::NowOrBusy);
+    for (Group &g : song.groups)
+        g.fitSlideOverrides();   // the same song: fitted overrides compare equal
+    Library::Transaction t(m_library, lock);
     if (!t.ok())
         return {false, t.error(), t.busy()};
     QSqlDatabase db = m_library.database();
@@ -245,10 +247,9 @@ SongStore::Result SongStore::saveSlideOverrides(Song &song)
     if (rows != 1)
         return {false, QStringLiteral("\"%1\" isn't in the library.").arg(song.title)};
     for (const Group &g : song.groups) {
-        Group fitted = g;
-        fitted.fitSlideOverrides();
-        if (QString err = run(db, "UPDATE song_group SET slide_overrides = ? WHERE id = ? AND song_id = ?",
-                              {overridesJson(fitted.slideOverrides), key(g.id), key(song.id)}, &rows);
+        // Only while its slides are the ones the overrides were made for.
+        if (QString err = run(db, "UPDATE song_group SET slide_overrides = ? WHERE id = ? AND song_id = ? AND slides = ?",
+                              {overridesJson(g.slideOverrides), key(g.id), key(song.id), slidesJson(g.slides)}, &rows);
             !err.isEmpty())
             return fail(err);
         if (rows != 1)
@@ -256,8 +257,6 @@ SongStore::Result SongStore::saveSlideOverrides(Song &song)
     }
     if (QString err = t.commit(); !err.isEmpty())
         return fail(err);
-    for (Group &g : song.groups)
-        g.fitSlideOverrides();
     song.updated = now;
     return {};
 }

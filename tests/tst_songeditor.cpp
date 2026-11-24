@@ -413,6 +413,46 @@ private slots:
         QCOMPARE(storedOverride(1), QJsonObject());
     }
 
+    // Thermo review: a reset is checked like a set.
+    void aResetThatBreaksARuleIsRefused()
+    {
+        m_editor->selectSlide(slideKey(1), false);
+        m_editor->setSlideProperty("maxSize", 0.2);
+        m_editor->setSlideProperty("minSize", 0.15);
+        QCOMPARE(m_editor->overriddenProperties(), (QStringList{"maxSize", "minSize"}));
+        m_editor->resetSlideProperty("maxSize");   // the template's largest is smaller
+        QVERIFY(m_editor->warnings().join(' ').contains("minSize"));
+        QCOMPARE(m_editor->overriddenProperties(), (QStringList{"maxSize", "minSize"}));
+        m_editor->resetSlides();   // both together is fine
+        QVERIFY(m_editor->overriddenProperties().isEmpty());
+    }
+
+    // Thermo review: a save that failed for good doesn't keep the editor on that song.
+    void anotherSongOpensAfterAStyleSaveFails()
+    {
+        QVERIFY(m_songs->createFromPaste("Other", "Verse 1\nOne\n"));
+        const QString other = m_songs->selectedId();
+        m_editor->selectSlide(slideKey(1), false);
+        m_editor->setSlideProperty("color", "#ffcc00");
+        QVERIFY(m_songs->removeSong(m_editor->songId()));
+        QVERIFY(!m_editor->flush());
+        m_editor->setSongId(other);
+        QCOMPARE(m_editor->songId(), other);
+    }
+
+    // Thermo review: the region edited is one the song's template has.
+    void theRegionFollowsTheTemplate()
+    {
+        Template two = saveTemplate("Two regions");
+        two.regions << TextRegion{"title", "Title", two.regions[0].style, {}};
+        QVERIFY(m_templates->save(two).ok);
+        m_editor->setTemplateId(idText(two.id));
+        m_editor->selectRegion("title");
+        QCOMPARE(m_editor->regionId(), QStringLiteral("title"));
+        m_editor->setTemplateId(idText(builtInLyricsTemplateId()));
+        QCOMPARE(m_editor->regionId(), QStringLiteral("main"));
+    }
+
     // GUI-thread writes never wait on another program's lock: the edit stays and saves later.
     void aBusyLibraryKeepsTheStyleAndSavesItLater()
     {

@@ -81,6 +81,15 @@ QStringList overriddenProperties(const QJsonObject &overrides, const QString &re
     return out;
 }
 
+int propertyCount(const QJsonObject &overrides)
+{
+    int n = 0;
+    const QJsonObject regions = overrides.value("regions").toObject();
+    for (auto it = regions.begin(); it != regions.end(); ++it)
+        n += overriddenProperties(overrides, it.key()).size();
+    return n;
+}
+
 QString setProperty(QJsonObject &overrides, const QString &regionId, const QString &path, const QJsonValue &value)
 {
     if (regionId.trimmed().isEmpty() || regionId.size() > templatelimits::kTextLength)
@@ -108,17 +117,12 @@ void resetAll(QJsonObject &overrides)
     overrides.remove("template");
 }
 
-QString setTemplate(QJsonObject &overrides, const QUuid &templateId)
+void setTemplate(QJsonObject &overrides, const QUuid &templateId)
 {
     if (templateId.isNull())
-        return QStringLiteral("no template given");
-    overrides["template"] = templateId.toString(QUuid::WithoutBraces);
-    return {};
-}
-
-void resetTemplate(QJsonObject &overrides)
-{
-    overrides.remove("template");
+        overrides.remove("template");
+    else
+        overrides["template"] = templateId.toString(QUuid::WithoutBraces);
 }
 
 } // namespace visualis::overrides

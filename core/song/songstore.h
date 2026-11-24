@@ -1,5 +1,6 @@
 #pragma once
 
+#include "library/library.h"
 #include "song.h"
 #include "songmatch.h"
 
@@ -9,8 +10,6 @@
 #include <optional>
 
 namespace visualis {
-
-class Library;
 
 // Called by folder imports before each file, and once more at the end (done == total). Return
 // false to stop: the import ends after the file in hand, reporting what it did so far.
@@ -39,10 +38,11 @@ public:
     // song's groups or a group that doesn't exist, and songs over the limits in songlimits.h.
     Result save(Song &song);
     // Saves only the slide overrides of a song already in the library, and its updated time
-    // (#95: the song editor's style edits, from the GUI thread during a service). It never
-    // waits for the write lock: if another program holds it, it fails at once with `busy` set.
-    // Refuses a song or group the library doesn't have, and overrides over the limits.
-    Result saveSlideOverrides(Song &song);
+    // (#95: the song editor's style edits, from the GUI thread during a service). With
+    // NowOrBusy it never waits for the write lock: if another program holds it, it fails at
+    // once with `busy` set. Refuses a song or group the library doesn't have, a group whose
+    // slides changed there since `song` was loaded, and overrides over the limits.
+    Result saveSlideOverrides(Song &song, Library::Transaction::Lock lock = Library::Transaction::Lock::NowOrBusy);
     std::optional<Song> load(const QUuid &id) const;
     // Updates only an existing song's Planning Center link and credits (pco_song_id,
     // ccli_number, authors, copyright): no lyrics, arrangements, or timestamps. Inside a
