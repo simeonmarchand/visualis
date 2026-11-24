@@ -7,6 +7,7 @@
 #include <vector>
 
 class QLockFile;
+class QSqlQuery;
 
 namespace visualis {
 
@@ -62,6 +63,19 @@ public:
     // How long a write waits for another connection's lock before failing.
     static constexpr int kBusyTimeoutMs = 5000;
     static int latestVersion();
+
+    // One prepared statement run without waiting on another program's lock (#88), so a write
+    // from the GUI thread can't hold up the operator window for the busy timeout. The timeout
+    // is 0 while it runs and kBusyTimeoutMs again after. The SQLite codes are read only here.
+    struct WriteNow {
+        enum class Outcome { Ok, Busy, UniqueViolation, Failed };
+        Outcome outcome = Outcome::Ok;
+        QString error;          // the driver's text, unless Ok
+        int rowsAffected = 0;   // read before the timeout is restored, which resets SQLite's count
+        bool ok() const { return outcome == Outcome::Ok; }
+        bool busy() const { return outcome == Outcome::Busy; }
+    };
+    static WriteNow writeNow(QSqlDatabase db, QSqlQuery &query);
 
     ~Library();
     Library(const Library &) = delete;

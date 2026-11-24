@@ -11,6 +11,7 @@
 #include <QtTest>
 
 #include "childprocess.h"
+#include "otherprogram.h"
 
 using visualis::Library;
 using visualis::Migration;
@@ -426,6 +427,62 @@ private slots:
         auto again = Library::open(tmp.path());
         QCOMPARE(again.error, E::None);
         QCOMPARE(again.library->setting("church.name"), QStringLiteral("Grace Church"));
+    }
+
+    // #111: the one place that runs a write without waiting on another program's lock.
+    void writeNowReportsBusyAndRestoresTheTimeout()
+    {
+        QTemporaryDir tmp;
+        auto r = Library::open(tmp.path());
+        QCOMPARE(r.error, E::None);
+        QSqlDatabase db = r.library->database();
+        {
+            OtherProgram other(tmp.path());
+            QSqlQuery hold(other.database());
+            QVERIFY(hold.exec("BEGIN IMMEDIATE"));
+
+            QSqlQuery q(db);
+            q.prepare("INSERT INTO setting (key, value) VALUES ('church.name', 'Grace Church')");
+            QElapsedTimer t;
+            t.start();
+            const Library::WriteNow w = Library::writeNow(db, q);
+            QVERIFY2(t.elapsed() < Library::kBusyTimeoutMs / 2, qPrintable(QString::number(t.elapsed())));
+            QCOMPARE(w.outcome, Library::WriteNow::Outcome::Busy);
+            QVERIFY(w.busy());
+            QVERIFY(!w.error.isEmpty());
+            QVERIFY(hold.exec("ROLLBACK"));
+        }
+        QCOMPARE(pragma(*r.library, "busy_timeout").toInt(), Library::kBusyTimeoutMs);
+    }
+
+    void writeNowReportsAUniqueViolation()
+    {
+        QTemporaryDir tmp;
+        auto r = Library::open(tmp.path());
+        QSqlDatabase db = r.library->database();
+        QVERIFY(QSqlQuery(db).exec("CREATE TEMP TABLE names (name TEXT UNIQUE)"));
+        const auto insert = [&] {
+            QSqlQuery q(db);
+            q.prepare("INSERT INTO names (name) VALUES ('Amazing Grace')");
+            return Library::writeNow(db, q);
+        };
+        const Library::WriteNow first = insert();
+        QVERIFY(first.ok());
+        QCOMPARE(first.rowsAffected, 1);
+        QCOMPARE(insert().outcome, Library::WriteNow::Outcome::UniqueViolation);
+        QCOMPARE(pragma(*r.library, "busy_timeout").toInt(), Library::kBusyTimeoutMs);
+    }
+
+    void writeNowReportsOtherErrors()
+    {
+        QTemporaryDir tmp;
+        auto r = Library::open(tmp.path());
+        QSqlDatabase db = r.library->database();
+        QSqlQuery q(db);
+        q.prepare("INSERT INTO no_such_table (x) VALUES (1)");
+        const Library::WriteNow w = Library::writeNow(db, q);
+        QCOMPARE(w.outcome, Library::WriteNow::Outcome::Failed);
+        QVERIFY(!w.error.isEmpty());
     }
 
     void openingTwiceSkipsTheBackup()

@@ -385,6 +385,28 @@ bool Library::setSetting(const QString &key, const QString &value)
     return q.exec();
 }
 
+Library::WriteNow Library::writeNow(QSqlDatabase db, QSqlQuery &query)
+{
+    QSqlQuery pragma(db);
+    pragma.exec(QStringLiteral("PRAGMA busy_timeout = 0"));
+    WriteNow r;
+    const bool done = query.exec();
+    const QSqlError error = query.lastError();
+    r.rowsAffected = query.numRowsAffected();
+    pragma.exec(QStringLiteral("PRAGMA busy_timeout = %1").arg(kBusyTimeoutMs));
+    if (done)
+        return r;
+    r.error = error.text();
+    const QString code = error.nativeErrorCode();
+    if (code == QLatin1String("5"))   // SQLITE_BUSY
+        r.outcome = WriteNow::Outcome::Busy;
+    else if (code == QLatin1String("2067"))   // SQLITE_CONSTRAINT_UNIQUE
+        r.outcome = WriteNow::Outcome::UniqueViolation;
+    else
+        r.outcome = WriteNow::Outcome::Failed;
+    return r;
+}
+
 Library::Transaction::Transaction(Library &library, Lock lock)
     : m_db(library.database())
 {
@@ -395,14 +417,12 @@ Library::Transaction::Transaction(Library &library, Lock lock)
         return;
     }
     QSqlQuery q(m_db);
-    q.exec(QStringLiteral("PRAGMA busy_timeout = 0"));
-    m_open = q.exec(QStringLiteral("BEGIN IMMEDIATE"));
-    const QSqlError error = q.lastError();
-    q.exec(QStringLiteral("PRAGMA busy_timeout = %1").arg(kBusyTimeoutMs));
-    if (!m_open) {
-        m_busy = error.nativeErrorCode() == QLatin1String("5");   // SQLITE_BUSY
-        m_error = m_busy ? QStringLiteral("The library is in use by another program.") : error.text();
-    }
+    q.prepare(QStringLiteral("BEGIN IMMEDIATE"));
+    const WriteNow begun = writeNow(m_db, q);
+    m_open = begun.ok();
+    m_busy = begun.busy();
+    if (!m_open)
+        m_error = m_busy ? QStringLiteral("The library is in use by another program.") : begun.error;
 }
 
 Library::Transaction::~Transaction()
