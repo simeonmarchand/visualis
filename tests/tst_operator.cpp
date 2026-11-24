@@ -1024,6 +1024,26 @@ private slots:
         QCOMPARE(m_services->selectedIndex(), 0);
     }
 
+    // PR #123 review: linking saves the song, and an oversized style stored on it stays.
+    void linkingKeepsAStoredOversizedStyle()
+    {
+        QVERIFY(m_songs->createFromPaste("Amazing Grace", kLyrics));
+        const QString id = m_songs->selectedId();
+        const Song song = *m_songs->loadSong(QUuid::fromString(id));
+        QSqlQuery q(m_songs->library()->database());
+        q.prepare("UPDATE song_group SET slide_overrides = ? WHERE id = ?");
+        q.addBindValue(QStringLiteral("[{\"later\":\"%1\"}]").arg(QString(20 * 1024, 'x')));
+        q.addBindValue(song.groups[1].id.toString(QUuid::WithoutBraces));
+        QVERIFY(q.exec());
+        const QJsonObject big = m_songs->loadSong(song.id)->groups[1].slideOverride(0);
+        QVERIFY(!big.isEmpty());
+
+        openImportedService({"Amazing Grace"});
+        QVERIFY(m_services->linkSong(0, id));
+        QCOMPARE(m_songs->loadSong(song.id)->pcoSongId, QStringLiteral("p1"));   // it saved
+        QCOMPARE(m_songs->loadSong(song.id)->groups[1].slideOverride(0), big);
+    }
+
     // Review of #85: a wrong link by title doesn't stick. Relinking moves the Planning
     // Center id, so next week links the right song by id instead of asking again.
     void relinkingMovesThePlanningCenterId()

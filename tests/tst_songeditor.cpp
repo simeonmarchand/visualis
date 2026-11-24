@@ -506,6 +506,41 @@ private slots:
         QCOMPARE(storedColor(1), QStringLiteral("#ffcc00"));
     }
 
+    // PR #123 review: a style the library can't show is pointed out, and kept.
+    void anOversizedStoredStyleIsReportedAndKept()
+    {
+        const Song song = *m_songs->loadSong(QUuid::fromString(m_editor->songId()));
+        QSqlQuery q(m_songs->library()->database());
+        q.prepare("UPDATE song_group SET slide_overrides = ? WHERE id = ?");
+        q.addBindValue(QStringLiteral("[{\"later\":\"%1\"}]").arg(QString(20 * 1024, 'x')));
+        q.addBindValue(song.groups[1].id.toString(QUuid::WithoutBraces));
+        QVERIFY(q.exec());
+        m_editor->setSongId(m_editor->songId());
+        QVERIFY2(m_editor->warnings().join(' ').contains("too much style"), qPrintable(m_editor->warnings().join(' ')));
+
+        m_editor->selectSlide(slideKey(2), false);   // the chorus
+        m_editor->setSlideProperty("color", "#ffcc00");
+        QVERIFY(m_editor->flush());
+        m_editor->setTitle("Renamed");
+        QVERIFY(m_editor->error().isEmpty());
+        QCOMPARE(m_songs->loadSong(song.id)->groups[1].slideOverride(0)["later"].toString().size(), 20 * 1024);
+    }
+
+    // PR #123 review: a failed save on one song doesn't stop another's style edits saving.
+    void aFailedSaveOnOneSongDoesntBlockTheNext()
+    {
+        const QString tooLong = m_editor->lyrics().replace("My chains are gone", QString(songlimits::kCharactersPerSlide + 1, 'a'));
+        m_editor->applyLyrics(tooLong);
+        QVERIFY(!m_editor->error().isEmpty());
+        QVERIFY(m_songs->createFromPaste("Other", "Verse 1\nOne\n"));
+        m_editor->setSongId(m_songs->selectedId());
+        QVERIFY(m_editor->error().isEmpty());
+        m_editor->selectSlide(slideKey(0), false);
+        m_editor->setSlideProperty("color", "#ffcc00");
+        QVERIFY(m_editor->flush());
+        QCOMPARE(storedColor(0), QStringLiteral("#ffcc00"));
+    }
+
     void lyricEditsKeepSlideStyles()
     {
         m_editor->selectSlide(slideKey(1), false);

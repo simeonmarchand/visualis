@@ -3,6 +3,7 @@
 #include "song/songlimits.h"
 
 #include <QElapsedTimer>
+#include <QJsonDocument>
 #include <QtTest>
 
 using namespace visualis;
@@ -224,6 +225,15 @@ private slots:
         for (int i = 0; i * songlimits::kSlideOverrideBytes / 2 <= songlimits::kOverrideBytes; ++i)
             many.groups << Group{QUuid::createUuid(), "Verse", "", {"x"}, {big}};
         QVERIFY2(overrideLimitError(many).startsWith("too much slide style"), qPrintable(overrideLimitError(many)));
+
+        // What the library already holds can be written back, but not grown.
+        StoredOverrides stored;
+        stored.total = qint64(many.groups.size()) * QJsonDocument(big).toJson(QJsonDocument::Compact).size();
+        stored.oversized.insert(QJsonDocument(song.groups[0].slideOverrides[1]).toJson(QJsonDocument::Compact));
+        QVERIFY(overrideLimitError(many, stored).isEmpty());
+        QVERIFY(overrideLimitError(song, stored).isEmpty());
+        many.groups << Group{QUuid::createUuid(), "Verse", "", {"x"}, {big}};
+        QVERIFY(!overrideLimitError(many, stored).isEmpty());
     }
 
     void oversizedOverridesAreDroppedWithAWarning()

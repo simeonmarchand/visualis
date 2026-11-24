@@ -2,7 +2,9 @@
 
 #include "song.h"
 
+#include <QByteArray>
 #include <QJsonObject>
+#include <QSet>
 #include <QString>
 #include <QStringList>
 
@@ -30,10 +32,16 @@ constexpr int kOverrideBytes = 1024 * 1024;   // all of a song's together
 // 500"), or empty when it's within all of them. Cheap: it never expands the song.
 QString songLimitError(const Song &song);
 
-// Slide overrides are bounded on write: SongStore refuses a song for this, and readers drop
-// what's over (dropOversizedOverrides) instead, so a song stored before the limits still
-// loads, shows, and saves. Empty when within them.
-QString overrideLimitError(const Song &song);
+// Slide overrides are bounded on write: SongStore refuses a song for this. What a library
+// already holds (stored before the limits) is kept as stored and may be written back
+// unchanged: an override in `stored.oversized`, and a total up to `stored.total`. Rendering
+// leaves an oversized one out, and imports drop it (dropOversizedOverrides). Empty when
+// within them.
+struct StoredOverrides {
+    QSet<QByteArray> oversized;   // compact JSON; may hold small ones too
+    qint64 total = 0;
+};
+QString overrideLimitError(const Song &song, const StoredOverrides &stored = {});
 bool slideOverrideTooLarge(const QJsonObject &override);
 // Empties each slide override over kSlideOverrideBytes, and all of them if the song's are
 // still over kOverrideBytes; one warning, for the operator, per drop.

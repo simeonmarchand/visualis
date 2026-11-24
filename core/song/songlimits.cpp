@@ -1,6 +1,8 @@
 #include "songlimits.h"
 
 #include <QJsonDocument>
+
+#include <algorithm>
 #include <QLocale>
 
 namespace visualis {
@@ -53,19 +55,19 @@ bool slideOverrideTooLarge(const QJsonObject &o)
     return overrideBytes(o) > kSlideOverrideBytes;
 }
 
-QString overrideLimitError(const Song &song)
+QString overrideLimitError(const Song &song, const StoredOverrides &stored)
 {
     qint64 total = 0;
     for (const Group &g : song.groups) {
         for (const QJsonObject &o : g.slideOverrides) {
             const qint64 bytes = overrideBytes(o);
-            if (bytes > kSlideOverrideBytes)
+            if (bytes > kSlideOverrideBytes && !stored.oversized.contains(QJsonDocument(o).toJson(QJsonDocument::Compact)))
                 return QStringLiteral("a slide of \"%1\" has too much style: %2 bytes; the limit is %3")
                     .arg(g.label, number(bytes), number(kSlideOverrideBytes));
             total += bytes;
         }
     }
-    if (total > kOverrideBytes)
+    if (total > std::max<qint64>(kOverrideBytes, stored.total))
         return QStringLiteral("too much slide style: %1 bytes; the limit is %2").arg(number(total), number(kOverrideBytes));
     return {};
 }

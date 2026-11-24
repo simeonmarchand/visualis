@@ -541,36 +541,42 @@ private slots:
         QCOMPARE(loaded, plain);
     }
 
-    // PR #123 review: an oversized override already in a library, or in a file, is dropped on
-    // read, so the song still loads, shows, and saves.
-    void anOversizedOverrideIsDroppedOnRead()
+    // PR #123 review: an oversized override already in a library is kept as stored, and
+    // never lost to a write of something else. Nothing writes a new one. A file's is dropped
+    // on import, with a warning.
+    void anOversizedStoredOverrideSurvivesOtherWrites()
     {
         SongStore store(*m_library);
         const QJsonObject gold{{"regions", QJsonObject{{"main", QJsonObject{{"color", "#ffcc00"}}}}}};
+        const QJsonObject big{{"later", QString(20 * 1024, 'x')}};
         Song s;
         s.title = "Big";
-        s.groups = {Group{{}, "Verse", {}, {"a", "b"}}};
-        s.groups[0].slideOverrides = {gold, {}};
+        s.groups = {Group{{}, "Verse", {}, {"a", "b", "c"}}};
         QVERIFY(store.save(s).ok);
-        const QJsonObject big{{"later", QString(20 * 1024, 'x')}};
-        QSqlQuery q(m_library->database());
-        q.prepare("UPDATE song_group SET slide_overrides = ? WHERE id = ?");
-        q.addBindValue(QString::fromUtf8(QJsonDocument(QJsonArray{gold, big}).toJson(QJsonDocument::Compact)));
-        q.addBindValue(s.groups[0].id.toString(QUuid::WithoutBraces));
-        QVERIFY(q.exec());
+        storeOverridesRaw(s.groups[0].id, QJsonArray{gold, big, QJsonObject{}});
+        const QString stored = storedOverridesRaw(s.groups[0].id);
 
         Song loaded = *store.load(s.id);
-        QCOMPARE(loaded.groups[0].slideOverrides, (QList<QJsonObject>{gold, {}}));
-        loaded.groups[0].slides[1] = "b, edited";
-        QVERIFY(store.save(loaded).ok);   // its lyrics still save
+        QCOMPARE(loaded.groups[0].slideOverrides[1], big);   // as stored; rendering leaves it out
+        loaded.title = "Big, renamed";
+        QVERIFY2(store.save(loaded).ok, "a title save");
+        QCOMPARE(storedOverridesRaw(s.groups[0].id), stored);
+        loaded.groups[0].slideOverrides[2] = gold;   // another slide's style
+        const SongStore::Result r = store.saveSlideOverrides(loaded);
+        QVERIFY2(r.ok, qPrintable(r.error));
+        QCOMPARE(store.load(s.id)->groups[0].slideOverrides, (QList<QJsonObject>{gold, big, gold}));
 
-        Song bigger = s;
-        bigger.groups[0].slideOverrides = {gold, big};
-        QVERIFY(!store.save(bigger).ok);   // but nothing writes one
-        const SongJsonResult r = songFromJson(songToJson(bigger));
-        QVERIFY2(r.song, qPrintable(r.error));
-        QCOMPARE(r.song->groups[0].slideOverrides, (QList<QJsonObject>{gold, {}}));
-        QCOMPARE(r.warnings.size(), 1);
+        Song bigger = loaded;   // a new oversized one is refused
+        bigger.groups[0].slideOverrides[0] = QJsonObject{{"later", QString(20 * 1024, 'y')}};
+        QVERIFY(!store.save(bigger).ok);
+        QVERIFY(!store.saveSlideOverrides(bigger).ok);
+
+        Song imported = s;
+        imported.groups[0].slideOverrides = {gold, big, {}};
+        const SongJsonResult r2 = songFromJson(songToJson(imported));
+        QVERIFY2(r2.song, qPrintable(r2.error));
+        QCOMPARE(r2.song->groups[0].slideOverrides, (QList<QJsonObject>{gold, {}, {}}));
+        QCOMPARE(r2.warnings.size(), 1);
     }
 
     // Codex on #102 (5): unusable overrides are reported, at import too.
@@ -737,6 +743,22 @@ private slots:
     }
 
 private:
+    void storeOverridesRaw(const QUuid &group, const QJsonArray &overrides)
+    {
+        QSqlQuery q(m_library->database());
+        q.prepare("UPDATE song_group SET slide_overrides = ? WHERE id = ?");
+        q.addBindValue(QString::fromUtf8(QJsonDocument(overrides).toJson(QJsonDocument::Compact)));
+        q.addBindValue(group.toString(QUuid::WithoutBraces));
+        QVERIFY(q.exec());
+    }
+    QString storedOverridesRaw(const QUuid &group) const
+    {
+        QSqlQuery q(m_library->database());
+        q.prepare("SELECT slide_overrides FROM song_group WHERE id = ?");
+        q.addBindValue(group.toString(QUuid::WithoutBraces));
+        return q.exec() && q.next() ? q.value(0).toString() : QString();
+    }
+
     std::optional<QTemporaryDir> m_dir;
     std::unique_ptr<Library> m_library;
 };

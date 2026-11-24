@@ -4,6 +4,7 @@
 #include "live/liveitem.h"
 #include "song/lyricspaste.h"
 #include "song/slidelist.h"
+#include "song/songlimits.h"
 #include "song/songtext.h"
 #include "template/overrides.h"
 #include "template/templatejson.h"
@@ -45,8 +46,12 @@ SongEditor::SongEditor(QObject *parent)
 // lock instead of being lost. Mid-service saves never wait (flush()).
 SongEditor::~SongEditor()
 {
-    if (!m_stylePending || m_songUnsaved)
+    if (!m_stylePending)
         return;
+    if (m_songUnsaved) {
+        qCWarning(lcSongEditor).noquote() << QStringLiteral("the last edits to \"%1\" were not saved: %2").arg(m_song.title, m_error);
+        return;
+    }
     discardPendingStyle();
     if (m_library)
         disconnect(m_library, nullptr, this, nullptr);   // nothing to follow now
@@ -80,15 +85,21 @@ void SongEditor::setSongId(const QString &id)
         m_library = lib;
     }
     flush();
-    if (m_stylePending)
+    if (m_stylePending && !m_songUnsaved)
         return;   // stay with the style edit the busy library hasn't taken yet
+    if (m_stylePending)
+        qCWarning(lcSongEditor).noquote() << QStringLiteral("the last edits to \"%1\" were not saved: %2").arg(m_song.title, m_error);
+    discardPendingStyle();
+    m_songUnsaved = false;
     const std::optional<Song> song = lib ? lib->loadSong(QUuid::fromString(id)) : std::nullopt;
     m_song = song.value_or(Song{});
     m_selected.clear();
     fitRegion();
     m_arrangement = m_song.defaultArrangement.isNull() && !m_song.arrangements.isEmpty()
         ? m_song.arrangements.first().id : m_song.defaultArrangement;
-    m_warnings.clear();
+    // Kept as stored, but left out of what shows: say so.
+    Song shown = m_song;
+    m_warnings = dropOversizedOverrides(shown);
     m_error = song || id.isEmpty() ? QString() : QStringLiteral("That song is no longer in the library.");
     emit changed();
     emit lyricsReset();
@@ -104,7 +115,10 @@ void SongEditor::save()
     else
         m_error.clear();
     // Saved with the rest; or, if that failed, left for the next save that works.
-    discardPendingStyle();
+    if (m_songUnsaved)
+        m_styleSave.stop();
+    else
+        discardPendingStyle();
     pruneSelection();
     emit changed();
 }
@@ -456,11 +470,13 @@ bool SongEditor::flush()
 {
     if (!m_stylePending)
         return true;
-    discardPendingStyle();
     // An edit that didn't save (save()) is in m_song too. Saving only the overrides would be
     // refused against the stored slides and lose it; the next whole save takes both.
-    if (m_songUnsaved)
+    if (m_songUnsaved) {
+        m_styleSave.stop();
         return false;
+    }
+    discardPendingStyle();
     SongLibrary *lib = library();
     const SongStore::Result r = lib ? lib->saveSlideOverrides(m_song) : SongStore::Result{false, QStringLiteral("The library isn't open.")};
     if (r.ok) {
