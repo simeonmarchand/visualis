@@ -499,6 +499,28 @@ private slots:
         QVERIFY(!m_services->items()[0].toMap()["warnings"].toString().isEmpty());
     }
 
+    // #93 with #44: a template change re-renders a library song as it went live, so an edit
+    // saved since still waits for the next go-live.
+    void aTemplateChangeDoesntBringInALiveSongsUnshownEdit()
+    {
+        auto *templates = m_engine->singletonInstance<TemplateLibrary *>("Visualis.Ui", "TemplateLibrary");
+        const QStringList ids = makeSongs({"Amazing Grace"});
+        m_songs->select(ids[0]);
+        QVERIFY(m_songs->goLive(0));
+        const QString shown = m_live->currentText();
+
+        Song song = *m_songs->loadSong(QUuid::fromString(ids[0]));
+        song.groups[0].slides[0] = "Edited since";
+        QString error;
+        QVERIFY2(m_songs->saveSong(song, &error), qPrintable(error));
+        Template t = builtInLyricsTemplate();
+        t.id = QUuid();
+        t.name = "Any";
+        QVERIFY(templates->save(t));
+
+        QCOMPARE(m_live->currentText(), shown);
+    }
+
     // #93: a stored template that can't be read is left out and logged; what uses it shows
     // in the built-in, never blank.
     void anUnreadableTemplateFallsBackToTheBuiltIn()

@@ -72,8 +72,7 @@ void SongLibrary::refreshLive()
     auto *live = engine ? engine->singletonInstance<LiveState *>("Visualis.Ui", "LiveState") : nullptr;
     if (!live || !live->itemId().isNull() || live->song().id.isNull())
         return;   // nothing from the library is live
-    if (const std::optional<Song> song = loadSong(live->song().id))
-        live->update(liveSong(*song, live->arrangementId(), templates()));
+    live->update(liveSong(live->song(), live->arrangementId(), templates()));   // the song as it went live
 }
 
 SongLibrary::~SongLibrary()
