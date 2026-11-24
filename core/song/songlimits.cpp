@@ -1,15 +1,19 @@
 #include "songlimits.h"
 
+#include <QJsonDocument>
 #include <QLocale>
 
 namespace visualis {
 
 using namespace songlimits;
 
+namespace {
+QString number(qint64 n) { return QLocale(QLocale::English).toString(n); }
+} // namespace
+
 QString limitError(const QString &what, qint64 count, int limit)
 {
-    const QLocale english(QLocale::English);
-    return QStringLiteral("too many %1: %2; the limit is %3").arg(what, english.toString(count), english.toString(limit));
+    return QStringLiteral("too many %1: %2; the limit is %3").arg(what, number(count), number(limit));
 }
 
 QString songLimitError(const Song &song)
@@ -34,6 +38,21 @@ QString songLimitError(const Song &song)
         if (a.sequence.size() > kSteps)
             return limitError(QStringLiteral("steps in arrangement \"%1\"").arg(a.name), a.sequence.size(), kSteps);
     }
+    qint64 overrideBytes = 0;
+    for (const Group &g : song.groups) {
+        for (const QJsonObject &o : g.slideOverrides) {
+            if (o.isEmpty())
+                continue;
+            const qint64 bytes = QJsonDocument(o).toJson(QJsonDocument::Compact).size();
+            if (bytes > kSlideOverrideBytes)
+                return QStringLiteral("a slide of \"%1\" has too much style: %2 bytes; the limit is %3")
+                    .arg(g.label, number(bytes), number(kSlideOverrideBytes));
+            overrideBytes += bytes;
+        }
+    }
+    if (overrideBytes > kOverrideBytes)
+        return QStringLiteral("too much slide style: %1 bytes; the limit is %2")
+            .arg(number(overrideBytes), number(kOverrideBytes));
     return {};
 }
 

@@ -19,6 +19,9 @@ constexpr int kArrangements = 100;
 constexpr int kSteps = 1'000;             // per arrangement, or a played sequence
 constexpr int kCharactersPerSlide = 10'000;
 constexpr int kPlayedSlides = 10'000;     // one arrangement expanded (songSlides)
+// Slide overrides as compact JSON (#95). One with every property set is under 1 KB.
+constexpr int kSlideOverrideBytes = 16 * 1024;
+constexpr int kOverrideBytes = 1024 * 1024;   // all of a song's together
 } // namespace songlimits
 
 // Why the song is over a limit, for the operator ("too many groups: 40,000; the limit is

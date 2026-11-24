@@ -229,6 +229,39 @@ SongStore::Result SongStore::save(Song &song)
     return {};
 }
 
+SongStore::Result SongStore::saveSlideOverrides(Song &song)
+{
+    if (QString tooBig = songLimitError(song); !tooBig.isEmpty())
+        return {false, tooBig};
+    Library::Transaction t(m_library, Library::Transaction::Lock::NowOrBusy);
+    if (!t.ok())
+        return {false, t.error(), t.busy()};
+    QSqlDatabase db = m_library.database();
+    const QDateTime now = QDateTime::currentDateTimeUtc();
+    auto fail = [&](const QString &error) { return Result{false, QStringLiteral("Couldn't save \"%1\": %2").arg(song.title, error)}; };
+    int rows = 0;
+    if (QString err = run(db, "UPDATE song SET updated_at = ? WHERE id = ?", {timestamp(now), key(song.id)}, &rows); !err.isEmpty())
+        return fail(err);
+    if (rows != 1)
+        return {false, QStringLiteral("\"%1\" isn't in the library.").arg(song.title)};
+    for (const Group &g : song.groups) {
+        Group fitted = g;
+        fitted.fitSlideOverrides();
+        if (QString err = run(db, "UPDATE song_group SET slide_overrides = ? WHERE id = ? AND song_id = ?",
+                              {overridesJson(fitted.slideOverrides), key(g.id), key(song.id)}, &rows);
+            !err.isEmpty())
+            return fail(err);
+        if (rows != 1)
+            return {false, QStringLiteral("\"%1\" changed in the library since it was opened; open it again.").arg(song.title)};
+    }
+    if (QString err = t.commit(); !err.isEmpty())
+        return fail(err);
+    for (Group &g : song.groups)
+        g.fitSlideOverrides();
+    song.updated = now;
+    return {};
+}
+
 SongStore::Result SongStore::updatePcoLink(const Song &song)
 {
     QSqlDatabase db = m_library.database();
