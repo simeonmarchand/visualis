@@ -221,6 +221,24 @@ private slots:
         QCOMPARE(live.slides[0].content.regions["main"].style.color, builtInLyricsTemplate().regions[0].style.color);
     }
 
+    // #96: the item's transition, then the slide's; cuts unless something says otherwise.
+    void theTransitionIsTheTemplatesThenTheItemsThenTheSlides()
+    {
+        const Song plain = sample();
+        const LiveItem builtIn = liveItem(songItem(plain), plain, templateSet({}));
+        for (const LiveSlide &s : builtIn.slides)
+            QCOMPARE(s.content.transition.kind, TransitionKind::Cut);
+
+        Song song = sample();
+        song.groups[1].slideOverrides = {{{"transition", QJsonObject{{"kind", "cut"}}}}};
+        const QJsonObject itemFade{{"transition", QJsonObject{{"kind", "fade"}, {"ms", 250}}}};
+        const LiveItem live = liveItem(songItem(song, itemFade), song, templateSet({}));
+        QCOMPARE(live.slides[0].content.transition, (Transition{TransitionKind::Fade, 250}));
+        QCOMPARE(live.slides[1].content.transition, (Transition{TransitionKind::Fade, 250}));
+        QCOMPARE(live.slides[2].content.transition, (Transition{TransitionKind::Cut, 250}));
+        QVERIFY(live.warnings.isEmpty());
+    }
+
     // Recovery re-renders from the journal, which keeps the live item's own song.
     void anItemKeepsItsSourceAndRendersTheSameFromItsOwnSong()
     {

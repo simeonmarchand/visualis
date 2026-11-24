@@ -39,6 +39,7 @@ constexpr int kBytes = 256 * 1024;      // a template is a few KB; this is the w
 constexpr int kRegions = 32;
 constexpr int kTextLength = 200;        // names, ids, font families
 constexpr double kMaxSafeArea = 0.45;   // of the output, on each side
+constexpr int kMaxTransitionMs = 10'000;
 } // namespace templatelimits
 
 QByteArray templateToJson(const Template &tmpl);
@@ -64,5 +65,11 @@ RegionStyle enforceRegionConstraints(RegionStyle style, const RegionStyle &fallb
 // Both, for one layer over `base`, as reading a template does.
 RegionStyle applyRegionStyle(const RegionStyle &base, const QJsonObject &json, const QString &where,
                              QStringList *warnings);
+
+// One transition as JSON: {"kind": "fade", "ms": 600}.
+QJsonObject transitionToJson(const Transition &transition);
+// `base` with the valid keys of `json` applied; a kind this version doesn't know reads as a
+// cut. Problems are reported in `warnings`, prefixed with `where`.
+Transition applyTransition(const Transition &base, const QJsonObject &json, const QString &where, QStringList *warnings);
 
 } // namespace visualis

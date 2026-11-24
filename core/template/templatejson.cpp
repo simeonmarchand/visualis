@@ -14,7 +14,6 @@ namespace {
 
 constexpr int kVersion = 1;
 const char *kFormat = "visualis-template";
-constexpr int kMaxTransitionMs = 10'000;
 
 // How a value reads in a warning.
 QString show(const QJsonValue &v)
@@ -155,28 +154,29 @@ QJsonObject overlay(QJsonObject kept, const QJsonObject &known)
     return kept;
 }
 
+QString time(const QDateTime &t) { return t.toUTC().toString(Qt::ISODateWithMs); }
+
+} // namespace
+
 QJsonObject transitionToJson(const Transition &t)
 {
     return {{"kind", kTransitionKinds.value(int(t.kind))}, {"ms", t.ms}};
 }
 
-Transition transitionFrom(const QJsonObject &o, const QString &where, QStringList *warnings, Transition t)
+Transition applyTransition(const Transition &base, const QJsonObject &json, const QString &where, QStringList *warnings)
 {
-    Reader r(o, where, warnings);
-    const QJsonValue kind = o.value("kind");
+    Transition t = base;
+    Reader r(json, where, warnings);
+    const QJsonValue kind = json.value("kind");
     if (!kind.isUndefined()) {
         const qsizetype i = kind.isString() ? kTransitionKinds.indexOf(kind.toString()) : -1;
         t.kind = i < 0 ? TransitionKind::Cut : TransitionKind(i);
         if (i < 0)
             r.report(QStringLiteral("%1 is %2, which this version doesn't know; using a cut").arg(r.where("kind"), show(kind)));
     }
-    r.integer("ms", 0, kMaxTransitionMs, t.ms);
+    r.integer("ms", 0, templatelimits::kMaxTransitionMs, t.ms);
     return t;
 }
-
-QString time(const QDateTime &t) { return t.toUTC().toString(Qt::ISODateWithMs); }
-
-} // namespace
 
 QJsonObject regionStyleToJson(const RegionStyle &s)
 {
@@ -349,9 +349,9 @@ TemplateJsonResult templateFromJson(const QByteArray &json)
     }
     if (const QJsonObject tr = r.object("transitions"); !tr.isEmpty()) {
         Reader trr(tr, r.where("transitions"), warnings);
-        t.transitions.content = transitionFrom(trr.object("content"), trr.where("content"), warnings, t.transitions.content);
+        t.transitions.content = applyTransition(t.transitions.content, trr.object("content"), trr.where("content"), warnings);
         t.transitions.background =
-            transitionFrom(trr.object("background"), trr.where("background"), warnings, t.transitions.background);
+            applyTransition(t.transitions.background, trr.object("background"), trr.where("background"), warnings);
     }
 
     const QJsonValue regionsValue = o.value("regions");
