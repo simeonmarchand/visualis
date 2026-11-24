@@ -26,6 +26,8 @@ qt_add_library(visualis_core STATIC
     media/mediaasset.h
     media/mediafiles.cpp
     media/mediafiles.h
+    media/mediaresolve.cpp
+    media/mediaresolve.h
     media/medialimits.h
     media/mediastore.cpp
     media/mediastore.h
