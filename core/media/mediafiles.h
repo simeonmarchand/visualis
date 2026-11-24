@@ -35,6 +35,17 @@ struct PartialCopy {
 PartialCopy copyToPartial(const QString &source, const QString &mediaFolder, qint64 maxBytes,
                           const std::atomic_bool *stop = nullptr);
 
+struct FileHash {
+    QString hash;        // SHA-256, lower-case hex; empty unless ok()
+    bool cancelled = false;
+    QString error;       // for the operator; empty on success
+    bool ok() const { return error.isEmpty() && !cancelled; }
+};
+
+// The SHA-256 of a file, read in chunks with `stop` checked between them, as copyToPartial
+// does. Safe to call from any thread.
+FileHash hashFile(const QString &path, const std::atomic_bool *stop = nullptr);
+
 // media/.partial/ as an absolute path, created if `create`; empty if it's missing or isn't the
 // library's own folder (a link elsewhere). Copies are staged there, inside media/, so
 // publishing is a rename on one filesystem.

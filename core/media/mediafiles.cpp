@@ -59,6 +59,30 @@ bool syncToDisk(QFile &file)
 #endif
 }
 
+// Reads `in` to the end in chunks, hashing each and handing it to `each`, which returns false
+// to stop (having said why). One loop, so copying and rehashing can't disagree on a hash.
+// `error` is set only for a failed read; a stop from `each` leaves it empty.
+template <typename Each>
+FileHash readChunks(QFile &in, const std::atomic_bool *stop, Each each)
+{
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    QByteArray chunk(kChunkBytes, Qt::Uninitialized);
+    for (;;) {
+        if (stop && stop->load())
+            return {{}, true, {}};
+        const qint64 n = in.read(chunk.data(), kChunkBytes);
+        if (n < 0)
+            return {{}, false, in.errorString()};
+        if (n == 0)
+            break;
+        const QByteArrayView view(chunk.constData(), n);
+        hash.addData(view);
+        if (!each(view))
+            return {};
+    }
+    return {QString::fromLatin1(hash.result().toHex()), false, {}};
+}
+
 QString extensionOf(const QString &fileName)
 {
     const QString suffix = QFileInfo(fileName).suffix().toLower();
@@ -141,31 +165,39 @@ PartialCopy copyToPartial(const QString &source, const QString &mediaFolder, qin
         return out;
     };
 
-    QCryptographicHash hash(QCryptographicHash::Sha256);
-    QByteArray chunk(kChunkBytes, Qt::Uninitialized);
     qint64 copied = 0;
-    for (;;) {
-        if (stop && stop->load())
-            return abandon({}, true);
-        const qint64 n = in.read(chunk.data(), kChunkBytes);
-        if (n < 0)
-            return abandon(in.errorString());
-        if (n == 0)
-            break;
-        copied += n;
-        if (copied > maxBytes)   // it grew since it was opened
-            return abandon(QStringLiteral("too large (the limit is %1 MB)").arg(maxBytes / (1024 * 1024)));
-        hash.addData(QByteArrayView(chunk.constData(), n));
-        if (partial.write(chunk.constData(), n) != n)
-            return abandon(partial.errorString());
-    }
+    QString chunkError;
+    const FileHash read = readChunks(in, stop, [&](QByteArrayView chunk) {
+        copied += chunk.size();
+        if (copied > maxBytes) {   // it grew since it was opened
+            chunkError = QStringLiteral("too large (the limit is %1 MB)").arg(maxBytes / (1024 * 1024));
+            return false;
+        }
+        if (partial.write(chunk.constData(), chunk.size()) != chunk.size()) {
+            chunkError = partial.errorString();
+            return false;
+        }
+        return true;
+    });
+    if (read.cancelled)
+        return abandon({}, true);
+    if (!read.error.isEmpty() || !chunkError.isEmpty())
+        return abandon(chunkError.isEmpty() ? read.error : chunkError);
     if (!partial.flush())
         return abandon(partial.errorString());
     if (!syncToDisk(partial))
         return abandon(QStringLiteral("couldn't write the copy to disk"));
     partial.close();
-    out.hash = QString::fromLatin1(hash.result().toHex());
+    out.hash = read.hash;
     return out;
+}
+
+FileHash hashFile(const QString &path, const std::atomic_bool *stop)
+{
+    QFile in(path);
+    if (!in.open(QIODevice::ReadOnly))
+        return {{}, false, in.errorString()};
+    return readChunks(in, stop, [](QByteArrayView) { return true; });
 }
 
 QString mediaFileFor(const QString &hash, const QString &extension)
