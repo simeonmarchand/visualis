@@ -9,6 +9,16 @@ const QStringList kKindNames = {"lyrics", "scripture", "title", "lower_third", "
 
 } // namespace
 
+int RegionStyle::horizontalAlignment() const
+{
+    return hAlign == HAlign::Left ? Qt::AlignLeft : hAlign == HAlign::Right ? Qt::AlignRight : Qt::AlignHCenter;
+}
+
+int RegionStyle::verticalAlignment() const
+{
+    return vAlign == VAlign::Top ? Qt::AlignTop : vAlign == VAlign::Bottom ? Qt::AlignBottom : Qt::AlignVCenter;
+}
+
 const TextRegion *Template::region(const QString &id) const
 {
     for (const TextRegion &r : regions) {
@@ -38,8 +48,8 @@ QUuid builtInLyricsTemplateId()
 
 Template builtInLyricsTemplate()
 {
-    // Keep in step with app/qml/LyricsTemplate.qml until the outputs read templates (#93);
-    // tst_template compares the two.
+    // The look Phase 1 shipped with, so nothing changed on screen when the outputs moved to
+    // templates (#93).
     Template t;
     t.id = builtInLyricsTemplateId();
     t.name = QStringLiteral("Lyrics");
@@ -83,6 +93,16 @@ std::optional<Template> builtInTemplate(const QUuid &id)
 bool isBuiltInTemplate(const QUuid &id)
 {
     return builtInTemplate(id).has_value();
+}
+
+TemplateSet templateSet(const QList<Template> &stored)
+{
+    TemplateSet set;
+    for (const Template &t : stored)
+        set.insert(t.id, t);
+    for (const Template &t : builtInTemplates())
+        set.insert(t.id, t);
+    return set;
 }
 
 QUuid overrideTemplateId(const QJsonObject &overrides)

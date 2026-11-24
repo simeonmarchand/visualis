@@ -6,16 +6,11 @@
 #include "template/templatejson.h"
 #include "template/templatestore.h"
 
-#include <QColor>
 #include <QJsonArray>
 #include <QJsonDocument>
-#include <QQmlEngine>
 #include <QSqlQuery>
 #include <QTemporaryDir>
-#include <QtQml/qqmlextensionplugin.h>
 #include <QtTest>
-
-Q_IMPORT_QML_PLUGIN(Visualis_UiPlugin)
 
 using namespace visualis;
 
@@ -90,43 +85,6 @@ private slots:
     {
         m_library.reset();
         m_dir.reset();
-    }
-
-    // Nothing may change on screen when templates arrive: the built-in is today's QML.
-    void theBuiltInLyricsTemplateIsTodaysLook()
-    {
-        QQmlEngine engine;
-        QObject *qml = engine.singletonInstance<QObject *>("Visualis.Ui", "LyricsTemplate");
-        QVERIFY(qml);
-        const Template t = builtInLyricsTemplate();
-        QCOMPARE(t.id, builtInLyricsTemplateId());
-        QCOMPARE(t.kind, TemplateKind::Lyrics);
-        QCOMPARE(t.regions.size(), 1);
-        const RegionStyle &s = t.regions[0].style;
-        QCOMPARE(t.regions[0].id, QStringLiteral("main"));
-
-        QCOMPARE(s.fontFamily, qml->property("fontFamily").toString());
-        QCOMPARE(s.weight, qml->property("fontWeight").toInt());
-        QCOMPARE(QColor(s.color), qml->property("textColor").value<QColor>());
-        QCOMPARE(s.maxSize, qml->property("maxTextSize").toDouble());
-        QCOMPARE(s.minSize, qml->property("minTextSize").toDouble());
-        QCOMPARE(s.lineHeight, qml->property("lineHeight").toDouble());
-        QCOMPARE(t.safeAreaX, qml->property("safeAreaX").toDouble());
-        QCOMPARE(t.safeAreaY, qml->property("safeAreaY").toDouble());
-        // The text fills the safe area, centered.
-        QCOMPARE(s.frame, QRectF(t.safeAreaX, t.safeAreaY, 1 - 2 * t.safeAreaX, 1 - 2 * t.safeAreaY));
-        QCOMPARE(s.hAlign, HAlign::Center);
-        QCOMPARE(s.vAlign, VAlign::Center);
-        QCOMPARE(s.shadow.enabled, qml->property("shadow").toBool());
-        QCOMPARE(QColor(s.shadow.color), qml->property("shadowColor").value<QColor>());
-        QCOMPARE(s.shadow.opacity, qml->property("shadowOpacity").toDouble());
-        QCOMPARE(s.shadow.blur, qml->property("shadowBlur").toDouble());
-        QCOMPARE(s.shadow.offset, qml->property("shadowOffset").toDouble());
-        QCOMPARE(s.outline.width, 0.0);
-        QCOMPARE(t.transitions.content.kind, qml->property("transition").toString() == "fade" ? TransitionKind::Fade : TransitionKind::Cut);
-        QCOMPARE(t.transitions.content.ms, qml->property("fadeMs").toInt());
-        QCOMPARE(t.transitions.background.kind, TransitionKind::Fade);   // OutputWindow always fades it
-        QCOMPARE(t.transitions.background.ms, qml->property("backgroundFadeMs").toInt());
     }
 
     void jsonRoundTrips()

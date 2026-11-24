@@ -1,6 +1,7 @@
 #include "live/livejournal.h"
 #include "live/livestate.h"
 #include "library/songlibrary.h"
+#include "template/templatejson.h"
 #include "live/recovery.h"
 #include "video/videoengine.h"
 
@@ -15,6 +16,12 @@ using namespace visualis;
 
 namespace {
 
+// A song taken live from the library, through the built-in template.
+LiveItem libraryItem(const Song &song, const QUuid &arrangement = {})
+{
+    return liveSong(song, arrangement, templateSet({}));
+}
+
 Song sample()
 {
     Song s;
@@ -27,6 +34,16 @@ Song sample()
     return s;
 }
 
+// A stored template, as TemplateLibrary loads it.
+Template stored(const QString &font)
+{
+    Template t = builtInLyricsTemplate();
+    t.id = QUuid::createUuid();
+    t.name = font;
+    t.regions[0].style.fontFamily = font;
+    t.transitions.content = {TransitionKind::Fade, 250};
+    return *templateFromJson(templateToJson(t)).tmpl;
+}
 
 // One group of `slides` slides, played `steps` times: structurally small, huge expanded.
 Song repeated(int slides, int steps)
@@ -55,7 +72,7 @@ int crashLiveChild(char **argv)
     LiveState live;
     Recovery recovery;
     recovery.start(QString::fromLocal8Bit(argv[3]), &live, nullptr);
-    if (!song || !live.show(*song, {}, 1))
+    if (!song || !live.show(libraryItem(*song), 1))
         return 1;
     return childprocess::readyUntilParentGoes("live", songs.selectedId().toUtf8());
 }
@@ -84,7 +101,7 @@ private slots:
         LiveState live;
         Recovery recovery;
         recovery.start(m_path, &live, nullptr);
-        live.show(sample(), {}, 0);
+        live.show(libraryItem(sample()), 0);
         QCOMPARE(readJournal(m_path).snapshot->slideIndex, 0);
         live.next();
         QCOMPARE(readJournal(m_path).snapshot->slideIndex, 1);
@@ -98,7 +115,7 @@ private slots:
             LiveState live;
             Recovery recovery;
             recovery.start(m_path, &live, nullptr);
-            live.show(sample(), {}, 0);
+            live.show(libraryItem(sample()), 0);
             live.next();
             live.next();
             live.clearBackground();
@@ -124,7 +141,7 @@ private slots:
         second.title = "O Come All Ye Faithful";
         const ServiceItem a{QUuid::createUuid(), ServiceItem::Kind::Song, "Joy", {}, {}, {}, {}, {}, {}, {}, {}};
         const ServiceItem b{QUuid::createUuid(), ServiceItem::Kind::Song, "O Come", {}, {}, {}, {}, {}, {}, {}, {}};
-        const QList<LiveItem> items{liveItem(a, sample()), liveItem(b, second)};
+        const QList<LiveItem> items{liveItem(a, sample(), templateSet({})), liveItem(b, second, templateSet({}))};
         const QUuid service = QUuid::createUuid();
         {
             LiveState live;
@@ -173,6 +190,55 @@ private slots:
         QCOMPARE(songs.selectedSlides().size(), 2);
     }
 
+    // #93: what comes back is what was on screen, rendered again from the journal alone (the
+    // library may not open): the item, its overrides, its template.
+    void recoveryRendersTheSameItemFromTheJournalAlone()
+    {
+        const Template t = stored("Georgia");
+        ServiceItem item{QUuid::createUuid(), ServiceItem::Kind::Song, "Joy", {}, {}, {}, {}, {}, {}, {}, {}};
+        item.overrides = {{"template", t.id.toString(QUuid::WithoutBraces)},
+                          {"regions", QJsonObject{{"main", QJsonObject{{"weight", 800}}}}}};
+        item.customSequence = {"Intro", "Verse 1", "Chorus"};
+        Song song = sample();
+        song.groups[1].slideOverrides = {QJsonObject{{"regions", QJsonObject{{"main", QJsonObject{{"color", "#ffcc00"}}}}}}};
+        const LiveItem shown = liveItem(item, song, templateSet({t}));
+        const QUuid service = QUuid::createUuid();
+        {
+            LiveState live;
+            Recovery recovery;
+            recovery.start(m_path, &live, nullptr);
+            live.setService(service, {shown});
+            QVERIFY(live.goToItem(0, 2));
+        }   // no finish(): the process died
+
+        LiveState live;
+        Recovery recovery;
+        QVERIFY(recovery.start(m_path, &live, nullptr));
+        QCOMPARE(live.item(), shown);
+        QCOMPARE(live.slideIndex(), 2);
+        QCOMPARE(live.serviceId(), service);
+        QCOMPARE(live.content().regions["main"].style.fontFamily, QStringLiteral("Georgia"));
+    }
+
+    void aLibrarySongComesBackInItsTemplate()
+    {
+        const Template t = stored("Avenir");
+        Song song = sample();
+        song.defaultTemplate = t.id;
+        const LiveItem shown = liveSong(song, {}, templateSet({t}));
+        {
+            LiveState live;
+            Recovery recovery;
+            recovery.start(m_path, &live, nullptr);
+            live.show(shown, 1);
+        }
+        LiveState live;
+        Recovery recovery;
+        QVERIFY(recovery.start(m_path, &live, nullptr));
+        QCOMPARE(live.item(), shown);
+        QCOMPARE(live.content().regions["main"].style.fontFamily, QStringLiteral("Avenir"));
+    }
+
     void theBackgroundComesBackToo()
     {
         const QUrl clip = QUrl::fromLocalFile(m_dir.filePath("motion.mp4"));
@@ -197,7 +263,7 @@ private slots:
             LiveState live;
             Recovery recovery;
             recovery.start(m_path, &live, nullptr);
-            live.show(sample(), {}, 1);
+            live.show(libraryItem(sample()), 1);
             recovery.finish();
             live.next();   // after finish: no longer journaled
         }
@@ -206,6 +272,34 @@ private slots:
         Recovery recovery;
         QVERIFY(!recovery.start(m_path, &live, nullptr));
         QVERIFY(!live.hasSlide());
+    }
+
+    // #93 review: a journal from before #93 holds the rendered song and its "This service"
+    // order, but no service item. It restores, and a second crash before the service is
+    // opened again brings back the same order and slide.
+    void aJournalFromBefore93SurvivesTwoCrashesInARow()
+    {
+        ServiceItem item{QUuid::createUuid(), ServiceItem::Kind::Song, "Joy", {}, {}, {}, {}, {}, {}, {}, {}};
+        item.customSequence = {"Intro", "Chorus", "Verse 1", "Chorus"};
+        const LiveItem shown = liveItem(item, sample(), templateSet({}));
+        QCOMPARE(shown.arrangement, item.id);
+        LiveSnapshot old;
+        old.song = shown.song;
+        old.arrangement = shown.arrangement;
+        old.item = item.id;
+        old.service = QUuid::createUuid();
+        old.slideIndex = 3;
+        old.savedAt = QDateTime::currentDateTimeUtc();
+        QVERIFY(writeJournal(m_path, old));
+
+        for (int crash = 0; crash < 2; ++crash) {
+            LiveState live;
+            Recovery recovery;
+            QVERIFY(recovery.start(m_path, &live, nullptr));
+            QCOMPARE(live.slides(), shown.slides);
+            QCOMPARE(live.slideIndex(), 3);
+            QCOMPARE(live.itemId(), item.id);
+        }   // no finish(), twice
     }
 
     void aJournalFromAnotherDayIsNotRestored()
@@ -250,7 +344,7 @@ private slots:
         LiveState live;
         Recovery recovery;
         QVERIFY(!recovery.start(m_path, &live, nullptr));
-        live.show(sample(), {}, 0);
+        live.show(libraryItem(sample()), 0);
         QVERIFY(readJournal(m_path).snapshot);
     }
 
@@ -259,7 +353,7 @@ private slots:
         LiveState live;
         Recovery recovery;
         QVERIFY(!recovery.start("/dev/null/cannot/live-journal.json", &live, nullptr));
-        QVERIFY(live.show(sample(), {}, 0));
+        QVERIFY(live.show(libraryItem(sample()), 0));
         QVERIFY(live.next());
     }
 
@@ -268,9 +362,9 @@ private slots:
         LiveState live;
         Recovery recovery;
         recovery.start(m_path, &live, nullptr);
-        live.show(sample(), {}, 0);
+        live.show(libraryItem(sample()), 0);
         QVERIFY(QFile::exists(m_path));
-        live.restore(Song{}, {}, -1, false, false);
+        live.restore(LiveItem{}, -1, false, false);
         QVERIFY(!QFile::exists(m_path));
     }
 

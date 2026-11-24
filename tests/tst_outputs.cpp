@@ -1,6 +1,7 @@
 #include "live/livestate.h"
 #include "output/latencyprobe.h"
 
+#include <QFont>
 #include <QJSValue>
 #include <QQmlApplicationEngine>
 #include <QQmlComponent>
@@ -18,6 +19,12 @@ Q_IMPORT_QML_PLUGIN(Visualis_UiPlugin)
 using namespace visualis;
 
 namespace {
+
+// A song taken live from the library, through the built-in template.
+LiveItem libraryItem(const Song &song, const QUuid &arrangement = {})
+{
+    return liveSong(song, arrangement, templateSet({}));
+}
 
 // Joy to the World (public domain): a blank intro, a two-slide verse, and a chorus.
 Song sample()
@@ -41,6 +48,18 @@ Song oneSlide(const QString &text)
     s.groups = {Group{QUuid::createUuid(), "Verse", "#0078cc", {text}}};
     s.arrangements = {Arrangement{QUuid::createUuid(), "Default", {s.groups[0].id}, {}}};
     return s;
+}
+
+// `song` through a template of its own, made with `edit` from the built-in.
+template <typename Edit>
+LiveItem throughTemplate(Song song, Edit edit)
+{
+    Template t = builtInLyricsTemplate();
+    t.id = QUuid::createUuid();
+    t.name = "Test";
+    edit(t);
+    song.defaultTemplate = t.id;
+    return liveSong(song, {}, templateSet({t}));
 }
 
 int pixelSize(const QObject *text)
@@ -75,7 +94,7 @@ private slots:
     void audienceShowsTheCurrentSlide()
     {
         QQuickWindow *w = output("audience");
-        m_live->show(sample(), {}, 1);
+        m_live->show(libraryItem(sample()), 1);
         QTRY_COMPARE(shownLyrics(w), QStringLiteral("Joy to the world\nThe Lord is come"));
         m_live->next();
         QTRY_COMPARE(shownLyrics(w), QStringLiteral("Let earth receive her King"));
@@ -90,7 +109,7 @@ private slots:
         if (QGuiApplication::platformName() == "offscreen")
             QSKIP("MultiEffect doesn't render offscreen; run with QT_QPA_PLATFORM=cocoa");
         QQuickWindow *w = output("audience");
-        m_live->show(oneSlide("Joy to the world"), {}, 0);
+        m_live->show(libraryItem(oneSlide("Joy to the world")), 0);
         QTRY_COMPARE(shownLyrics(w), QStringLiteral("Joy to the world"));
         QTest::qWait(LyricsFadeWaitMs);
         const QImage image = w->grabWindow();
@@ -105,7 +124,7 @@ private slots:
     void slidesCutByDefault()
     {
         QQuickWindow *w = output("audience");
-        m_live->show(sample(), {}, 1);
+        m_live->show(libraryItem(sample()), 1);
         QTRY_COMPARE(shownLyrics(w), QStringLiteral("Joy to the world\nThe Lord is come"));
         m_live->next();
         // No waiting: the new slide is fully shown and the old one gone at once.
@@ -113,27 +132,50 @@ private slots:
         QCOMPARE(hiddenLyrics(w)->opacity(), 0.0);
     }
 
+    // #93: the audience text renders from the live slide's template: font, size, alignment
+    // and place.
+    void theTextRendersFromTheTemplate()
+    {
+        QQuickWindow *w = output("audience");
+        QCOMPARE(w->size(), QSize(1920, 1080));
+        m_live->show(throughTemplate(oneSlide("short"), [](Template &t) {
+            RegionStyle &s = t.regions[0].style;
+            s.fontFamily = "Courier New";
+            s.maxSize = 0.05;
+            s.weight = 700;
+            s.hAlign = HAlign::Left;
+            s.vAlign = VAlign::Bottom;
+            s.frame = QRectF(0.1, 0.6, 0.8, 0.3);
+        }), 0);
+        QTRY_VERIFY(visibleLyrics(w) && visibleLyrics(w)->property("text").toString() == "short");
+        QQuickItem *text = visibleLyrics(w);
+        const QFont font = text->property("font").value<QFont>();
+        QCOMPARE(font.family(), QStringLiteral("Courier New"));
+        QCOMPARE(font.weight(), QFont::Bold);
+        QCOMPARE(pixelSize(text), 54);   // 5% of 1080
+        QCOMPARE(text->property("horizontalAlignment").toInt(), int(Qt::AlignLeft));
+        QCOMPARE(text->property("verticalAlignment").toInt(), int(Qt::AlignBottom));
+        QCOMPARE(text->mapRectToScene(QRectF(0, 0, text->width(), text->height())), QRectF(192, 648, 1536, 324));
+        snapshot(w, "audience-template");
+    }
+
     void theFadeTransitionCrossfades()
     {
-        auto *tmpl = m_engine->singletonInstance<QObject *>("Visualis.Ui", "LyricsTemplate");
-        QVERIFY(tmpl);
-        tmpl->setProperty("transition", "fade");
         QQuickWindow *w = output("audience");
-        m_live->show(sample(), {}, 1);
+        m_live->show(throughTemplate(sample(), [](Template &t) { t.transitions.content = {TransitionKind::Fade, 300}; }), 1);
         QTRY_COMPARE(visibleLyrics(w)->opacity(), 1.0);
         m_live->next();
         QTest::qWait(50);
         QVERIFY(visibleLyrics(w)->opacity() < 1.0);   // still fading in
         QTRY_COMPARE(visibleLyrics(w)->opacity(), 1.0);
         QTRY_COMPARE(hiddenLyrics(w)->opacity(), 0.0);
-        tmpl->setProperty("transition", "cut");
     }
 
     void clearedTextLeavesTheAudienceAndStaysOnStage()
     {
         QQuickWindow *audience = output("audience");
         QQuickWindow *stage = output("stage");
-        m_live->show(sample(), {}, 1);
+        m_live->show(libraryItem(sample()), 1);
         m_live->clearText();
         QTRY_COMPARE(shownLyrics(audience), QString());
         QCOMPARE(stage->findChild<QObject *>("stageCurrent")->property("text").toString(),
@@ -145,11 +187,11 @@ private slots:
     void longSlidesShrinkToFit()
     {
         QQuickWindow *w = output("audience");
-        m_live->show(oneSlide("short"), {}, 0);
+        m_live->show(libraryItem(oneSlide("short")), 0);
         QTRY_VERIFY(visibleLyrics(w));
         const int full = pixelSize(visibleLyrics(w));
 
-        m_live->show(oneSlide(QStringList(8, "A line of a long verse that keeps going").join('\n')), {}, 0);
+        m_live->show(libraryItem(oneSlide(QStringList(8, "A line of a long verse that keeps going").join('\n'))), 0);
         QTRY_VERIFY(visibleLyrics(w) && visibleLyrics(w)->property("text").toString().startsWith("A line"));
         QQuickItem *text = visibleLyrics(w);
         QVERIFY2(pixelSize(text) < full, qPrintable(QString::number(pixelSize(text))));
@@ -160,7 +202,7 @@ private slots:
     void textNeverOverflowsTheSafeArea()
     {
         QQuickWindow *w = output("audience");
-        m_live->show(oneSlide(QStringList(60, "far too many words for one slide").join('\n')), {}, 0);
+        m_live->show(libraryItem(oneSlide(QStringList(60, "far too many words for one slide").join('\n'))), 0);
         QTRY_VERIFY(visibleLyrics(w) && visibleLyrics(w)->property("text").toString().startsWith("far"));
         QQuickItem *text = visibleLyrics(w);
         QVERIFY(text->property("contentHeight").toReal() <= text->height());
@@ -174,7 +216,7 @@ private slots:
     void stageShowsGroupPositionNextAndClock()
     {
         QQuickWindow *stage = output("stage");
-        m_live->show(sample(), {}, 1);
+        m_live->show(libraryItem(sample()), 1);
         QTRY_COMPARE(text(stage, "stageNext"), QStringLiteral("Let earth receive her King"));
         QCOMPARE(text(stage, "stageTitle"), QStringLiteral("Joy to the World   2 / 4"));
         QCOMPARE(stage->findChild<QQuickItem *>("stageGroup")->property("color").value<QColor>(), QColor("#0078cc"));
@@ -191,7 +233,7 @@ private slots:
         Song s = sample();
         s.arrangements[0].sequence = {s.groups[1].id, s.groups[0].id, s.groups[2].id};
         QQuickWindow *stage = output("stage");
-        m_live->show(s, {}, 1);
+        m_live->show(libraryItem(s), 1);
         QTRY_COMPARE(text(stage, "stageNext"), QString());
     }
 
@@ -208,7 +250,7 @@ private slots:
     void commandsReachTheOutputQuickly()
     {
         QQuickWindow *w = output("audience");
-        m_live->show(sample(), {}, 1);
+        m_live->show(libraryItem(sample()), 1);
         QTest::qWait(200);
         LatencyProbe probe(w, "audience");
         QSignalSpy measured(&probe, &LatencyProbe::measured);
@@ -228,7 +270,7 @@ private slots:
     // Plan 5.2: an output owns no state, so a reopened window shows what's live.
     void aNewOutputWindowShowsWhatIsLive()
     {
-        m_live->show(sample(), {}, 2);
+        m_live->show(libraryItem(sample()), 2);
         QQuickWindow *w = output("audience");
         QTRY_COMPARE(shownLyrics(w), QStringLiteral("Let earth receive her King"));
     }

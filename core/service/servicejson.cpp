@@ -12,17 +12,43 @@ QString idText(const QUuid &id) { return id.isNull() ? QString() : id.toString(Q
 QString time(const QDateTime &t) { return t.isValid() ? t.toUTC().toString(Qt::ISODateWithMs) : QString(); }
 } // namespace
 
+QJsonObject serviceItemToJson(const ServiceItem &it)
+{
+    return {
+        {"id", idText(it.id)}, {"kind", kindName(it.kind)}, {"title", it.title}, {"ref", idText(it.ref)},
+        {"arrangement", idText(it.arrangement)}, {"customSequence", QJsonArray::fromStringList(it.customSequence)},
+        {"body", it.body}, {"servicePosition", it.servicePosition}, {"pcoItemId", it.pcoItemId},
+        {"overrides", it.overrides}, {"importSnapshot", it.importSnapshot}, {"pcoRemoved", it.pcoRemoved},
+    };
+}
+
+ServiceItem serviceItemFromJson(const QJsonObject &i, QStringList *warnings)
+{
+    ServiceItem it;
+    it.id = QUuid::fromString(i.value("id").toString());
+    const QString kind = i.value("kind").toString();
+    it.kind = kindFromName(kind).value_or(ServiceItem::Kind::Placeholder);
+    if (!kindFromName(kind) && warnings)
+        *warnings << QStringLiteral("\"%1\" has an unknown kind \"%2\"; it's a placeholder.").arg(i.value("title").toString(), kind);
+    it.title = i.value("title").toString();
+    it.ref = QUuid::fromString(i.value("ref").toString());
+    it.arrangement = QUuid::fromString(i.value("arrangement").toString());
+    for (const QJsonValue &label : i.value("customSequence").toArray())
+        it.customSequence << label.toString();
+    it.body = i.value("body").toString();
+    it.servicePosition = i.value("servicePosition").toString();
+    it.pcoItemId = i.value("pcoItemId").toString();
+    it.overrides = i.value("overrides").toObject();
+    it.importSnapshot = i.value("importSnapshot").toObject();
+    it.pcoRemoved = i.value("pcoRemoved").toBool();
+    return it;
+}
+
 QByteArray serviceToJson(const Service &s)
 {
     QJsonArray items;
-    for (const ServiceItem &it : s.items) {
-        items.append(QJsonObject{
-            {"id", idText(it.id)}, {"kind", kindName(it.kind)}, {"title", it.title}, {"ref", idText(it.ref)},
-            {"arrangement", idText(it.arrangement)}, {"customSequence", QJsonArray::fromStringList(it.customSequence)},
-            {"body", it.body}, {"servicePosition", it.servicePosition}, {"pcoItemId", it.pcoItemId},
-            {"overrides", it.overrides}, {"importSnapshot", it.importSnapshot}, {"pcoRemoved", it.pcoRemoved},
-        });
-    }
+    for (const ServiceItem &it : s.items)
+        items.append(serviceItemToJson(it));
     QJsonArray removed;
     for (auto r = s.removedPcoItems.cbegin(); r != s.removedPcoItems.cend(); ++r)
         removed.append(QJsonObject{{"pcoItemId", r.key()}, {"importSnapshot", r.value()}});
@@ -61,27 +87,8 @@ ServiceJsonResult serviceFromJson(const QByteArray &json)
     s.lastImportedAt = QDateTime::fromString(o.value("lastImportedAt").toString(), Qt::ISODateWithMs);
     s.created = QDateTime::fromString(o.value("created").toString(), Qt::ISODateWithMs);
     s.updated = QDateTime::fromString(o.value("updated").toString(), Qt::ISODateWithMs);
-    for (const QJsonValue &v : o.value("items").toArray()) {
-        const QJsonObject i = v.toObject();
-        ServiceItem it;
-        it.id = QUuid::fromString(i.value("id").toString());
-        const QString kind = i.value("kind").toString();
-        it.kind = kindFromName(kind).value_or(ServiceItem::Kind::Placeholder);
-        if (!kindFromName(kind))
-            r.warnings << QStringLiteral("\"%1\" has an unknown kind \"%2\"; it's a placeholder.").arg(i.value("title").toString(), kind);
-        it.title = i.value("title").toString();
-        it.ref = QUuid::fromString(i.value("ref").toString());
-        it.arrangement = QUuid::fromString(i.value("arrangement").toString());
-        for (const QJsonValue &label : i.value("customSequence").toArray())
-            it.customSequence << label.toString();
-        it.body = i.value("body").toString();
-        it.servicePosition = i.value("servicePosition").toString();
-        it.pcoItemId = i.value("pcoItemId").toString();
-        it.overrides = i.value("overrides").toObject();
-        it.importSnapshot = i.value("importSnapshot").toObject();
-        it.pcoRemoved = i.value("pcoRemoved").toBool();
-        s.items << it;
-    }
+    for (const QJsonValue &v : o.value("items").toArray())
+        s.items << serviceItemFromJson(v.toObject(), &r.warnings);
     for (const QJsonValue &v : o.value("removedPcoItems").toArray()) {
         const QJsonObject x = v.toObject();
         s.removedPcoItems.insert(x.value("pcoItemId").toString(), x.value("importSnapshot").toObject());

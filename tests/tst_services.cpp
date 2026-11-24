@@ -456,6 +456,24 @@ private slots:
         QVERIFY(m_services->load(s.id)->removedPcoItems.isEmpty());
     }
 
+    // One item on its own, as the live state journal keeps it (#93): every field comes back.
+    void oneItemRoundTripsOnItsOwn()
+    {
+        ServiceItem it{QUuid::createUuid(), ServiceItem::Kind::Song, "Joy to the World", QUuid::createUuid(),
+                       QUuid::createUuid(), {"Verse 1", "Chorus"}, "", "pre", "4412",
+                       QJsonObject{{"template", QUuid::createUuid().toString(QUuid::WithoutBraces)}},
+                       QJsonObject{{"title", "Joy to the World"}}};
+        it.pcoRemoved = true;
+        QStringList warnings;
+        QCOMPARE(serviceItemFromJson(serviceItemToJson(it), &warnings), it);
+        QVERIFY(warnings.isEmpty());
+
+        QJsonObject future = serviceItemToJson(it);
+        future["kind"] = "hologram";
+        QCOMPARE(serviceItemFromJson(future, &warnings).kind, ServiceItem::Kind::Placeholder);
+        QCOMPARE(warnings.size(), 1);
+    }
+
     void jsonRoundTripsAndToleratesUnknownKinds()
     {
         Service s;

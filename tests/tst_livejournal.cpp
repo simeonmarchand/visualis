@@ -1,5 +1,6 @@
 #include "live/livejournal.h"
 #include "live/livestate.h"
+#include "template/templatejson.h"
 
 #include <QTemporaryDir>
 #include <QtTest>
@@ -38,6 +39,33 @@ class LiveJournalTest : public QObject
     Q_OBJECT
 
 private slots:
+    // #93: the live item's service item and template, so recovery can render it again.
+    void roundTripsTheServiceItemAndTemplate()
+    {
+        Template t = builtInLyricsTemplate();
+        t.id = QUuid::createUuid();
+        t.name = "Ours";
+        t.regions[0].style.fontFamily = "Georgia";
+        t = *templateFromJson(templateToJson(t)).tmpl;
+        ServiceItem item{QUuid::createUuid(), ServiceItem::Kind::Song, "Joy", QUuid::createUuid(), {}, {"Verse 1", "Chorus"},
+                         {}, {}, "4412", {}, {}};
+        item.overrides = {{"template", t.id.toString(QUuid::WithoutBraces)}};
+        LiveSnapshot s;
+        s.song = sample();
+        s.serviceItem = item;
+        s.tmpl = t;
+        s.savedAt = QDateTime::currentDateTimeUtc();
+        const SnapshotResult r = snapshotFromJson(snapshotToJson(s));
+        QVERIFY2(r.snapshot, qPrintable(r.error));
+        QCOMPARE(r.snapshot->serviceItem, item);
+        QCOMPARE(r.snapshot->tmpl, t);
+
+        LiveSnapshot plain;   // a library song in the built-in: neither is written
+        plain.song = sample();
+        const SnapshotResult p = snapshotFromJson(snapshotToJson(plain));
+        QVERIFY(!p.snapshot->serviceItem && !p.snapshot->tmpl);
+    }
+
     void roundTripsTheLiveState()
     {
         LiveSnapshot s;
@@ -153,7 +181,7 @@ private slots:
         const Song song = sample();
         LiveState live;
         QSignalSpy changed(&live, &LiveState::changed);
-        live.restore(song, song.arrangements[0].id, 2, true, true);
+        live.restore(liveSong(song, song.arrangements[0].id, templateSet({})), 2, true, true);
         QCOMPARE(changed.count(), 1);
         QCOMPARE(live.slideIndex(), 2);
         QCOMPARE(live.groupLabel(), QStringLiteral("Chorus"));
@@ -165,7 +193,7 @@ private slots:
     {
         const Song song = sample();
         LiveState live;
-        live.restore(song, song.arrangements[1].id, 0, false, false);
+        live.restore(liveSong(song, song.arrangements[1].id, templateSet({})), 0, false, false);
         QCOMPARE(live.slideCount(), 1);   // "Short": just the chorus
         QCOMPARE(live.currentText(), QStringLiteral("And heaven and nature sing"));
     }
@@ -174,7 +202,7 @@ private slots:
     {
         const Song song = sample();
         LiveState live;
-        live.restore(song, {}, 40, false, false);
+        live.restore(liveSong(song, {}, templateSet({})), 40, false, false);
         QCOMPARE(live.songTitle(), song.title);
         QVERIFY(!live.hasSlide());
     }

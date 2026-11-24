@@ -1,6 +1,7 @@
 #include "library/medialibrary.h"
 #include "library/servicelist.h"
 #include "library/songlibrary.h"
+#include "library/templatelibrary.h"
 #include "library/library.h"
 #include "pco/planimport.h"
 #include "pco/songlink.h"
@@ -452,6 +453,182 @@ private slots:
             QTest::qWait(300);
             window->grabWindow().save(dir + "/operator-service.png");
         }
+    }
+
+    // #93: editing a template in the library shows at once in the open service and on what's
+    // live, at the same slide; deleting it falls back to the built-in with a warning.
+    void aTemplateEditReachesTheServiceAndWhatsLive()
+    {
+        auto *templates = m_engine->singletonInstance<TemplateLibrary *>("Visualis.Ui", "TemplateLibrary");
+        QVERIFY(templates);
+        Template t = builtInLyricsTemplate();
+        t.id = QUuid();
+        t.name = "Ours";
+        t.regions[0].style.fontFamily = "Avenir";
+        QVERIFY(templates->save(t));
+        QVERIFY(templates->templates().contains(t.id));
+
+        const QStringList ids = makeSongs({"Amazing Grace", "Holy Spirit"});
+        Song song = *m_songs->loadSong(QUuid::fromString(ids[0]));
+        song.defaultTemplate = t.id;
+        QString error;
+        QVERIFY2(m_songs->saveSong(song, &error), qPrintable(error));
+        QVERIFY(m_services->createService("Sunday"));
+        QVERIFY(m_services->addSong(ids[0]));
+        QVERIFY(m_live->goToItem(0, 1));
+        auto mainFont = [this] { return m_live->content().regions.value("main").style.fontFamily; };
+        QCOMPARE(mainFont(), QStringLiteral("Avenir"));
+
+        t.regions[0].style.fontFamily = "Georgia";
+        QVERIFY(templates->save(t));
+        QCOMPARE(mainFont(), QStringLiteral("Georgia"));
+        QCOMPARE(m_live->itemIndex(), 0);
+        QCOMPARE(m_live->slideIndex(), 1);
+        QVERIFY(m_services->items()[0].toMap()["warnings"].toString().isEmpty());
+
+        // A song taken live from the library follows too.
+        m_songs->select(ids[0]);
+        QVERIFY(m_songs->goLive(2));
+        t.regions[0].style.fontFamily = "Menlo";
+        QVERIFY(templates->save(t));
+        QCOMPARE(mainFont(), QStringLiteral("Menlo"));
+        QCOMPARE(m_live->slideIndex(), 2);
+
+        QVERIFY(templates->remove(t.id));   // gone: never a blank output
+        QCOMPARE(mainFont(), builtInLyricsTemplate().regions[0].style.fontFamily);
+        QVERIFY(!m_services->items()[0].toMap()["warnings"].toString().isEmpty());
+    }
+
+    // #93 with #44: a template change re-renders a library song as it went live, so an edit
+    // saved since still waits for the next go-live.
+    void aTemplateChangeDoesntBringInALiveSongsUnshownEdit()
+    {
+        auto *templates = m_engine->singletonInstance<TemplateLibrary *>("Visualis.Ui", "TemplateLibrary");
+        const QStringList ids = makeSongs({"Amazing Grace"});
+        m_songs->select(ids[0]);
+        QVERIFY(m_songs->goLive(0));
+        const QString shown = m_live->currentText();
+
+        Song song = *m_songs->loadSong(QUuid::fromString(ids[0]));
+        song.groups[0].slides[0] = "Edited since";
+        QString error;
+        QVERIFY2(m_songs->saveSong(song, &error), qPrintable(error));
+        Template t = builtInLyricsTemplate();
+        t.id = QUuid();
+        t.name = "Any";
+        QVERIFY(templates->save(t));
+
+        QCOMPARE(m_live->currentText(), shown);
+    }
+
+    // #93 review: deleting the song that's live in a service never blanks the output. The
+    // copy on screen stays and the operator is told.
+    void deletingTheLiveSongKeepsItOnScreen()
+    {
+        const QStringList ids = makeSongs({"Amazing Grace", "Holy Spirit"});
+        QVERIFY(m_services->createService("Sunday"));
+        QVERIFY(m_services->addSong(ids[0]));
+        QVERIFY(m_services->addSong(ids[1]));
+        QQuickWindow *window = loadOperatorWindow();
+        QVERIFY(m_live->goToItem(0, 1));
+        const QString shown = m_live->currentText();
+
+        QVERIFY(m_songs->removeSong(ids[0]));
+        QCOMPARE(m_live->currentText(), shown);
+        QCOMPARE(m_live->slideIndex(), 1);
+        QQuickItem *banner = findItem(window->contentItem(), "liveHeldBack");
+        QVERIFY(banner);
+        QTRY_VERIFY(banner->isVisible());
+
+        QVERIFY(m_live->goToItem(1, 0));
+        QTRY_VERIFY(!banner->isVisible());
+    }
+
+    // #93: a stored template that can't be read is left out and logged; what uses it shows
+    // in the built-in, never blank.
+    void anUnreadableTemplateFallsBackToTheBuiltIn()
+    {
+        auto *templates = m_engine->singletonInstance<TemplateLibrary *>("Visualis.Ui", "TemplateLibrary");
+        Template t = builtInLyricsTemplate();
+        t.id = QUuid();
+        t.name = "Damaged";
+        t.regions[0].style.fontFamily = "Avenir";
+        QVERIFY(templates->save(t));
+        const QStringList ids = makeSongs({"Amazing Grace"});
+        Song song = *m_songs->loadSong(QUuid::fromString(ids[0]));
+        song.defaultTemplate = t.id;
+        QString error;
+        QVERIFY2(m_songs->saveSong(song, &error), qPrintable(error));
+
+        {
+            QSqlQuery q(m_songs->library()->database());
+            q.prepare("UPDATE template SET body = '{not json' WHERE id = ?");
+            q.addBindValue(t.id.toString(QUuid::WithoutBraces));
+            QVERIFY2(q.exec() && q.numRowsAffected() == 1, qPrintable(q.lastError().text()));
+        }
+        const QString folder = m_songs->folder();   // a copy: openLibrary closes the old library first
+        QTest::ignoreMessage(QtWarningMsg, QRegularExpression("template \"Damaged\":"));
+        QVERIFY(m_songs->openLibrary(folder));   // re-read, as at startup
+
+        QVERIFY(!templates->templates().contains(t.id));
+        QVERIFY(m_services->createService("Sunday"));
+        QTest::ignoreMessage(QtWarningMsg, QRegularExpression("built-in"));
+        QVERIFY(m_services->addSong(ids[0]));
+        QVERIFY(m_live->goToItem(0, 0));
+        QCOMPARE(m_live->content().regions.value("main").style.fontFamily,
+                 builtInLyricsTemplate().regions[0].style.fontFamily);
+        QVERIFY(m_services->items()[0].toMap()["warnings"].toString().contains("built-in"));
+    }
+
+    // #93: the grid's tiles draw the slide's content, so a preview matches the output.
+    void previewTilesRenderThroughTheSlidesTemplate()
+    {
+        auto *templates = m_engine->singletonInstance<TemplateLibrary *>("Visualis.Ui", "TemplateLibrary");
+        Template t = builtInLyricsTemplate();
+        t.id = QUuid();
+        t.name = "Ours";
+        t.regions[0].style.fontFamily = "Georgia";
+        t.regions[0].style.frame = QRectF(0.1, 0.6, 0.8, 0.3);
+        QVERIFY(templates->save(t));
+        const QStringList ids = makeSongs({"Amazing Grace"});
+        Song song = *m_songs->loadSong(QUuid::fromString(ids[0]));
+        song.defaultTemplate = t.id;
+        QString error;
+        QVERIFY2(m_songs->saveSong(song, &error), qPrintable(error));
+        m_songs->select(ids[0]);
+
+        QQuickWindow *window = loadOperatorWindow();
+        QQuickItem *preview = tile(window, 1);
+        QVERIFY(preview);
+        QQuickItem *text = findItem(preview, "lyricsA");
+        QVERIFY(text);
+        QTRY_VERIFY(!text->property("text").toString().isEmpty());
+        QCOMPARE(text->property("font").value<QFont>().family(), QStringLiteral("Georgia"));
+        // The frame sits where the template puts it, at the tile's scale.
+        auto *lyrics = text->parentItem()->parentItem();   // the frame's AudienceLyrics
+        QCOMPARE(text->parentItem()->y(), lyrics->height() * 0.6);
+
+        QVERIFY(m_songs->goLive(1));   // the output gets the same content
+        QCOMPARE(m_live->content(), m_songs->selectedSlides()[1].toMap()["content"].value<Content>());
+    }
+
+    // #93: an item that shows, but not as asked, is marked in the service list.
+    void anItemWhoseTemplateIsMissingIsMarked()
+    {
+        const QStringList ids = makeSongs({"Amazing Grace", "Holy Spirit"});
+        Song song = *m_songs->loadSong(QUuid::fromString(ids[0]));
+        song.defaultTemplate = QUuid::createUuid();   // a template that's gone
+        QString error;
+        QVERIFY2(m_songs->saveSong(song, &error), qPrintable(error));
+        QVERIFY(m_services->createService("Sunday"));
+        QVERIFY(m_services->addSong(ids[0]));
+        QVERIFY(m_services->addSong(ids[1]));
+        QQuickWindow *window = loadOperatorWindow();
+        QQuickItem *marked = findItem(window->contentItem(), "itemWarning0");
+        QVERIFY(marked);
+        QTRY_VERIFY(marked->isVisible());
+        QVERIFY(m_services->items()[0].toMap()["warnings"].toString().contains("built-in"));
+        QVERIFY(!findItem(window->contentItem(), "itemWarning1")->isVisible());
     }
 
     void tileClicksOnAServiceItemAreCommands()

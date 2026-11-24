@@ -1,6 +1,8 @@
 #pragma once
 
+#include "service/service.h"
 #include "song/song.h"
+#include "template/template.h"
 
 #include <QByteArray>
 #include <QDateTime>
@@ -22,6 +24,10 @@ struct LiveSnapshot
     QString background;         // the background video's URL, or empty
     QUuid service;              // the live service, if one is being run (#51)
     QUuid item;                 // the service item the song is, if it came from one
+    // What recovery renders the song with again (#93): the service item, overrides and all,
+    // and the template, unless it's a built-in. Older journals have neither.
+    std::optional<ServiceItem> serviceItem;
+    std::optional<Template> tmpl;
     QDateTime savedAt;          // UTC
 
     bool isEmpty() const { return !song && background.isEmpty(); }

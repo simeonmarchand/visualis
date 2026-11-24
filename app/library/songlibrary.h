@@ -3,6 +3,7 @@
 #include "song/song.h"
 #include "song/songimport.h"
 #include "song/songstore.h"
+#include "template/template.h"
 
 #include <QObject>
 #include <QTimer>
@@ -15,6 +16,7 @@
 #include <optional>
 
 class QThread;
+class TemplateLibrary;
 
 namespace visualis {
 class Library;
@@ -85,6 +87,9 @@ public:
 
     // The open library, or null; for ServiceList, which keeps services in it.
     visualis::Library *library() const { return m_library.get(); }
+    // The library's templates (#93), which this owns, and their snapshot.
+    TemplateLibrary *templateLibrary() const { return m_templates; }
+    const visualis::TemplateSet &templates() const;
 
     QString folder() const;
     QString error() const { return m_error; }
@@ -106,6 +111,7 @@ signals:
     void libraryChanged();
     void songsChanged();
     void selectionChanged();
+    void templatesChanged();
     void reportChanged();
     void importingChanged();
     void importProgressChanged();
@@ -149,6 +155,8 @@ private:
     void finishImport();
     ImportSummary importSummary() const;
     void setReport(const QString &report);
+    // Re-renders a song taken live from the library after its template changed.
+    void refreshLive();
 
     std::unique_ptr<visualis::Library> m_library;
     std::unique_ptr<visualis::SongStore> m_store;
@@ -160,4 +168,5 @@ private:
     // this object, so it can outlive it at quit.
     std::unique_ptr<ImportRun> m_import;
     QTimer m_importSave;   // saves what the worker has read, a batch at a time
+    TemplateLibrary *m_templates = nullptr;   // a child; follows m_library
 };

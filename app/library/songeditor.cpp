@@ -1,6 +1,7 @@
 #include "library/songeditor.h"
 
 #include "library/songlibrary.h"
+#include "live/liveitem.h"
 #include "song/lyricspaste.h"
 #include "song/slidelist.h"
 #include "song/songtext.h"
@@ -30,6 +31,11 @@ QString SongEditor::songId() const
 void SongEditor::setSongId(const QString &id)
 {
     SongLibrary *lib = library();
+    // Here, not in the constructor: the library comes from the QML engine, set after it.
+    if (lib && !m_followsTemplates) {
+        connect(lib, &SongLibrary::templatesChanged, this, &SongEditor::changed);   // the preview
+        m_followsTemplates = true;
+    }
     const std::optional<Song> song = lib ? lib->loadSong(QUuid::fromString(id)) : std::nullopt;
     m_song = song.value_or(Song{});
     m_arrangement = m_song.defaultArrangement.isNull() && !m_song.arrangements.isEmpty()
@@ -178,10 +184,9 @@ QVariantList SongEditor::sequence() const
 
 QVariantList SongEditor::previewSlides() const
 {
-    QVariantList list;
-    for (const SongSlide &s : songSlides(m_song, m_arrangement))
-        list.append(QVariantMap{{"text", s.text}, {"groupLabel", s.groupLabel}, {"groupColor", s.groupColor}});
-    return list;
+    // Through the song's template, as it will show (#93).
+    SongLibrary *songs = library();
+    return slideMaps(liveSong(m_song, m_arrangement, songs ? songs->templates() : templateSet({})).slides);
 }
 
 QString SongEditor::addArrangement(const QString &name)

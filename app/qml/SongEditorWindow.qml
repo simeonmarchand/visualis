@@ -264,7 +264,7 @@ Window {
                     delegate: SlideTile {
                         required property var modelData
                         width: preview.cellWidth - 10
-                        text: modelData.text
+                        content: modelData.content
                         groupLabel: modelData.groupLabel
                         groupColor: modelData.groupColor
                     }

@@ -152,6 +152,17 @@ Window {
             }
         }
 
+        // The live song changed so it can't show (deleted, or over the limits): the audience
+        // keeps the copy it has until another item goes live (#93).
+        Label {
+            objectName: "liveHeldBack"
+            Layout.fillWidth: true
+            visible: LiveState.heldBack !== ""
+            text: LiveState.heldBack
+            wrapMode: Text.WordWrap
+            color: "#e0b040"
+        }
+
         Label {
             objectName: "libraryError"
             Layout.fillWidth: true

@@ -3,6 +3,7 @@
 #include "service/service.h"
 
 #include <QByteArray>
+#include <QJsonObject>
 #include <QStringList>
 #include <optional>
 
@@ -25,5 +26,10 @@ struct ServiceJsonResult {
     QStringList warnings;   // e.g. an unknown item kind, read as a placeholder
 };
 ServiceJsonResult serviceFromJson(const QByteArray &json);
+
+// One item, as it appears in "items" above; also kept in the live state journal (#93). An
+// unknown kind reads as a placeholder, with a warning.
+QJsonObject serviceItemToJson(const ServiceItem &item);
+ServiceItem serviceItemFromJson(const QJsonObject &json, QStringList *warnings = nullptr);
 
 } // namespace visualis

@@ -1,8 +1,10 @@
 #pragma once
 
 #include <QDateTime>
+#include <QHash>
 #include <QJsonObject>
 #include <QList>
+#include <QObject>
 #include <QRectF>
 #include <QString>
 #include <QStringList>
@@ -12,7 +14,8 @@
 
 // Stored templates (plan 5.4) and the per-item and per-slide overrides on top of them
 // (plan 5.2). Everything is resolution-independent: positions and sizes are fractions of
-// the output (sizes and offsets of its height), as in app/qml/LyricsTemplate.qml.
+// the output (sizes and offsets of its height). The styles are Q_GADGETs so the outputs
+// can bind to them (#93; registered for QML in app/live/livestateqml.h).
 namespace visualis {
 
 enum class TemplateKind { Lyrics, Scripture, Title, LowerThird, Stage };
@@ -20,6 +23,14 @@ enum class HAlign { Left, Center, Right };
 enum class VAlign { Top, Center, Bottom };
 
 struct Shadow {
+    Q_GADGET
+    Q_PROPERTY(bool enabled MEMBER enabled)
+    Q_PROPERTY(QString color MEMBER color)
+    Q_PROPERTY(double opacity MEMBER opacity)
+    Q_PROPERTY(double blur MEMBER blur)
+    Q_PROPERTY(double offset MEMBER offset)
+
+public:
     bool enabled = false;
     QString color = QStringLiteral("#000000");
     double opacity = 1.0;
@@ -30,6 +41,11 @@ struct Shadow {
 };
 
 struct Outline {
+    Q_GADGET
+    Q_PROPERTY(QString color MEMBER color)
+    Q_PROPERTY(double width MEMBER width)
+
+public:
     QString color = QStringLiteral("#000000");
     double width = 0.0;      // of the output's height; 0 draws none
 
@@ -38,6 +54,21 @@ struct Outline {
 
 // How one text region looks. Colors are "#rrggbb" or "#aarrggbb".
 struct RegionStyle {
+    Q_GADGET
+    Q_PROPERTY(QRectF frame MEMBER frame)
+    Q_PROPERTY(QString fontFamily MEMBER fontFamily)
+    Q_PROPERTY(double maxSize MEMBER maxSize)
+    Q_PROPERTY(double minSize MEMBER minSize)
+    Q_PROPERTY(int weight MEMBER weight)
+    Q_PROPERTY(QString color MEMBER color)
+    // As Qt::Alignment, which QML's Text takes.
+    Q_PROPERTY(int horizontalAlignment READ horizontalAlignment)
+    Q_PROPERTY(int verticalAlignment READ verticalAlignment)
+    Q_PROPERTY(double lineHeight MEMBER lineHeight)
+    Q_PROPERTY(visualis::Shadow shadow MEMBER shadow)
+    Q_PROPERTY(visualis::Outline outline MEMBER outline)
+
+public:
     QRectF frame{0, 0, 1, 1};      // fractions of the output's width and height
     QString fontFamily = QStringLiteral("Helvetica Neue");
     double maxSize = 0.085;         // of the output's height: the size short text gets
@@ -51,6 +82,9 @@ struct RegionStyle {
     Outline outline;
 
     bool operator==(const RegionStyle &) const = default;
+
+    int horizontalAlignment() const;
+    int verticalAlignment() const;
 };
 
 struct TextRegion {
@@ -67,10 +101,17 @@ struct TextRegion {
 enum class TransitionKind { Cut, Fade };
 
 struct Transition {
+    Q_GADGET
+    Q_PROPERTY(QString kind READ kindName)   // "cut" or "fade"
+    Q_PROPERTY(int ms MEMBER ms)
+
+public:
     TransitionKind kind = TransitionKind::Cut;
     int ms = 300;            // unused by a cut, kept so switching to a fade remembers it
 
     bool operator==(const Transition &) const = default;
+
+    QString kindName() const { return kind == TransitionKind::Fade ? QStringLiteral("fade") : QStringLiteral("cut"); }
 };
 
 struct Transitions {
@@ -106,12 +147,17 @@ std::optional<TemplateKind> templateKindFromName(const QString &name);
 //
 // The id of the built-in Lyrics template, the same in every library.
 QUuid builtInLyricsTemplateId();
-// The Lyrics template with exactly the values of today's LyricsTemplate.qml: one region,
-// "main", filling the safe area, so nothing changes on screen when templates arrive.
+// The Lyrics template: one region, "main", filling the safe area, with the look Phase 1
+// shipped (Helvetica Neue DemiBold, white, a soft black shadow, cut between slides).
 Template builtInLyricsTemplate();
 QList<Template> builtInTemplates();
 std::optional<Template> builtInTemplate(const QUuid &id);
 bool isBuiltInTemplate(const QUuid &id);
+
+// The templates an item can use, by id: a value snapshot, so rendering does no I/O (#93).
+using TemplateSet = QHash<QUuid, Template>;
+// `stored` and the built-ins; a stored template can't replace a built-in.
+TemplateSet templateSet(const QList<Template> &stored);
 
 // Overrides, as stored in ServiceItem::overrides and per slide (Group::slideOverrides):
 //

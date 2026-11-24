@@ -86,7 +86,7 @@ ColumnLayout {
             Label {
                 anchors.fill: parent
                 anchors.leftMargin: 12
-                anchors.rightMargin: 8
+                anchors.rightMargin: warning.visible ? warning.width + 12 : 8
                 verticalAlignment: Text.AlignVCenter
                 elide: Text.ElideRight
                 text: row.modelData.pcoRemoved ? row.modelData.title + " (removed in Planning Center)"
@@ -98,6 +98,23 @@ ColumnLayout {
                 font.strikeout: row.modelData.pcoRemoved
                 font.capitalization: row.isHeader ? Font.AllUppercase : Font.MixedCase
                 color: row.isHeader ? "#8b8f96" : (row.modelData.hasSlides ? "#d0d3d8" : "#6b6f76")
+            }
+
+            Rectangle {   // it shows, but not as asked (#93): a missing template, a bad override
+                id: warning
+                objectName: "itemWarning" + row.index
+                visible: row.modelData.warnings !== ""
+                anchors.right: parent.right
+                anchors.rightMargin: 8
+                anchors.verticalCenter: parent.verticalCenter
+                width: 18
+                height: 18
+                radius: 9
+                color: "#c98a12"
+                Label { anchors.centerIn: parent; text: "!"; color: "black"; font.bold: true }
+                HoverHandler { id: warningHover }
+                ToolTip.visible: warningHover.hovered
+                ToolTip.text: row.modelData.warnings
             }
 
             MouseArea {
