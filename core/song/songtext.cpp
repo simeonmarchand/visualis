@@ -160,6 +160,10 @@ LyricsEdit applyLyricsText(const Song &song, const QString &text)
             a.sequence.removeAll(old[o].id);
         if (arranged)
             out.warnings << QStringLiteral("\"%1\" was removed, and with it its places in the arrangements.").arg(old[o].label);
+        if (const auto styled = std::count_if(old[o].slideOverrides.cbegin(), old[o].slideOverrides.cend(),
+                                              [](const QJsonObject &so) { return !so.isEmpty(); }))
+            out.warnings << QStringLiteral("\"%1\" was removed, and with it the style changes of %2 %3.")
+                                .arg(old[o].label).arg(styled).arg(styled == 1 ? QStringLiteral("slide") : QStringLiteral("slides"));
     }
     return out;
 }

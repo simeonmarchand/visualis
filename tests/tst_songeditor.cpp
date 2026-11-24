@@ -5,6 +5,7 @@
 #include "library/library.h"
 #include "live/livestate.h"
 #include "song/slidelist.h"
+#include "song/songtext.h"
 #include "template/overrides.h"
 
 #include <QQmlApplicationEngine>
@@ -471,6 +472,38 @@ private slots:
         }
         QTRY_COMPARE(storedColor(1), QStringLiteral("#ffcc00"));
         QVERIFY(m_editor->error().isEmpty());
+    }
+
+    // PR #123 review (2): a lyrics edit that didn't save isn't lost to a style save, and its
+    // error stays until a save fixes it.
+    void aFailedLyricsSaveKeepsTheEditAndItsError()
+    {
+        m_editor->selectSlide(slideKey(1), false);
+        QSignalSpy reset(m_editor.get(), &SongEditor::lyricsReset);
+        {
+            OtherProgram other(m_dir.filePath(QString::number(m_n)));
+            QVERIFY(QSqlQuery(other.database()).exec("BEGIN IMMEDIATE"));
+            m_editor->setSlideProperty("color", "#ffcc00");
+            QVERIFY(!m_editor->flush());   // busy: waits to retry
+            QVERIFY(QSqlQuery(other.database()).exec("ROLLBACK"));
+        }
+        const QString tooLong = m_editor->lyrics().replace("My chains are gone", QString(songlimits::kCharactersPerSlide + 1, 'a'));
+        m_editor->applyLyrics(tooLong);
+        QVERIFY2(m_editor->error().contains("characters"), qPrintable(m_editor->error()));
+        QTest::qWait(3 * SongEditor::kSaveDelayMs);   // the style retry would have run
+        m_editor->setSlideProperty("weight", 800);    // and another style edit
+        QTest::qWait(3 * SongEditor::kSaveDelayMs);
+        QVERIFY2(m_editor->error().contains("characters"), qPrintable(m_editor->error()));
+        QCOMPARE(reset.count(), 0);
+        QCOMPARE(m_editor->lyrics(), lyricsText(applyLyricsText(*m_songs->loadSong(QUuid::fromString(m_editor->songId())), tooLong).song));
+        QCOMPARE(m_editor->slideStyle()["color"].toString(), QStringLiteral("#ffcc00"));
+
+        // A save that works takes everything, and the error goes.
+        m_editor->applyLyrics(m_editor->lyrics().replace(QString(songlimits::kCharactersPerSlide + 1, 'a'), "My chains are GONE"));
+        QVERIFY2(m_editor->error().isEmpty(), qPrintable(m_editor->error()));
+        const Song saved = *m_songs->loadSong(QUuid::fromString(m_editor->songId()));
+        QCOMPARE(saved.groups[2].slides[0].left(18), QStringLiteral("My chains are GONE"));
+        QCOMPARE(storedColor(1), QStringLiteral("#ffcc00"));
     }
 
     void lyricEditsKeepSlideStyles()

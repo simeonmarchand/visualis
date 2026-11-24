@@ -541,6 +541,38 @@ private slots:
         QCOMPARE(loaded, plain);
     }
 
+    // PR #123 review: an oversized override already in a library, or in a file, is dropped on
+    // read, so the song still loads, shows, and saves.
+    void anOversizedOverrideIsDroppedOnRead()
+    {
+        SongStore store(*m_library);
+        const QJsonObject gold{{"regions", QJsonObject{{"main", QJsonObject{{"color", "#ffcc00"}}}}}};
+        Song s;
+        s.title = "Big";
+        s.groups = {Group{{}, "Verse", {}, {"a", "b"}}};
+        s.groups[0].slideOverrides = {gold, {}};
+        QVERIFY(store.save(s).ok);
+        const QJsonObject big{{"later", QString(20 * 1024, 'x')}};
+        QSqlQuery q(m_library->database());
+        q.prepare("UPDATE song_group SET slide_overrides = ? WHERE id = ?");
+        q.addBindValue(QString::fromUtf8(QJsonDocument(QJsonArray{gold, big}).toJson(QJsonDocument::Compact)));
+        q.addBindValue(s.groups[0].id.toString(QUuid::WithoutBraces));
+        QVERIFY(q.exec());
+
+        Song loaded = *store.load(s.id);
+        QCOMPARE(loaded.groups[0].slideOverrides, (QList<QJsonObject>{gold, {}}));
+        loaded.groups[0].slides[1] = "b, edited";
+        QVERIFY(store.save(loaded).ok);   // its lyrics still save
+
+        Song bigger = s;
+        bigger.groups[0].slideOverrides = {gold, big};
+        QVERIFY(!store.save(bigger).ok);   // but nothing writes one
+        const SongJsonResult r = songFromJson(songToJson(bigger));
+        QVERIFY2(r.song, qPrintable(r.error));
+        QCOMPARE(r.song->groups[0].slideOverrides, (QList<QJsonObject>{gold, {}}));
+        QCOMPARE(r.warnings.size(), 1);
+    }
+
     // Codex on #102 (5): unusable overrides are reported, at import too.
     void malformedSlideOverridesAreReported()
     {

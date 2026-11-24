@@ -5,12 +5,15 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QLoggingCategory>
 #include <QSet>
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QVariant>
 
 namespace visualis {
+
+Q_LOGGING_CATEGORY(lcSongStore, "visualis.songs.store")
 
 namespace {
 
@@ -125,6 +128,8 @@ SongStore::Result SongStore::save(Song &song)
     // write an unbounded song (#83).
     if (QString tooBig = songLimitError(song); !tooBig.isEmpty())
         return {false, tooBig};
+    if (QString tooBig = overrideLimitError(song); !tooBig.isEmpty())
+        return {false, tooBig};
     // Work on a copy so a failed save leaves the caller's song exactly as it was.
     Song s = song;
     if (s.id.isNull())
@@ -233,6 +238,8 @@ SongStore::Result SongStore::saveSlideOverrides(Song &song, Library::Transaction
 {
     if (QString tooBig = songLimitError(song); !tooBig.isEmpty())
         return {false, tooBig};
+    if (QString tooBig = overrideLimitError(song); !tooBig.isEmpty())
+        return {false, tooBig};
     for (Group &g : song.groups)
         g.fitSlideOverrides();   // the same song: fitted overrides compare equal
     Library::Transaction t(m_library, lock);
@@ -340,6 +347,10 @@ std::optional<Song> SongStore::load(const QUuid &id) const
         group.fitSlideOverrides();
         s.groups << group;
     }
+    // Stored before the limits (#95), or by another program: left out, so the song still
+    // shows and saves.
+    for (const QString &w : dropOversizedOverrides(s))
+        qCWarning(lcSongStore).noquote() << QStringLiteral("\"%1\": %2").arg(s.title, w);
 
     QSqlQuery a(db);
     a.prepare("SELECT id, name, pco_arrangement_id FROM arrangement WHERE song_id = ? ORDER BY position");

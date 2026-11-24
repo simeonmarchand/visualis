@@ -2,7 +2,9 @@
 
 #include "song.h"
 
+#include <QJsonObject>
 #include <QString>
+#include <QStringList>
 
 namespace visualis {
 
@@ -27,6 +29,15 @@ constexpr int kOverrideBytes = 1024 * 1024;   // all of a song's together
 // Why the song is over a limit, for the operator ("too many groups: 40,000; the limit is
 // 500"), or empty when it's within all of them. Cheap: it never expands the song.
 QString songLimitError(const Song &song);
+
+// Slide overrides are bounded on write: SongStore refuses a song for this, and readers drop
+// what's over (dropOversizedOverrides) instead, so a song stored before the limits still
+// loads, shows, and saves. Empty when within them.
+QString overrideLimitError(const Song &song);
+bool slideOverrideTooLarge(const QJsonObject &override);
+// Empties each slide override over kSlideOverrideBytes, and all of them if the song's are
+// still over kOverrideBytes; one warning, for the operator, per drop.
+QStringList dropOversizedOverrides(Song &song);
 
 // The same wording for any one limit.
 QString limitError(const QString &what, qint64 count, int limit);

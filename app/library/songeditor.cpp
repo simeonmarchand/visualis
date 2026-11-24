@@ -45,9 +45,11 @@ SongEditor::SongEditor(QObject *parent)
 // lock instead of being lost. Mid-service saves never wait (flush()).
 SongEditor::~SongEditor()
 {
-    if (!m_stylePending)
+    if (!m_stylePending || m_songUnsaved)
         return;
     discardPendingStyle();
+    if (m_library)
+        disconnect(m_library, nullptr, this, nullptr);   // nothing to follow now
     const SongStore::Result r = m_library ? m_library->saveSlideOverrides(m_song, Library::Transaction::Lock::Wait)
                                           : SongStore::Result{false, QStringLiteral("the library isn't open")};
     if (!r.ok)
@@ -96,12 +98,13 @@ void SongEditor::save()
 {
     SongLibrary *lib = library();
     QString error;
-    if (!lib || !lib->saveSong(m_song, &error)) {
+    m_songUnsaved = !lib || !lib->saveSong(m_song, &error);
+    if (m_songUnsaved)
         m_error = QStringLiteral("Couldn't save: %1").arg(error.isEmpty() ? QStringLiteral("no library") : error);
-    } else {
+    else
         m_error.clear();
-        discardPendingStyle();   // saved with the rest
-    }
+    // Saved with the rest; or, if that failed, left for the next save that works.
+    discardPendingStyle();
     pruneSelection();
     emit changed();
 }
@@ -454,6 +457,10 @@ bool SongEditor::flush()
     if (!m_stylePending)
         return true;
     discardPendingStyle();
+    // An edit that didn't save (save()) is in m_song too. Saving only the overrides would be
+    // refused against the stored slides and lose it; the next whole save takes both.
+    if (m_songUnsaved)
+        return false;
     SongLibrary *lib = library();
     const SongStore::Result r = lib ? lib->saveSlideOverrides(m_song) : SongStore::Result{false, QStringLiteral("The library isn't open.")};
     if (r.ok) {

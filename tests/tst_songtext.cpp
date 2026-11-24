@@ -338,6 +338,19 @@ private slots:
         QCOMPARE(e.song.groups[0].slideOverrides, s.groups[0].slideOverrides);
     }
 
+    // PR #123 review: a removed group's styles go with it, and the operator is told.
+    void removingAStyledGroupSaysSo()
+    {
+        Song s;
+        s.title = "Unarranged";
+        s.groups = {Group{QUuid::createUuid(), "Verse 1", {}, {"one"}}, Group{QUuid::createUuid(), "Tag", {}, {"end it"}}};
+        s.groups[1].slideOverrides = {styled("#000001")};
+        const LyricsEdit e = applyLyricsText(s, "[Verse 1]\none");
+        QCOMPARE(e.song.groups.size(), 1);
+        QCOMPARE(e.warnings.size(), 1);
+        QVERIFY2(e.warnings[0].contains("\"Tag\"") && e.warnings[0].contains("1 slide"), qPrintable(e.warnings[0]));
+    }
+
     void removingASlideDropsOnlyItsOverrides()
     {
         Song s = withGroups({Group{QUuid::createUuid(), "Verse 1", {}, {"one", "two", "three"}},

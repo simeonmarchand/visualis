@@ -205,24 +205,44 @@ private slots:
         QVERIFY(songLimitError(total).startsWith("too many slides:"));
     }
 
-    // #95: the editor writes slide overrides now, so they're bounded too.
-    void slideOverridesAreBounded()
+    // #95: the editor writes slide overrides now, so writes bound them. Reads drop what's over.
+    void slideOverridesAreBoundedOnWrite()
     {
         Song song = repeated(3, 1);
         song.groups[0].fitSlideOverrides();
         const QJsonObject everything{{"regions", QJsonObject{{"main", QJsonObject{{"color", "#ffcc00"}, {"maxSize", 0.07}}}}}};
         song.groups[0].slideOverrides[0] = everything;
-        QVERIFY(songLimitError(song).isEmpty());
+        QVERIFY(overrideLimitError(song).isEmpty());
         // Keys Visualis doesn't know still count.
         song.groups[0].slideOverrides[1] = {{"later", QString(songlimits::kSlideOverrideBytes, 'x')}};
-        QVERIFY2(songLimitError(song).startsWith("a slide of \"Verse\" has too much style"), qPrintable(songLimitError(song)));
+        QVERIFY2(overrideLimitError(song).startsWith("a slide of \"Verse\" has too much style"), qPrintable(overrideLimitError(song)));
+        QVERIFY(songLimitError(song).isEmpty());   // it still shows
 
         Song many = repeated(1, 1);
         many.groups.clear();
         const QJsonObject big{{"later", QString(songlimits::kSlideOverrideBytes / 2, 'x')}};
         for (int i = 0; i * songlimits::kSlideOverrideBytes / 2 <= songlimits::kOverrideBytes; ++i)
             many.groups << Group{QUuid::createUuid(), "Verse", "", {"x"}, {big}};
-        QVERIFY2(songLimitError(many).startsWith("too much slide style"), qPrintable(songLimitError(many)));
+        QVERIFY2(overrideLimitError(many).startsWith("too much slide style"), qPrintable(overrideLimitError(many)));
+    }
+
+    void oversizedOverridesAreDroppedWithAWarning()
+    {
+        Song song = repeated(2, 1);
+        const QJsonObject gold{{"regions", QJsonObject{{"main", QJsonObject{{"color", "#ffcc00"}}}}}};
+        song.groups[0].slideOverrides = {gold, {{"later", QString(songlimits::kSlideOverrideBytes, 'x')}}};
+        const QStringList warnings = dropOversizedOverrides(song);
+        QCOMPARE(warnings.size(), 1);
+        QVERIFY2(warnings[0].contains("slide 2 of \"Verse\""), qPrintable(warnings[0]));
+        QCOMPARE(song.groups[0].slideOverrides, (QList<QJsonObject>{gold, {}}));
+
+        Song many = repeated(1, 1);
+        many.groups.clear();
+        const QJsonObject big{{"later", QString(songlimits::kSlideOverrideBytes / 2, 'x')}};
+        for (int i = 0; i * songlimits::kSlideOverrideBytes / 2 <= songlimits::kOverrideBytes; ++i)
+            many.groups << Group{QUuid::createUuid(), "Verse", "", {"x"}, {big}};
+        QCOMPARE(dropOversizedOverrides(many).size(), 1);   // over the song's total: all of them, said once
+        QVERIFY(overrideLimitError(many).isEmpty());
     }
 
     // The issue's case: 10,000 slides played 10,000 times would be 100 million slides.

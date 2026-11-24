@@ -114,6 +114,20 @@ private slots:
         QCOMPARE(fontOf(live), QStringLiteral("Georgia"));
     }
 
+    // PR #123 review: a song stored before the override limits still goes live; the oversized
+    // style is left out, and the operator told.
+    void anOversizedSlideOverrideIsLeftOutNotFatal()
+    {
+        Song song = sample();
+        song.groups[0].slideOverrides = {mainStyle({{"color", "#ff0000"}, {"later", QString(20 * 1024, 'x')}}), {}};
+        const LiveItem live = liveSong(song, {}, templateSet({}));
+        QVERIFY2(live.error.isEmpty(), qPrintable(live.error));
+        QCOMPARE(live.slides.size(), 3);
+        QCOMPARE(live.slides[0].content.regions["main"].style.color, builtInLyricsTemplate().regions[0].style.color);
+        QCOMPARE(live.warnings.size(), 1);
+        QVERIFY2(live.warnings[0].contains("too much style"), qPrintable(live.warnings[0]));
+    }
+
     // Phase 3 acceptance (#93): a template change shows on every slide that doesn't override it.
     void changingTheTemplatesFontChangesEverySlideButOverriddenOnes()
     {

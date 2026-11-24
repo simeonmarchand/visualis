@@ -126,7 +126,8 @@ public:
     Q_INVOKABLE void resetSlideProperty(const QString &path);
     Q_INVOKABLE void resetSlides();
     // Saves a style edit that's waiting to. False if it couldn't be saved: a busy library keeps
-    // the edit and is tried again; any other failure goes back to what's stored.
+    // the edit and is tried again; any other failure goes back to what's stored. After a
+    // lyrics or other edit that didn't save, it waits for the next save that works.
     Q_INVOKABLE bool flush();
 
 signals:
@@ -166,5 +167,6 @@ private:
     QList<SlideRef> m_selected;
     QString m_regionId = QStringLiteral("main");
     bool m_stylePending = false;       // a style edit waits to be saved
+    bool m_songUnsaved = false;        // the last whole-song save failed; m_song is ahead of the library
     QTimer m_styleSave;                // when it will be; backs off while the library is busy
 };

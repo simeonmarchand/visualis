@@ -54,7 +54,13 @@ void render(LiveItem &live, const TemplateSet &templates, const QUuid &wanted, c
         Content content;
         content.transition = t.transitions.content;
         const Group *group = live.song.group(s.groupId);
-        const QList<QJsonObject> layers{itemOverrides, group ? group->slideOverride(s.indexInGroup) : QJsonObject()};
+        QJsonObject slideOverride = group ? group->slideOverride(s.indexInGroup) : QJsonObject();
+        // A journal or file from before the limits (#95): the slide shows with the template's.
+        if (slideOverrideTooLarge(slideOverride)) {
+            warnings << QStringLiteral("A slide of \"%1\" has too much style, so it shows with the template's.").arg(s.groupLabel);
+            slideOverride = {};
+        }
+        const QList<QJsonObject> layers{itemOverrides, slideOverride};
         for (const TextRegion &region : t.regions) {
             content.regions.insert(region.id, {region.id == QStringLiteral("main") ? s.text : QString(),
                                                effectiveStyle(t, region.id, layers, &warnings).value_or(region.style)});

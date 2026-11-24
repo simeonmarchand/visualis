@@ -38,22 +38,59 @@ QString songLimitError(const Song &song)
         if (a.sequence.size() > kSteps)
             return limitError(QStringLiteral("steps in arrangement \"%1\"").arg(a.name), a.sequence.size(), kSteps);
     }
-    qint64 overrideBytes = 0;
+    return {};
+}
+
+namespace {
+qint64 overrideBytes(const QJsonObject &o)
+{
+    return o.isEmpty() ? 0 : QJsonDocument(o).toJson(QJsonDocument::Compact).size();
+}
+} // namespace
+
+bool slideOverrideTooLarge(const QJsonObject &o)
+{
+    return overrideBytes(o) > kSlideOverrideBytes;
+}
+
+QString overrideLimitError(const Song &song)
+{
+    qint64 total = 0;
     for (const Group &g : song.groups) {
         for (const QJsonObject &o : g.slideOverrides) {
-            if (o.isEmpty())
-                continue;
-            const qint64 bytes = QJsonDocument(o).toJson(QJsonDocument::Compact).size();
+            const qint64 bytes = overrideBytes(o);
             if (bytes > kSlideOverrideBytes)
                 return QStringLiteral("a slide of \"%1\" has too much style: %2 bytes; the limit is %3")
                     .arg(g.label, number(bytes), number(kSlideOverrideBytes));
-            overrideBytes += bytes;
+            total += bytes;
         }
     }
-    if (overrideBytes > kOverrideBytes)
-        return QStringLiteral("too much slide style: %1 bytes; the limit is %2")
-            .arg(number(overrideBytes), number(kOverrideBytes));
+    if (total > kOverrideBytes)
+        return QStringLiteral("too much slide style: %1 bytes; the limit is %2").arg(number(total), number(kOverrideBytes));
     return {};
+}
+
+QStringList dropOversizedOverrides(Song &song)
+{
+    QStringList warnings;
+    qint64 total = 0;
+    for (Group &g : song.groups) {
+        for (qsizetype i = 0; i < g.slideOverrides.size(); ++i) {
+            if (slideOverrideTooLarge(g.slideOverrides[i])) {
+                warnings << QStringLiteral("slide %1 of \"%2\" has too much style (over %3 KB), so its style changes were left out")
+                                .arg(i + 1).arg(g.label).arg(kSlideOverrideBytes / 1024);
+                g.slideOverrides[i] = {};
+            }
+            total += overrideBytes(g.slideOverrides[i]);
+        }
+    }
+    if (total > kOverrideBytes) {
+        warnings << QStringLiteral("\"%1\" has too much slide style (over %2 KB), so every slide's style changes were left out")
+                        .arg(song.title).arg(kOverrideBytes / 1024);
+        for (Group &g : song.groups)
+            g.slideOverrides.fill({});
+    }
+    return warnings;
 }
 
 } // namespace visualis
