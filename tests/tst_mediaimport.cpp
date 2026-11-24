@@ -271,57 +271,6 @@ private slots:
         QVERIFY2(found, qPrintable(m_media->report()));
     }
 
-    // #97 review (M7, H3): two Visualis importing the same file into one library make one
-    // asset with its file, and neither reports a failure.
-    void twoImportersOfTheSameFileMakeOneAsset()
-    {
-        QTemporaryDir in;
-        QVERIFY(!copyFixture("h264-320x180-30fps-2s.mp4", in.path(), "Sunrise.mp4").isEmpty());
-        SongLibrary otherSongs;
-        QVERIFY(otherSongs.openLibrary(m_songs->library()->folder()));
-        MediaLibrary otherMedia(&otherSongs);
-
-        QSignalSpy finished(m_media.get(), &MediaLibrary::importFinished);
-        QSignalSpy otherFinished(&otherMedia, &MediaLibrary::importFinished);
-        QVERIFY(m_media->importFiles({QUrl::fromLocalFile(in.filePath("Sunrise.mp4"))}));
-        QVERIFY(otherMedia.importFiles({QUrl::fromLocalFile(in.filePath("Sunrise.mp4"))}));
-        QVERIFY(finished.count() == 1 || finished.wait(30'000));
-        QVERIFY(otherFinished.count() == 1 || otherFinished.wait(30'000));
-
-        for (const QString &report : {m_media->report(), otherMedia.report()})
-            QVERIFY2(!report.contains("Couldn't read"), qPrintable(report));
-        MediaStore store(*m_songs->library());
-        QCOMPARE(store.list().size(), 1);
-        QVERIFY(QFileInfo(store.filePath(store.list()[0])).isFile());
-    }
-
-    // H3: switching libraries mid-import never unlinks a file another Visualis saved.
-    void switchingLibrariesNeverRemovesAnotherImportsFile()
-    {
-        QTemporaryDir in, elsewhere;
-        QVERIFY(!copyFixture("h264-320x180-30fps-2s.mp4", in.path(), "Sunrise.mp4").isEmpty());
-        SongLibrary otherSongs;
-        QVERIFY(otherSongs.openLibrary(m_songs->library()->folder()));
-        MediaLibrary otherMedia(&otherSongs);
-        QSignalSpy otherFinished(&otherMedia, &MediaLibrary::importFinished);
-        QVERIFY(otherMedia.importFiles({QUrl::fromLocalFile(in.filePath("Sunrise.mp4"))}));
-        QVERIFY(otherFinished.wait(30'000));
-        MediaStore store(*otherSongs.library());   // stays open on this library throughout
-        const QString saved = store.filePath(store.list().value(0));
-        QVERIFY(QFileInfo(saved).isFile());
-
-        QFile big(in.filePath("Big.mov"));
-        QVERIFY(big.open(QIODevice::WriteOnly) && big.resize(qint64(2) * 1024 * 1024 * 1024));
-        big.close();
-        QSignalSpy finished(m_media.get(), &MediaLibrary::importFinished);
-        QVERIFY(m_media->importFiles({QUrl::fromLocalFile(in.filePath("Sunrise.mp4")), QUrl::fromLocalFile(big.fileName())}));
-        QTRY_VERIFY_WITH_TIMEOUT(m_media->importProgress().contains("2 of 2"), 10'000);
-        QVERIFY(m_songs->openLibrary(elsewhere.path()));
-        QVERIFY(finished.wait(10'000));
-        QVERIFY(QFileInfo(saved).isFile());
-        QCOMPARE(store.list().size(), 1);
-    }
-
     // Fail soft: damaged and unknown files are skipped with a reason, and nothing of them stays
     // in media/.
     void corruptFilesAreSkippedWithAReason()

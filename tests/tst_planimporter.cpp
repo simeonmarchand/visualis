@@ -24,6 +24,8 @@
 #include <utility>
 #include <QtTest>
 
+#include "otherprogram.h"
+
 using namespace visualis;
 using namespace visualis::testing;
 
@@ -67,11 +69,11 @@ private slots:
 
     void importsAPlanIntoAServiceThatOpensOffline()
     {
-        SongLibrary songs;
         const QString folder = m_dir.filePath(QString::number(++m_n));
-        QVERIFY(songs.openLibrary(folder));
         QString id;
         {
+            SongLibrary songs;   // closed before the library is reopened below
+            QVERIFY(songs.openLibrary(folder));
             FakePlanningCenter server;
             serve(server);
             PlanImporter importer;
@@ -236,9 +238,8 @@ private slots:
         const QString folder = m_dir.filePath(QString::number(++m_n));
         SongLibrary songs;
         QVERIFY(songs.openLibrary(folder));
-        auto other = Library::open(folder).library;   // stands in for another program
-        QVERIFY(other);
-        QSqlQuery lock(other->database());
+        OtherProgram other(folder);
+        QSqlQuery lock(other.database());
         QVERIFY(lock.exec("BEGIN IMMEDIATE"));
         bool held = true;
 
@@ -265,7 +266,7 @@ private slots:
         QVERIFY(importer.busy());
         // Released by a timer on this thread: if the save blocked, it couldn't run.
         QTimer::singleShot(500, this, [&] {
-            QSqlQuery(other->database()).exec("ROLLBACK");
+            QSqlQuery(other.database()).exec("ROLLBACK");
             held = false;
         });
         QVERIFY(idle(importer));
@@ -282,8 +283,8 @@ private slots:
         const QString folder = m_dir.filePath(QString::number(++m_n));
         SongLibrary songs;
         QVERIFY(songs.openLibrary(folder));
-        auto other = Library::open(folder).library;
-        QSqlQuery lock(other->database());
+        OtherProgram other(folder);
+        QSqlQuery lock(other.database());
         QVERIFY(lock.exec("BEGIN IMMEDIATE"));
 
         FakePlanningCenter server;
@@ -298,7 +299,7 @@ private slots:
         QCOMPARE(imported.size(), 0);
         QVERIFY2(importer.status().contains("another program kept the library busy"), qPrintable(importer.status()));
 
-        QVERIFY(QSqlQuery(other->database()).exec("ROLLBACK"));
+        QVERIFY(QSqlQuery(other.database()).exec("ROLLBACK"));
         QVERIFY(ServiceStore(*songs.library()).list().isEmpty());
         importer.importPlan("1001", "5001");
         QVERIFY(idle(importer));
@@ -312,8 +313,8 @@ private slots:
         const QString second = m_dir.filePath(QString::number(++m_n));
         SongLibrary songs;
         QVERIFY(songs.openLibrary(first));
-        auto other = Library::open(first).library;
-        QSqlQuery lock(other->database());
+        OtherProgram other(first);
+        QSqlQuery lock(other.database());
         QVERIFY(lock.exec("BEGIN IMMEDIATE"));
 
         FakePlanningCenter server;
@@ -332,8 +333,10 @@ private slots:
         QVERIFY2(importer.status().contains("another library was opened"), qPrintable(importer.status()));
         QVERIFY(ServiceStore(*songs.library()).list().isEmpty());
 
-        QVERIFY(QSqlQuery(other->database()).exec("ROLLBACK"));
-        QVERIFY(ServiceStore(*other).list().isEmpty());   // nor in the first
+        QVERIFY(QSqlQuery(other.database()).exec("ROLLBACK"));
+        auto reopened = Library::open(first);   // nor in the first, now that nothing has it open
+        QVERIFY(reopened.library);
+        QVERIFY(ServiceStore(*reopened.library).list().isEmpty());
     }
 
     void switchingLibrariesDuringTheReadsCancelsTheImport()
@@ -364,8 +367,8 @@ private slots:
         const QString folder = m_dir.filePath(QString::number(++m_n));
         SongLibrary songs;
         QVERIFY(songs.openLibrary(folder));
-        auto other = Library::open(folder).library;
-        QSqlQuery lock(other->database());
+        OtherProgram other(folder);
+        QSqlQuery lock(other.database());
         QVERIFY(lock.exec("BEGIN IMMEDIATE"));
 
         FakePlanningCenter server;
@@ -377,7 +380,7 @@ private slots:
         QSignalSpy imported(&importer, &PlanImporter::imported);
         QTimer release;   // frees the lock after the deadline but before an uncapped retry
         release.setSingleShot(true);
-        connect(&release, &QTimer::timeout, this, [&] { QSqlQuery(other->database()).exec("ROLLBACK"); });
+        connect(&release, &QTimer::timeout, this, [&] { QSqlQuery(other.database()).exec("ROLLBACK"); });
         connect(&importer, &PlanImporter::statusChanged, this, [&] {
             if (importer.status().contains("Waiting") && !release.isActive())
                 release.start(PlanImporter::kLockRetryMs + 150);

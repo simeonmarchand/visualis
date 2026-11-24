@@ -6,6 +6,8 @@
 #include <memory>
 #include <vector>
 
+class QLockFile;
+
 namespace visualis {
 
 // One schema step. `statements` run in order inside a single transaction with the version bump,
@@ -17,6 +19,13 @@ struct Migration {
 
 // The church's library: a folder holding library.sqlite and media/ (plan 5.9). Every write
 // commits immediately; there is no Save. Open it with Library::open().
+//
+// One Visualis process at a time (#109): an open Library holds library.lock in its folder, and
+// a second process is refused. Everything built on Library may assume no other Visualis
+// process is using the folder. That settles the #104 findings where two processes could delete
+// each other's media (one importer unlinking a file the other just saved, the startup sweep
+// removing an active import's staged copies) or write the same service. Other programs
+// (sqlite3, backup tools) can still open the database, so a write can still find it locked.
 class Library
 {
 public:
@@ -28,6 +37,7 @@ public:
         Corrupt,           // not a database, or the integrity check failed
         TooNew,            // made by a newer Visualis; opening it could lose data
         MigrationFailed,   // a schema step failed and was rolled back
+        InUse,             // another Visualis process has it open (#109)
     };
 
     struct OpenResult {
@@ -38,7 +48,8 @@ public:
 
     // Opens the library in `folder`, creating it if the folder doesn't exist or is empty,
     // and brings its schema up to date. Before migrating an existing library it saves a copy
-    // next to it (library.sqlite.before-v<N>).
+    // next to it (library.sqlite.before-v<N>). Refused with InUse, touching nothing, while
+    // another Visualis process has it open; the lock of one that crashed is taken over.
     static OpenResult open(const QString &folder);
     // Same, with a given schema history. For tests.
     static OpenResult open(const QString &folder, const std::vector<Migration> &migrations);
@@ -93,10 +104,11 @@ public:
     };
 
 private:
-    explicit Library(const QString &folder, const QString &connectionName);
+    Library(const QString &folder, const QString &connectionName, std::unique_ptr<QLockFile> lock);
 
     QString m_folder;
     QString m_connectionName;
+    std::unique_ptr<QLockFile> m_lock;   // released after the destructor closes the connection
 };
 
 } // namespace visualis

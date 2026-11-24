@@ -3,9 +3,11 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QLockFile>
 #include <QLoggingCategory>
 #include <QSqlError>
 #include <QSqlQuery>
+#include <QSysInfo>
 #include <QUuid>
 #include <QVariant>
 
@@ -21,6 +23,7 @@ constexpr int kApplicationId = 0x5649534C;
 
 const char *kDatabaseFile = "library.sqlite";
 const char *kMediaFolder = "media";
+const char *kLockFile = "library.lock";
 
 struct Step {
     bool ok = true;
@@ -51,6 +54,27 @@ Library::OpenResult failure(Library::OpenError error, const QString &message)
     r.error = error;
     r.message = message;
     return r;
+}
+
+// Takes library.lock in `root`, or fills `refused` with why not. Stale only when the process
+// that took it is gone, never by age, so a crashed Visualis's lock is taken over (#109).
+std::unique_ptr<QLockFile> lockFolder(const QString &root, Library::OpenResult &refused)
+{
+    using E = Library::OpenError;
+    auto lock = std::make_unique<QLockFile>(QDir(root).filePath(kLockFile));
+    lock->setStaleLockTime(0);
+    if (lock->tryLock(0))
+        return lock;
+    QString host;
+    if (lock->error() != QLockFile::LockFailedError)
+        refused = failure(E::CannotCreate, QStringLiteral("Can't lock the library folder %1.").arg(root));
+    else if (lock->getLockInfo(nullptr, &host, nullptr) && !host.isEmpty() && host != QSysInfo::machineHostName())
+        // A folder synced between Macs: that lock is never taken over from here.
+        refused = failure(E::InUse, QStringLiteral("This library is open in Visualis on %1. If that Mac isn't running "
+                                                   "Visualis, delete library.lock in the library folder.").arg(host));
+    else
+        refused = failure(E::InUse, QStringLiteral("This library is open in another Visualis window."));
+    return nullptr;
 }
 
 // Opens or creates the database on an existing connection and migrates it. Returns an error
@@ -256,8 +280,18 @@ Library::OpenResult Library::open(const QString &folder, const std::vector<Migra
     if (info.exists() && !info.isDir())
         return failure(OpenError::NotADirectory, QStringLiteral("%1 is a file, not a library folder.").arg(folder));
     const QString root = info.absoluteFilePath();
-    if (!QDir().mkpath(root) || !QDir(root).mkpath(kMediaFolder))
+    const auto cannotCreate = [&] {
         return failure(OpenError::CannotCreate, QStringLiteral("Can't create the library folder %1.").arg(root));
+    };
+    if (!QDir().mkpath(root))
+        return cannotCreate();
+    // Before anything else in the folder is touched: one Visualis process per library (#109).
+    OpenResult refused;
+    std::unique_ptr<QLockFile> lock = lockFolder(root, refused);
+    if (!lock)
+        return refused;
+    if (!QDir(root).mkpath(kMediaFolder))
+        return cannotCreate();
 
     const QString dbPath = QDir(root).filePath(kDatabaseFile);
     const bool existed = QFileInfo(dbPath).size() > 0;
@@ -279,13 +313,14 @@ Library::OpenResult Library::open(const QString &folder, const std::vector<Migra
         QSqlDatabase::removeDatabase(connection);
         return r;
     }
-    r.library.reset(new Library(root, connection));
+    r.library.reset(new Library(root, connection, std::move(lock)));
     return r;
 }
 
-Library::Library(const QString &folder, const QString &connectionName)
+Library::Library(const QString &folder, const QString &connectionName, std::unique_ptr<QLockFile> lock)
     : m_folder(folder)
     , m_connectionName(connectionName)
+    , m_lock(std::move(lock))
 {
 }
 
