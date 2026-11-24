@@ -4,13 +4,18 @@
 #include "template/templatejson.h"
 
 #include <QJsonObject>
+#include <QLoggingCategory>
 #include <QQmlEngine>
 
 #include <cmath>
 
 using namespace visualis;
 
+Q_LOGGING_CATEGORY(lcTemplateEditor, "visualis.templates.editor")
+
 namespace {
+
+constexpr int kMaxRetryMs = 2000;   // how far retries back off while the library is busy
 
 // The sample slide's group. Fixed, so every preview renders the same slide.
 const QUuid kSampleGroup{QStringLiteral("{b0f9c2a4-6a52-4d1e-9a39-3f0c4a1d7e21}")};
@@ -34,9 +39,19 @@ TemplateEditor::TemplateEditor(QObject *parent)
     load(builtInLyricsTemplate());
 }
 
+// At quit the outputs are closing too, so the last edit waits out another program's lock
+// instead of being lost. Mid-service saves never wait (commit()).
 TemplateEditor::~TemplateEditor()
 {
-    flush();
+    if (!m_pending)
+        return;
+    discardPending();
+    if (m_library)
+        disconnect(m_library, nullptr, this, nullptr);   // nothing to follow now
+    const TemplateStore::Result r = m_library ? m_library->save(m_tmpl, TemplateStore::Lock::Wait)
+                                              : TemplateStore::Result{false, QStringLiteral("the library isn't open")};
+    if (!r.ok)
+        qCWarning(lcTemplateEditor).noquote() << QStringLiteral("the last edit to \"%1\" was not saved: %2").arg(m_tmpl.name, r.error);
 }
 
 // Here, not in the constructor: the library comes from the QML engine, set after it.
@@ -44,8 +59,12 @@ void TemplateEditor::componentComplete()
 {
     QQmlEngine *engine = qmlEngine(this);
     m_library = engine ? engine->singletonInstance<TemplateLibrary *>("Visualis.Ui", "TemplateLibrary") : nullptr;
-    if (m_library)
+    if (m_library) {
+        // Before the new library's templates are read: an edit made in the old one stays there,
+        // even if the new one has a template with the same id (a copy).
+        connect(m_library, &TemplateLibrary::libraryChanged, this, &TemplateEditor::discardPending);
         connect(m_library, &TemplateLibrary::templatesChanged, this, &TemplateEditor::follow);
+    }
     follow();
 }
 
@@ -225,11 +244,13 @@ bool TemplateEditor::commit()
     const TemplateStore::Result r = m_library ? m_library->save(m_tmpl)
                                               : TemplateStore::Result{false, QStringLiteral("The library isn't open.")};
     if (r.ok) {
+        m_save.setInterval(kSaveDelayMs);
         setProblems({}, {});
         return true;
     }
     if (r.busy) {
         m_pending = true;
+        m_save.setInterval(std::min(m_save.interval() * 2, kMaxRetryMs));
         m_save.start();
         setProblems({}, QStringLiteral("Not saved yet: %1. Trying again.").arg(r.error));
         return false;
@@ -280,10 +301,14 @@ void TemplateEditor::rename(const QString &name)
     if (!requireEditable() || name.trimmed().isEmpty() || name.trimmed() == m_tmpl.name)
         return;
     // Style edits first, so a name that's refused doesn't take them with it.
-    if (!flush())
-        return;
+    const bool saved = flush();
+    if (!saved && !m_pending)
+        return;   // refused, and back to what's stored
     m_tmpl.name = name.trimmed();
-    commit();
+    if (saved)
+        commit();
+    else
+        emit templateChanged();   // the library is busy: saved with the edits on the retry
 }
 
 bool TemplateEditor::remove()

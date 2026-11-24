@@ -17,7 +17,10 @@ TemplateLibrary::TemplateLibrary(SongLibrary *songs)
     , m_songs(songs)
     , m_templates(templateSet({}))
 {
-    connect(songs, &SongLibrary::libraryChanged, this, &TemplateLibrary::reload);
+    connect(songs, &SongLibrary::libraryChanged, this, [this] {
+        emit libraryChanged();
+        reload();
+    });
     reload();
 }
 
@@ -33,12 +36,12 @@ Library *TemplateLibrary::library() const
     return m_songs ? m_songs->library() : nullptr;
 }
 
-TemplateStore::Result TemplateLibrary::save(Template &tmpl)
+TemplateStore::Result TemplateLibrary::save(Template &tmpl, TemplateStore::Lock lock)
 {
     Library *lib = library();
     if (!lib)
         return {false, QStringLiteral("The library isn't open.")};
-    const TemplateStore::Result r = TemplateStore(*lib).save(tmpl);
+    const TemplateStore::Result r = TemplateStore(*lib).save(tmpl, lock);
     if (r.ok)
         reload();
     return r;

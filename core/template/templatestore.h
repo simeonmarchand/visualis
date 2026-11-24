@@ -36,9 +36,13 @@ public:
         bool busy = false;  // another program holds the library's write lock; try again
     };
 
+    // Whether a write waits out another program's lock (up to Library::kBusyTimeoutMs). Only
+    // where nothing is on screen to freeze, e.g. the editor's last save at quit.
+    enum class Lock { NowOrBusy, Wait };
+
     // Saves the template whole. Gives a new template an id, bumps its revision, and sets
     // the timestamps; on failure the caller's template is left as it was.
-    Result save(Template &tmpl);
+    Result save(Template &tmpl, Lock lock = Lock::NowOrBusy);
     // A stored template, or a built-in one. A stored one that reads with problems still loads,
     // with them in `warnings`.
     std::optional<Template> load(const QUuid &id, QStringList *warnings = nullptr) const;

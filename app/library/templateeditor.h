@@ -118,5 +118,5 @@ private:
     QStringList m_warnings;
     QString m_error;
     bool m_pending = false;        // an edit waits to be saved
-    QTimer m_save;                 // when it will be
+    QTimer m_save;                 // when it will be; backs off while the library is busy
 };

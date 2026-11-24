@@ -12,10 +12,13 @@
 #include <QQuickItem>
 #include <QQuickWindow>
 #include <QSqlDatabase>
+#include <QSqlError>
 #include <QSqlQuery>
 #include <QTemporaryDir>
 #include <QtQml/qqmlextensionplugin.h>
 #include <QtTest>
+
+#include <thread>
 
 #include "testkeychain.h"
 
@@ -331,6 +334,75 @@ private slots:
         }
         QTRY_COMPARE(storedStyle().color, QStringLiteral("#ffcc00"));
         QVERIFY(m_editor->error().isEmpty());
+    }
+
+    // #122 second review (1): at quit the outputs are closing anyway, so the editor's last
+    // save waits out another program's lock rather than losing the edit.
+    void quittingWaitsForABusyLibraryToSaveTheLastEdit()
+    {
+        m_editor->create("Ours");
+        const QString path = m_songs->library()->databasePath();
+        std::atomic<bool> locked = false;
+        // Another program on its own thread: the GUI thread is blocked in the save meanwhile.
+        std::thread other([&] {
+            {
+                QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", "other-thread");
+                db.setDatabaseName(path);
+                db.open();
+                QSqlQuery(db).exec("BEGIN IMMEDIATE");
+                locked = true;
+                std::this_thread::sleep_for(std::chrono::milliseconds(400));
+                QSqlQuery(db).exec("ROLLBACK");
+                db.close();
+            }
+            QSqlDatabase::removeDatabase("other-thread");
+        });
+        QTRY_VERIFY(locked);
+        m_editor->setStyle(map("{'color': '#ffcc00'}"));
+        const QString id = m_editor->templateId();
+        m_editor.reset();
+        other.join();
+        QCOMPARE(m_templates->templates().value(QUuid::fromString(id)).regions[0].style.color, QStringLiteral("#ffcc00"));
+    }
+
+    void anEditThatCantBeSavedAtQuitIsLogged()
+    {
+        m_editor->create("Ours");
+        const OtherProgram other(*m_songs->library());
+        m_editor->setStyle(map("{'color': '#ffcc00'}"));
+        QTest::ignoreMessage(QtWarningMsg, QRegularExpression("Ours.*not saved"));
+        m_editor.reset();
+    }
+
+    // #122 second review (2): a name given while the library is busy is saved with the retry.
+    void aRenameWhileBusyIsSavedLater()
+    {
+        m_editor->create("Ours");
+        {
+            const OtherProgram other(*m_songs->library());
+            m_editor->setStyle(map("{'color': '#ffcc00'}"));
+            m_editor->rename("Christmas");
+            QCOMPARE(m_editor->name(), QStringLiteral("Christmas"));
+        }
+        QTRY_COMPARE(stored().name, QStringLiteral("Christmas"));
+        QCOMPARE(storedStyle().color, QStringLiteral("#ffcc00"));
+    }
+
+    // #122 second review (3): another library with the same template (a copy of this one)
+    // doesn't get the edit that was pending here.
+    void aPendingEditDoesntLandInAnotherLibrary()
+    {
+        const QString id = m_editor->create("Ours");
+        const QString copy = m_dir.filePath("copy");
+        QVERIFY(QDir().mkpath(copy));
+        QSqlQuery vacuum(m_songs->library()->database());
+        QVERIFY2(vacuum.exec(QStringLiteral("VACUUM INTO '%1'").arg(copy + "/library.sqlite")), qPrintable(vacuum.lastError().text()));
+        m_editor->setStyle(map("{'color': '#ffcc00'}"));
+        QVERIFY(m_songs->openLibrary(copy));
+        QCOMPARE(m_editor->templateId(), id);   // the copy has it too
+        m_editor->flush();
+        QCOMPARE(stored().regions[0].style.color, QStringLiteral("#ffffff"));
+        QCOMPARE(m_editor->style().value("color").toString(), QStringLiteral("#ffffff"));
     }
 
     // #122 review (2): an edit that couldn't be saved isn't dropped by moving to another template.

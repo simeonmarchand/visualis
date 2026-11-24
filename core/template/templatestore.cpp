@@ -60,7 +60,7 @@ TemplateStore::TemplateStore(Library &library)
 {
 }
 
-TemplateStore::Result TemplateStore::save(Template &tmpl)
+TemplateStore::Result TemplateStore::save(Template &tmpl, Lock lock)
 {
     if (isBuiltInTemplate(tmpl.id))
         return {false, QStringLiteral("\"%1\" is built in and can't be changed; duplicate it instead.").arg(tmpl.name)};
@@ -96,7 +96,8 @@ TemplateStore::Result TemplateStore::save(Template &tmpl)
     q.addBindValue(QString::fromUtf8(body));
     q.addBindValue(t.created.toString(Qt::ISODateWithMs));
     q.addBindValue(t.updated.toString(Qt::ISODateWithMs));
-    if (const Result r = write(m_library, q); !r.ok)
+    const Result r = lock == Lock::Wait ? Result{q.exec(), q.lastError().text()} : write(m_library, q);
+    if (!r.ok)
         return {false, QStringLiteral("Couldn't save \"%1\": %2").arg(t.name, r.error), r.busy};
     tmpl = t;
     return {};

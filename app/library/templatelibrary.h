@@ -39,10 +39,13 @@ public:
 
     // As TemplateStore's, and the snapshot is re-read. Not ok when the library isn't open,
     // the change is refused, or (`busy`) another program is writing to the library.
-    visualis::TemplateStore::Result save(visualis::Template &tmpl);
+    visualis::TemplateStore::Result save(visualis::Template &tmpl,
+                                         visualis::TemplateStore::Lock lock = visualis::TemplateStore::Lock::NowOrBusy);
     visualis::TemplateStore::Result remove(const QUuid &id);
 
 signals:
+    // Another library is open (or none): sent before its templates are read.
+    void libraryChanged();
     void templatesChanged();
     void entriesChanged();
 
