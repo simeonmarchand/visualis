@@ -1,6 +1,7 @@
 #pragma once
 
 #include "media/mediaasset.h"
+#include "media/mediaresolve.h"
 
 #include <QObject>
 #include <QPointer>
@@ -72,6 +73,10 @@ public:
     // stands in for a read that won't return.
     void setWorkerPause(std::function<void()> pause);
 
+    // Every asset, whatever the search, and the media folder, as a value for the resolver
+    // (mediaresolve.h). Changes with assetsChanged.
+    visualis::MediaSnapshot snapshot() const { return m_snapshot; }
+
     QString search() const { return m_search; }
     void setSearch(const QString &search);
     QVariantList assets() const;
@@ -99,10 +104,13 @@ private:
     void abandonIfStuck();
     void abandonWorker();
     void setReport(const QString &report);
+    // Reads the assets again from the library, and emits assetsChanged.
+    void reloadAssets();
 
     QPointer<SongLibrary> m_songs;
     std::unique_ptr<visualis::MediaStore> m_store;
     QList<visualis::MediaAsset> m_assets;
+    visualis::MediaSnapshot m_snapshot;
     QString m_search;
     QString m_report;
     std::unique_ptr<ImportRun> m_import;

@@ -49,10 +49,10 @@ public:
     // partial set would delete files that are in use (#114).
     std::optional<QSet<QString>> contentHashes() const;
 
-    // Absolute paths inside the media folder, or empty when the row's file isn't valid or
-    // would resolve outside it (containedPath). Checked again on every call: the folders can
-    // change under a running app.
-    QString filePath(const MediaAsset &asset) const;
+    // The thumbnail's absolute path inside the media folder, or empty when the hash isn't
+    // valid or the path would resolve outside it (containedPath). Checked again on every
+    // call: the folders can change under a running app. An asset's own file is found with
+    // checkMedia (mediaresolve.h).
     QString thumbnailPath(const MediaAsset &asset) const;
 
 private:
