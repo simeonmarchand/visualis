@@ -178,6 +178,26 @@ private slots:
         QVERIFY(fine.warnings.isEmpty());
     }
 
+    // #93 review: the text goes in "main", so a template without it can't hold the lyrics and
+    // falls back like a missing one.
+    void aTemplateWithNoMainRegionFallsBackToTheBuiltIn()
+    {
+        Template renamed = named("Georgia");
+        renamed.regions[0].id = "lyrics";
+        Template empty = named("Avenir");
+        empty.regions.clear();
+        for (const Template &t : {renamed, empty}) {
+            Song song = sample();
+            song.defaultTemplate = t.id;
+            const LiveItem live = liveItem(songItem(song), song, templateSet({t}));
+            QCOMPARE(live.templateId(), builtInLyricsTemplateId());
+            QVERIFY(live.templateFellBack);
+            QCOMPARE(live.slides[0].content.regions.value("main").text, song.groups[0].slides[0]);
+            QCOMPARE(live.warnings.size(), 1);
+            QVERIFY(live.warnings[0].contains("built-in"));
+        }
+    }
+
     void badOverrideValuesAreReportedOncePerItem()
     {
         Song song = sample();

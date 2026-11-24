@@ -43,12 +43,19 @@ QList<QUuid> customSteps(Song &song, const QUuid &itemId, const QStringList &lab
 void render(LiveItem &live, const TemplateSet &templates, const QUuid &wanted, const QJsonObject &itemOverrides)
 {
     const QUuid id = wanted.isNull() ? builtInLyricsTemplateId() : wanted;
-    const Template t = templates.value(id, builtInLyricsTemplate());
+    const auto found = templates.constFind(id);
+    // The text goes in "main": a template without one can't hold it.
+    const bool usable = found != templates.cend()
+        && std::any_of(found->regions.cbegin(), found->regions.cend(),
+                       [](const TextRegion &r) { return r.id == QStringLiteral("main"); });
+    const Template t = usable ? *found : builtInLyricsTemplate();
     QStringList warnings;
-    if (!templates.contains(id)) {
+    if (!usable) {
         live.templateFellBack = true;
-        warnings << QStringLiteral("Its template isn't in the library, so it shows with the built-in \"%1\" template.")
-                        .arg(t.name);
+        warnings << (found == templates.cend()
+                         ? QStringLiteral("Its template isn't in the library, so it shows with the built-in \"%1\" template.").arg(t.name)
+                         : QStringLiteral("Its template \"%1\" has no lyrics region, so it shows with the built-in \"%2\" template.")
+                               .arg(found->name, t.name));
     }
     live.tmpl = t;
     for (const SongSlide &s : songSlides(live.song, live.arrangement, &live.error)) {
