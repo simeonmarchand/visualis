@@ -1,3 +1,4 @@
+#include "library/medialibrary.h"
 #include "library/servicelist.h"
 #include "library/songlibrary.h"
 #include "library/library.h"
@@ -181,6 +182,45 @@ private slots:
         QVERIFY(m_songs->createFromPaste("Amazing Grace", kLyrics));
         QQuickWindow *window = loadOperatorWindow();
         QVERIFY(!window->findChild<QQuickItem *>("libraryReportDetails")->isVisible());
+    }
+
+    // #97: deleting media a service shows names the service before anything is removed.
+    void deletingMediaAServiceUsesAsksFirst()
+    {
+        auto *media = m_engine->singletonInstance<MediaLibrary *>("Visualis.Ui", "MediaLibrary");
+        QVERIFY(media);
+        QTemporaryDir in;
+        QImage image(16, 9, QImage::Format_RGB32);
+        image.fill(Qt::blue);
+        QVERIFY(image.save(in.filePath("Sunrise.png")));
+        QSignalSpy finished(media, &MediaLibrary::importFinished);
+        QVERIFY(media->importFiles({QUrl::fromLocalFile(in.filePath("Sunrise.png"))}));
+        QVERIFY(finished.wait(10'000));
+        QCOMPARE(media->assets().size(), 1);
+        const QString id = media->assets()[0].toMap().value("id").toString();
+
+        Service s;
+        s.title = "Easter Sunday";
+        ServiceItem item;
+        item.kind = ServiceItem::Kind::Media;
+        item.title = "Sunrise";
+        item.ref = QUuid::fromString(id);
+        s.items << item;
+        QVERIFY(ServiceStore(*m_songs->library()).save(s).ok);
+
+        QQuickWindow *window = loadOperatorWindow();
+        QObject *dialog = window->findChild<QObject *>("mediaDeleteDialog");
+        QVERIFY(dialog);
+        dialog->setProperty("assetId", id);
+        dialog->setProperty("assetName", "Sunrise.png");
+        QVERIFY(QMetaObject::invokeMethod(dialog, "ask"));
+        QTRY_VERIFY(dialog->property("visible").toBool());
+        const QString text = window->findChild<QObject *>("mediaDeleteText")->property("text").toString();
+        QVERIFY2(text.contains("Easter Sunday"), qPrintable(text));
+        QCOMPARE(media->assets().size(), 1);   // nothing gone while it asks
+
+        QVERIFY(QMetaObject::invokeMethod(dialog, "accept"));
+        QTRY_VERIFY(media->assets().isEmpty());
     }
 
     void goLiveShowsTheSelectedSongsSlide()

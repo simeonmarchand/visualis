@@ -221,6 +221,14 @@ const std::vector<Migration> &Library::migrations()
              " service_id TEXT NOT NULL REFERENCES service(id) ON DELETE CASCADE,"
              " pco_item_id TEXT NOT NULL, import_snapshot TEXT NOT NULL DEFAULT '{}',"
              " PRIMARY KEY (service_id, pco_item_id))"}},
+        // The media library (plan 5.9, #97). Files live in media/ under their SHA-256; the row
+        // holds what probing found.
+        {7, {"CREATE TABLE media_asset ("
+             " id TEXT PRIMARY KEY, content_hash TEXT NOT NULL UNIQUE, file TEXT NOT NULL,"
+             " original_name TEXT NOT NULL DEFAULT '', kind TEXT NOT NULL,"
+             " width INTEGER NOT NULL DEFAULT 0, height INTEGER NOT NULL DEFAULT 0,"
+             " duration_ms INTEGER NOT NULL DEFAULT 0, frame_rate REAL NOT NULL DEFAULT 0,"
+             " codec TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL)"}},
     };
     return all;
 }
