@@ -1,6 +1,7 @@
 #include "library/songeditor.h"
 #include "song/songlimits.h"
 #include "library/songlibrary.h"
+#include "library/templatelibrary.h"
 #include "live/livestate.h"
 
 #include <QQmlApplicationEngine>
@@ -241,6 +242,34 @@ private slots:
         QVERIFY(QTest::qWaitForWindowActive(main));
         QTest::keyClick(main, Qt::Key_Right);
         QCOMPARE(m_live->slideIndex(), 1);
+    }
+
+    // #93 review: an open editor's preview follows a template saved or removed meanwhile.
+    void thePreviewFollowsATemplateChange()
+    {
+        auto *templates = m_engine->singletonInstance<TemplateLibrary *>("Visualis.Ui", "TemplateLibrary");
+        Template t = builtInLyricsTemplate();
+        t.id = QUuid();
+        t.name = "Ours";
+        t.regions[0].style.fontFamily = "Avenir";
+        QVERIFY(templates->save(t));
+        Song song = *m_songs->loadSong(QUuid::fromString(m_editor->songId()));
+        song.defaultTemplate = t.id;
+        QVERIFY(m_songs->saveSong(song, nullptr));
+        m_editor->setSongId(m_editor->songId());
+        auto previewFont = [this] {
+            return m_editor->previewSlides().value(1).toMap()["content"].value<Content>().regions.value("main").style.fontFamily;
+        };
+        QCOMPARE(previewFont(), QStringLiteral("Avenir"));
+
+        QSignalSpy changed(m_editor.get(), &SongEditor::changed);
+        t.regions[0].style.fontFamily = "Georgia";
+        QVERIFY(templates->save(t));
+        QVERIFY(changed.count() >= 1);
+        QCOMPARE(previewFont(), QStringLiteral("Georgia"));
+        QVERIFY(templates->remove(t.id));
+        QCOMPARE(previewFont(), builtInLyricsTemplate().regions[0].style.fontFamily);
+        QVERIFY(changed.count() >= 2);
     }
 
 private:

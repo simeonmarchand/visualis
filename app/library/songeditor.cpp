@@ -31,6 +31,11 @@ QString SongEditor::songId() const
 void SongEditor::setSongId(const QString &id)
 {
     SongLibrary *lib = library();
+    // Here, not in the constructor: the library comes from the QML engine, set after it.
+    if (lib && !m_followsTemplates) {
+        connect(lib, &SongLibrary::templatesChanged, this, &SongEditor::changed);   // the preview
+        m_followsTemplates = true;
+    }
     const std::optional<Song> song = lib ? lib->loadSong(QUuid::fromString(id)) : std::nullopt;
     m_song = song.value_or(Song{});
     m_arrangement = m_song.defaultArrangement.isNull() && !m_song.arrangements.isEmpty()

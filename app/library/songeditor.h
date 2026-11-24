@@ -92,4 +92,5 @@ private:
     QUuid m_arrangement;
     QStringList m_warnings;
     QString m_error;
+    bool m_followsTemplates = false;   // connected to the library's templatesChanged
 };
