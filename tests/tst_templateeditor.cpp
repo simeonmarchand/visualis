@@ -1,14 +1,18 @@
+#include "library/library.h"
 #include "library/songlibrary.h"
 #include "library/templateeditor.h"
 #include "library/templatelibrary.h"
 #include "live/livestate.h"
 #include "template/templatejson.h"
 
+#include <QElapsedTimer>
 #include <QJsonDocument>
 #include <QQmlApplicationEngine>
 #include <QQmlComponent>
 #include <QQuickItem>
 #include <QQuickWindow>
+#include <QSqlDatabase>
+#include <QSqlQuery>
 #include <QTemporaryDir>
 #include <QtQml/qqmlextensionplugin.h>
 #include <QtTest>
@@ -34,6 +38,28 @@ QStringList names(const QVariantList &templates)
 // JSON written with single quotes, so it reads in a C++ string.
 QJsonObject json(const char *text) { return QJsonDocument::fromJson(QByteArray(text).replace('\'', '"')).object(); }
 QVariantMap map(const char *text) { return json(text).toVariantMap(); }
+
+// Another program writing to the library: holds its write lock while in scope.
+class OtherProgram
+{
+public:
+    explicit OtherProgram(const Library &library)
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", "other-program");
+        db.setDatabaseName(library.databasePath());
+        QVERIFY(db.open());
+        QVERIFY(QSqlQuery(db).exec("BEGIN IMMEDIATE"));
+    }
+    ~OtherProgram()
+    {
+        {
+            QSqlDatabase db = QSqlDatabase::database("other-program");
+            QSqlQuery(db).exec("ROLLBACK");
+            db.close();
+        }
+        QSqlDatabase::removeDatabase("other-program");
+    }
+};
 
 constexpr int kAllEdges = Qt::LeftEdge | Qt::TopEdge | Qt::RightEdge | Qt::BottomEdge;
 
@@ -267,7 +293,7 @@ private slots:
     {
         const QString id = m_editor->create("Ours");
         m_editor->setStyle(map("{'color': '#ffcc00'}"));
-        QVERIFY(m_templates->remove(QUuid::fromString(id)));
+        QVERIFY(m_templates->remove(QUuid::fromString(id)).ok);
         QCOMPARE(m_editor->templateId(), idText(builtInLyricsTemplateId()));
         m_editor->flush();
         QVERIFY(!m_templates->templates().contains(QUuid::fromString(id)));
@@ -281,10 +307,85 @@ private slots:
         Template other = builtInLyricsTemplate();
         other.id = QUuid();
         other.name = "Other";
-        QVERIFY(m_templates->save(other));
+        QVERIFY(m_templates->save(other).ok);
         QCOMPARE(m_editor->style().value("color").toString(), QStringLiteral("#ffcc00"));
         m_editor->flush();
         QCOMPARE(storedStyle().color, QStringLiteral("#ffcc00"));
+    }
+
+    // #122 review (1): another program holding the library's write lock doesn't hold up the
+    // GUI; the edit stays and saves once the library is free.
+    void aBusyLibraryKeepsTheEditAndSavesItLater()
+    {
+        m_editor->create("Ours");
+        {
+            const OtherProgram other(*m_songs->library());
+            m_editor->setStyle(map("{'color': '#ffcc00'}"));
+            QElapsedTimer t;
+            t.start();
+            m_editor->flush();
+            QVERIFY2(t.elapsed() < Library::kBusyTimeoutMs / 2, qPrintable(QString::number(t.elapsed())));
+            QVERIFY2(m_editor->error().contains("in use"), qPrintable(m_editor->error()));
+            QCOMPARE(m_editor->style().value("color").toString(), QStringLiteral("#ffcc00"));
+            QCOMPARE(storedStyle().color, QStringLiteral("#ffffff"));
+        }
+        QTRY_COMPARE(storedStyle().color, QStringLiteral("#ffcc00"));
+        QVERIFY(m_editor->error().isEmpty());
+    }
+
+    // #122 review (2): an edit that couldn't be saved isn't dropped by moving to another template.
+    void aFailedSaveKeepsTheTemplateSelected()
+    {
+        const QString ours = m_editor->create("Ours");
+        {
+            const OtherProgram other(*m_songs->library());
+            m_editor->setStyle(map("{'color': '#ffcc00'}"));
+            m_editor->select(idText(builtInLyricsTemplateId()));
+            QCOMPARE(m_editor->templateId(), ours);
+            QVERIFY(!m_editor->error().isEmpty());
+            QVERIFY(m_editor->create("Another").isEmpty());
+            QVERIFY(m_editor->duplicate().isEmpty());
+            QCOMPARE(m_editor->templateId(), ours);
+            QVERIFY(!m_editor->error().isEmpty());
+            QCOMPARE(m_editor->style().value("color").toString(), QStringLiteral("#ffcc00"));
+        }
+        QTRY_COMPARE(storedStyle().color, QStringLiteral("#ffcc00"));
+        QCOMPARE(m_templates->templates().size(), 2);
+    }
+
+    // #122 review (3): a refused name leaves the style edits made before it.
+    void aRefusedRenameKeepsTheStyleEdits()
+    {
+        m_editor->create("Ours");
+        m_editor->setStyle(map("{'color': '#ffcc00'}"));
+        m_editor->rename(QString(templatelimits::kTextLength + 1, 'x'));
+        QVERIFY(!m_editor->error().isEmpty());
+        QCOMPARE(m_editor->name(), QStringLiteral("Ours"));
+        QCOMPARE(m_editor->style().value("color").toString(), QStringLiteral("#ffcc00"));
+        QCOMPARE(storedStyle().color, QStringLiteral("#ffcc00"));
+    }
+
+    // A control showing a refused value goes back to the template's.
+    void aRefusedValueSnapsTheControlBack()
+    {
+        m_editor->create("Ours");
+        QSignalSpy changed(m_editor.get(), &TemplateEditor::templateChanged);
+        m_editor->setStyle(map("{'maxSize': 2}"));
+        QCOMPARE(changed.count(), 1);
+    }
+
+    // Style edits don't rebuild the list (which would reset its scroll mid-drag).
+    void theListChangesOnlyWhenItsNamesDo()
+    {
+        m_editor->create("Ours");
+        QSignalSpy entries(m_templates, &TemplateLibrary::entriesChanged);
+        for (int i = 1; i <= 5; ++i) {
+            m_editor->setStyle({{"lineHeight", 1 + i / 10.0}});
+            m_editor->flush();
+        }
+        QCOMPARE(entries.count(), 0);
+        m_editor->rename("Christmas");
+        QCOMPARE(entries.count(), 1);
     }
 
     void theWindowLoadsAndAFrameDragMovesTheRegion()

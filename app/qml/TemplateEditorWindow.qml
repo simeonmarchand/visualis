@@ -156,6 +156,7 @@ Window {
                 Layout.fillWidth: true
                 enabled: !editor.builtIn
                 placeholderText: "Name"
+                maximumLength: 200   // templatelimits::kTextLength
                 text: editor.name
                 onEditingFinished: editor.rename(text)
             }

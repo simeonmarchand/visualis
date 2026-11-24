@@ -88,6 +88,10 @@ Window {
                 textRole: "name"
                 valueRole: "id"
                 currentIndex: indexOfValue(editor.templateId)
+                function resync() { currentIndex = Qt.binding(() => indexOfValue(editor.templateId)) }
+                // indexOfValue doesn't re-run when the list changes around the chosen one; after
+                // the new list is in, so the index is looked up in it.
+                onModelChanged: Qt.callLater(resync)
                 // A template deleted since: the song shows with the built-in (#93).
                 displayText: currentIndex < 0 ? "Missing (built-in shows)" : currentText
                 onActivated: editor.templateId = currentValue

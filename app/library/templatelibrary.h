@@ -1,6 +1,7 @@
 #pragma once
 
 #include "template/template.h"
+#include "template/templatestore.h"
 
 #include <QObject>
 #include <QPointer>
@@ -22,7 +23,9 @@ class TemplateLibrary : public QObject
     QML_ELEMENT
     QML_SINGLETON
     // {id, name, kind, builtIn} for the editors' lists: built-ins first, then by name.
-    Q_PROPERTY(QVariantList entries READ entries NOTIFY templatesChanged)
+    // Signalled only when one of those changes, not on every save of a style, so a list
+    // keeps its place while a template is being edited.
+    Q_PROPERTY(QVariantList entries READ entries NOTIFY entriesChanged)
 
 public:
     explicit TemplateLibrary(SongLibrary *songs);
@@ -32,19 +35,22 @@ public:
     // Every readable stored template, and the built-ins. A stored template that can't be read
     // is left out (and logged), so items using it fall back to the built-in.
     const visualis::TemplateSet &templates() const { return m_templates; }
-    QVariantList entries() const;
+    QVariantList entries() const { return m_entries; }
 
-    // As TemplateStore::save, and the snapshot is re-read. False, with `error`, when the
-    // library isn't open or the save is refused.
-    bool save(visualis::Template &tmpl, QString *error = nullptr);
-    bool remove(const QUuid &id);
+    // As TemplateStore's, and the snapshot is re-read. Not ok when the library isn't open,
+    // the change is refused, or (`busy`) another program is writing to the library.
+    visualis::TemplateStore::Result save(visualis::Template &tmpl);
+    visualis::TemplateStore::Result remove(const QUuid &id);
 
 signals:
     void templatesChanged();
+    void entriesChanged();
 
 private:
     void reload();
+    visualis::Library *library() const;
 
     QPointer<SongLibrary> m_songs;
     visualis::TemplateSet m_templates;
+    QVariantList m_entries;
 };

@@ -7,6 +7,7 @@
 #include "template/templatestore.h"
 
 #include <QJsonArray>
+#include <QElapsedTimer>
 #include <QJsonDocument>
 #include <QSqlQuery>
 #include <QTemporaryDir>
@@ -245,8 +246,8 @@ private slots:
         QCOMPARE(list[2].name, QStringLiteral("Another"));
         QCOMPARE(list[2].kind, TemplateKind::LowerThird);
 
-        QVERIFY(store.remove(b.id));
-        QVERIFY(!store.remove(b.id));
+        QVERIFY(store.remove(b.id).ok);
+        QVERIFY(!store.remove(b.id).ok);
         QVERIFY(!store.load(b.id));
     }
 
@@ -258,7 +259,7 @@ private slots:
         edited.name = "Mine";
         QVERIFY(!store.save(edited).ok);
         QCOMPARE(edited.revision, builtInLyricsTemplate().revision);   // untouched
-        QVERIFY(!store.remove(builtInLyricsTemplateId()));
+        QVERIFY(!store.remove(builtInLyricsTemplateId()).ok);
         QCOMPARE(store.load(builtInLyricsTemplateId())->name, QStringLiteral("Lyrics"));
 
         Template unnamed;
@@ -637,6 +638,41 @@ private slots:
         QCOMPARE(other.song.groups[0].slides, s.groups[0].slides);
         QCOMPARE(other.song.groups[0].slideOverrides, s.groups[0].slideOverrides);
         QVERIFY(other.warnings.isEmpty());
+    }
+
+    // #122 review: the template editor saves from the GUI thread while the service runs, so
+    // another program holding the write lock makes a save fail at once with `busy` instead of
+    // freezing the operator window and the outputs for the busy timeout.
+    void aSaveWhileAnotherProgramWritesIsBusyAtOnce()
+    {
+        TemplateStore store(*m_library);
+        Template kept = sample();
+        QVERIFY(store.save(kept).ok);
+        {
+            QSqlDatabase other = QSqlDatabase::addDatabase("QSQLITE", "other-program");
+            other.setDatabaseName(m_library->databasePath());
+            QVERIFY(other.open());
+            QVERIFY(QSqlQuery(other).exec("BEGIN IMMEDIATE"));
+
+            QElapsedTimer t;
+            t.start();
+            Template edited = kept;
+            edited.name = "Edited";
+            const TemplateStore::Result saved = store.save(edited);
+            const TemplateStore::Result removed = store.remove(kept.id);
+            QVERIFY(!saved.ok && saved.busy);
+            QVERIFY(!removed.ok && removed.busy);
+            QCOMPARE(edited.name, QStringLiteral("Edited"));   // left as it was
+            QCOMPARE(edited.revision, kept.revision);
+            QVERIFY2(t.elapsed() < Library::kBusyTimeoutMs / 2, qPrintable(QString::number(t.elapsed())));
+
+            QVERIFY(QSqlQuery(other).exec("ROLLBACK"));
+            other.close();
+        }
+        QSqlDatabase::removeDatabase("other-program");
+        Template edited = kept;
+        QVERIFY(store.save(edited).ok);
+        QVERIFY(store.remove(kept.id).ok);
     }
 
     // #94: dragging a frame in the editor keeps it on the output and no smaller than the minimum.

@@ -91,7 +91,8 @@ void TemplateEditor::select(const QString &id)
     const QUuid uuid = QUuid::fromString(id);
     if (uuid == m_tmpl.id || !m_library || !m_library->templates().contains(uuid))
         return;
-    flush();
+    if (!flush())
+        return;   // stay with the edit that didn't save
     setProblems({}, {});
     load(m_library->templates().value(uuid));
 }
@@ -179,8 +180,11 @@ void TemplateEditor::setStyle(const QVariantMap &properties)
         return;
     QStringList warnings;
     const RegionStyle style = applyRegionStyle(r->style, QJsonObject::fromVariantMap(properties), r->id, &warnings);
-    if (!warnings.isEmpty())
-        return setProblems(warnings, {});
+    if (!warnings.isEmpty()) {
+        setProblems(warnings, {});
+        emit templateChanged();   // a control showing the refused value goes back
+        return;
+    }
     r->style = style;
     edited();
 }
@@ -191,8 +195,10 @@ void TemplateEditor::setSafeArea(double x, double y)
         return;
     auto valid = [](double v) { return std::isfinite(v) && v >= 0 && v <= templatelimits::kMaxSafeArea; };
     if (!valid(x) || !valid(y)) {
-        return setProblems({QStringLiteral("The safe area can be 0 to %1% of the output on each side.")
-                                .arg(templatelimits::kMaxSafeArea * 100)}, {});
+        setProblems({QStringLiteral("The safe area can be 0 to %1% of the output on each side.")
+                         .arg(templatelimits::kMaxSafeArea * 100)}, {});
+        emit templateChanged();
+        return;
     }
     m_tmpl.safeAreaX = x;
     m_tmpl.safeAreaY = y;
@@ -208,23 +214,29 @@ void TemplateEditor::dragFrame(const QRectF &start, int edges, double dx, double
     edited();
 }
 
-void TemplateEditor::flush()
+bool TemplateEditor::flush()
 {
-    if (m_pending)
-        commit();
+    return !m_pending || commit();
 }
 
 bool TemplateEditor::commit()
 {
     discardPending();
-    QString error;
-    if (m_library && m_library->save(m_tmpl, &error)) {
+    const TemplateStore::Result r = m_library ? m_library->save(m_tmpl)
+                                              : TemplateStore::Result{false, QStringLiteral("The library isn't open.")};
+    if (r.ok) {
         setProblems({}, {});
         return true;
     }
+    if (r.busy) {
+        m_pending = true;
+        m_save.start();
+        setProblems({}, QStringLiteral("Not saved yet: %1. Trying again.").arg(r.error));
+        return false;
+    }
     // Show what the library has, so the editor never shows what didn't save.
     follow();
-    setProblems({}, QStringLiteral("Couldn't save: %1").arg(error.isEmpty() ? QStringLiteral("no library") : error));
+    setProblems({}, r.error);
     return false;
 }
 
@@ -233,9 +245,10 @@ bool TemplateEditor::saveNew(Template &tmpl)
     tmpl.id = QUuid();
     tmpl.revision = 0;
     tmpl.created = tmpl.updated = {};
-    QString error;
-    if (!m_library || !m_library->save(tmpl, &error)) {
-        setProblems({}, QStringLiteral("Couldn't save: %1").arg(error.isEmpty() ? QStringLiteral("no library") : error));
+    const TemplateStore::Result r = m_library ? m_library->save(tmpl)
+                                              : TemplateStore::Result{false, QStringLiteral("The library isn't open.")};
+    if (!r.ok) {
+        setProblems({}, r.error);
         return false;
     }
     setProblems({}, {});
@@ -245,7 +258,8 @@ bool TemplateEditor::saveNew(Template &tmpl)
 
 QString TemplateEditor::create(const QString &name)
 {
-    flush();
+    if (!flush())
+        return {};
     Template t = builtInLyricsTemplate();
     t.name = name.trimmed().isEmpty() ? QStringLiteral("New template") : name.trimmed();
     return saveNew(t) ? idText(t.id) : QString();
@@ -253,7 +267,8 @@ QString TemplateEditor::create(const QString &name)
 
 QString TemplateEditor::duplicate()
 {
-    flush();
+    if (!flush())
+        return {};
     const QString suffix = QStringLiteral(" copy");
     Template t = m_tmpl;
     t.name = m_tmpl.name.left(templatelimits::kTextLength - suffix.size()) + suffix;
@@ -264,6 +279,9 @@ void TemplateEditor::rename(const QString &name)
 {
     if (!requireEditable() || name.trimmed().isEmpty() || name.trimmed() == m_tmpl.name)
         return;
+    // Style edits first, so a name that's refused doesn't take them with it.
+    if (!flush())
+        return;
     m_tmpl.name = name.trimmed();
     commit();
 }
@@ -272,9 +290,10 @@ bool TemplateEditor::remove()
 {
     if (!requireEditable())
         return false;
-    discardPending();
-    if (!m_library || !m_library->remove(m_tmpl.id)) {
-        setProblems({}, QStringLiteral("Couldn't delete \"%1\".").arg(m_tmpl.name));
+    const TemplateStore::Result r = m_library ? m_library->remove(m_tmpl.id)
+                                              : TemplateStore::Result{false, QStringLiteral("The library isn't open.")};
+    if (!r.ok) {
+        setProblems({}, r.error);
         return false;
     }
     return true;   // follow() has gone back to the built-in

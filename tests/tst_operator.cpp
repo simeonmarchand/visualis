@@ -465,7 +465,7 @@ private slots:
         t.id = QUuid();
         t.name = "Ours";
         t.regions[0].style.fontFamily = "Avenir";
-        QVERIFY(templates->save(t));
+        QVERIFY(templates->save(t).ok);
         QVERIFY(templates->templates().contains(t.id));
 
         const QStringList ids = makeSongs({"Amazing Grace", "Holy Spirit"});
@@ -480,7 +480,7 @@ private slots:
         QCOMPARE(mainFont(), QStringLiteral("Avenir"));
 
         t.regions[0].style.fontFamily = "Georgia";
-        QVERIFY(templates->save(t));
+        QVERIFY(templates->save(t).ok);
         QCOMPARE(mainFont(), QStringLiteral("Georgia"));
         QCOMPARE(m_live->itemIndex(), 0);
         QCOMPARE(m_live->slideIndex(), 1);
@@ -490,11 +490,11 @@ private slots:
         m_songs->select(ids[0]);
         QVERIFY(m_songs->goLive(2));
         t.regions[0].style.fontFamily = "Menlo";
-        QVERIFY(templates->save(t));
+        QVERIFY(templates->save(t).ok);
         QCOMPARE(mainFont(), QStringLiteral("Menlo"));
         QCOMPARE(m_live->slideIndex(), 2);
 
-        QVERIFY(templates->remove(t.id));   // gone: never a blank output
+        QVERIFY(templates->remove(t.id).ok);   // gone: never a blank output
         QCOMPARE(mainFont(), builtInLyricsTemplate().regions[0].style.fontFamily);
         QVERIFY(!m_services->items()[0].toMap()["warnings"].toString().isEmpty());
     }
@@ -516,7 +516,7 @@ private slots:
         Template t = builtInLyricsTemplate();
         t.id = QUuid();
         t.name = "Any";
-        QVERIFY(templates->save(t));
+        QVERIFY(templates->save(t).ok);
 
         QCOMPARE(m_live->currentText(), shown);
     }
@@ -553,7 +553,7 @@ private slots:
         t.id = QUuid();
         t.name = "Damaged";
         t.regions[0].style.fontFamily = "Avenir";
-        QVERIFY(templates->save(t));
+        QVERIFY(templates->save(t).ok);
         const QStringList ids = makeSongs({"Amazing Grace"});
         Song song = *m_songs->loadSong(QUuid::fromString(ids[0]));
         song.defaultTemplate = t.id;
@@ -589,7 +589,7 @@ private slots:
         t.name = "Ours";
         t.regions[0].style.fontFamily = "Georgia";
         t.regions[0].style.frame = QRectF(0.1, 0.6, 0.8, 0.3);
-        QVERIFY(templates->save(t));
+        QVERIFY(templates->save(t).ok);
         const QStringList ids = makeSongs({"Amazing Grace"});
         Song song = *m_songs->loadSong(QUuid::fromString(ids[0]));
         song.defaultTemplate = t.id;

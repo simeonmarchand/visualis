@@ -89,8 +89,9 @@ public:
     // (dx, dy) from `start`, the frame when the drag began: see draggedFrame.
     Q_INVOKABLE void dragFrame(const QRectF &start, int edges, double dx, double dy);
 
-    // Saves an edit that's waiting to.
-    Q_INVOKABLE void flush();
+    // Saves an edit that's waiting to. False if it couldn't be saved; the edit then stays
+    // here, and a busy library is tried again.
+    Q_INVOKABLE bool flush();
 
 signals:
     void templateChanged();
@@ -103,7 +104,9 @@ private:
     void load(const visualis::Template &tmpl);
     bool requireEditable();        // false, with `error` set, for a built-in
     void edited();                 // the change saves soon
-    bool commit();                 // saves m_tmpl now; on failure goes back to what's stored
+    // Saves m_tmpl now. A busy library keeps the edit and tries again; any other failure
+    // goes back to what's stored.
+    bool commit();
     bool saveNew(visualis::Template &tmpl);
     void discardPending();
     void setProblems(const QStringList &warnings, const QString &error);

@@ -252,7 +252,7 @@ private slots:
         t.id = QUuid();
         t.name = "Ours";
         t.regions[0].style.fontFamily = "Avenir";
-        QVERIFY(templates->save(t));
+        QVERIFY(templates->save(t).ok);
         Song song = *m_songs->loadSong(QUuid::fromString(m_editor->songId()));
         song.defaultTemplate = t.id;
         QVERIFY(m_songs->saveSong(song, nullptr));
@@ -264,10 +264,10 @@ private slots:
 
         QSignalSpy changed(m_editor.get(), &SongEditor::changed);
         t.regions[0].style.fontFamily = "Georgia";
-        QVERIFY(templates->save(t));
+        QVERIFY(templates->save(t).ok);
         QVERIFY(changed.count() >= 1);
         QCOMPARE(previewFont(), QStringLiteral("Georgia"));
-        QVERIFY(templates->remove(t.id));
+        QVERIFY(templates->remove(t.id).ok);
         QCOMPARE(previewFont(), builtInLyricsTemplate().regions[0].style.fontFamily);
         QVERIFY(changed.count() >= 2);
     }
@@ -282,7 +282,7 @@ private slots:
         t.id = QUuid();
         t.name = "Christmas";
         t.regions[0].style.color = "#ff0000";
-        QVERIFY(templates->save(t));
+        QVERIFY(templates->save(t).ok);
         QCOMPARE(strings(templates->entries(), "name"), (QStringList{"Lyrics", "Christmas"}));
 
         m_editor->setTemplateId(idText(t.id));
@@ -296,6 +296,41 @@ private slots:
         m_editor->setTemplateId(idText(builtInLyricsTemplateId()));   // back to the built-in
         QVERIFY(m_songs->loadSong(QUuid::fromString(m_editor->songId()))->defaultTemplate.isNull());
         QCOMPARE(m_editor->templateId(), idText(builtInLyricsTemplateId()));
+    }
+
+    // #122 review (4): the picker keeps showing the song's template as the list changes around it.
+    void thePickerFollowsTheListChanging()
+    {
+        auto *templates = m_engine->singletonInstance<TemplateLibrary *>("Visualis.Ui", "TemplateLibrary");
+        auto add = [&](const char *name) {
+            Template t = builtInLyricsTemplate();
+            t.id = QUuid();
+            t.name = name;
+            return templates->save(t).ok ? t : Template{};
+        };
+        add("B");
+        Template d = add("D");
+        m_engine->loadFromModule("Visualis.Ui", "Main");
+        auto *main = qobject_cast<QQuickWindow *>(m_engine->rootObjects().value(0));
+        QVERIFY(main);
+        auto *editorWindow = main->findChild<QQuickWindow *>("songEditorWindow");
+        QVERIFY(editorWindow);
+        QMetaObject::invokeMethod(editorWindow, "edit", Q_ARG(QVariant, m_songs->selectedId()));
+        auto *picker = editorWindow->findChild<QQuickItem *>("songTemplate");
+        QVERIFY(picker);
+        auto *windowEditor = editorWindow->findChild<SongEditor *>();
+        windowEditor->setTemplateId(idText(d.id));
+        QTRY_COMPARE(picker->property("displayText").toString(), QStringLiteral("D"));
+
+        add("C");   // lands between B and D
+        QTRY_COMPARE(picker->property("displayText").toString(), QStringLiteral("D"));
+        d.name = "A";   // moves to the top
+        QVERIFY(templates->save(d).ok);
+        QTRY_COMPARE(picker->property("displayText").toString(), QStringLiteral("A"));
+        QTest::qWait(50);
+        QCOMPARE(picker->property("displayText").toString(), QStringLiteral("A"));
+        windowEditor->setTemplateId(idText(builtInLyricsTemplateId()));   // still follows the song
+        QTRY_COMPARE(picker->property("displayText").toString(), QStringLiteral("Lyrics"));
     }
 
 private:
