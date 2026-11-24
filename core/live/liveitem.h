@@ -80,6 +80,9 @@ struct LiveItem {
     QUuid templateId() const { return tmpl.id; }
 };
 
+// For QML's slide grids and previews: each slide's text, group label and color, and content.
+QVariantList slideMaps(const QList<LiveSlide> &slides);
+
 // `song` is the item's song from the library, for song items; without it a song item has
 // no slides. `templates` must include the built-ins (templateSet()).
 LiveItem liveItem(const ServiceItem &item, const std::optional<Song> &song, const TemplateSet &templates);

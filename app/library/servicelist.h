@@ -116,6 +116,8 @@ private:
     bool save();
     // Rebuilds the items' slides from the library and hands the service to LiveState.
     void refresh();
+    // Logs those of `warnings` not logged for `item` last time; returns them all.
+    QStringList logNewWarnings(const visualis::ServiceItem &item, const QStringList &warnings) const;
     void followLive();
     void setReport(const QString &report);
 

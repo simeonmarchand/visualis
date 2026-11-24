@@ -76,6 +76,17 @@ QVariantMap Content::regionMap() const
     return out;
 }
 
+QVariantList slideMaps(const QList<LiveSlide> &slides)
+{
+    QVariantList list;
+    for (const LiveSlide &l : slides) {
+        const SongSlide &s = l.slide;
+        list.append(QVariantMap{{"text", s.text}, {"groupLabel", s.groupLabel}, {"groupColor", s.groupColor},
+                                {"content", QVariant::fromValue(l.content)}});
+    }
+    return list;
+}
+
 LiveItem liveSong(const Song &song, const QUuid &arrangement, const TemplateSet &templates)
 {
     LiveItem live;

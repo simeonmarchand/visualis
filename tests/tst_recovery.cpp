@@ -34,7 +34,6 @@ Song sample()
     return s;
 }
 
-
 // A stored template, as TemplateLibrary loads it.
 Template stored(const QString &font)
 {

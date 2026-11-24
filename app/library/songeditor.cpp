@@ -181,13 +181,7 @@ QVariantList SongEditor::previewSlides() const
 {
     // Through the song's template, as it will show (#93).
     SongLibrary *songs = library();
-    QVariantList list;
-    for (const LiveSlide &l : liveSong(m_song, m_arrangement, songs ? songs->templates() : templateSet({})).slides) {
-        const SongSlide &s = l.slide;
-        list.append(QVariantMap{{"text", s.text}, {"groupLabel", s.groupLabel}, {"groupColor", s.groupColor},
-                                {"content", QVariant::fromValue(l.content)}});
-    }
-    return list;
+    return slideMaps(liveSong(m_song, m_arrangement, songs ? songs->templates() : templateSet({})).slides);
 }
 
 QString SongEditor::addArrangement(const QString &name)

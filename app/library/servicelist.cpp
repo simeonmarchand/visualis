@@ -328,18 +328,15 @@ void ServiceList::refresh()
 {
     m_liveItems.clear();
     m_suggestions.clear();
+    QHash<QUuid, QStringList> logged;   // only the open items', so the map doesn't grow
     if (m_open) {
         QList<SongCandidate> candidates;
         bool haveCandidates = false;
+        const TemplateSet templates = m_songs ? m_songs->templates() : templateSet({});
         for (const ServiceItem &item : std::as_const(m_open->items)) {
             const bool isSong = item.kind == ServiceItem::Kind::Song;
-            m_liveItems << liveItem(item, isSong && m_songs ? m_songs->loadSong(item.ref) : std::nullopt,
-                                    m_songs ? m_songs->templates() : templateSet({}));
-            for (const QString &w : std::as_const(m_liveItems.last().warnings)) {
-                if (!m_loggedWarnings.value(item.id).contains(w))
-                    qCWarning(lcServices).noquote() << QStringLiteral("\"%1\":").arg(item.title) << w;
-            }
-            m_loggedWarnings[item.id] = m_liveItems.last().warnings;   // each logged once, not on every refresh
+            m_liveItems << liveItem(item, isSong && m_songs ? m_songs->loadSong(item.ref) : std::nullopt, templates);
+            logged[item.id] = logNewWarnings(item, m_liveItems.last().warnings);
             // What an unlinked imported song may be, for the operator to pick (#55).
             QVariantList suggestions;
             const std::optional<PcoSong> pco = snapshotSong(item.importSnapshot);
@@ -360,10 +357,21 @@ void ServiceList::refresh()
             m_suggestions << suggestions;
         }
     }
+    m_loggedWarnings = logged;
     if (m_live)
         m_live->setService(m_open ? m_open->id : QUuid(), m_liveItems);
     emit serviceChanged();
     emit selectionChanged();
+}
+
+QStringList ServiceList::logNewWarnings(const ServiceItem &item, const QStringList &warnings) const
+{
+    // Each logged once, not on every refresh.
+    for (const QString &w : warnings) {
+        if (!m_loggedWarnings.value(item.id).contains(w))
+            qCWarning(lcServices).noquote() << QStringLiteral("\"%1\":").arg(item.title) << w;
+    }
+    return warnings;
 }
 
 void ServiceList::followLive()
@@ -461,15 +469,9 @@ QString ServiceList::selectedSongId() const
 
 QVariantList ServiceList::selectedSlides() const
 {
-    QVariantList list;
     if (m_selected < 0 || m_selected >= m_liveItems.size())
-        return list;
-    for (const LiveSlide &l : m_liveItems[m_selected].slides) {
-        const SongSlide &s = l.slide;
-        list.append(QVariantMap{{"text", s.text}, {"groupLabel", s.groupLabel}, {"groupColor", s.groupColor},
-                                {"content", QVariant::fromValue(l.content)}});
-    }
-    return list;
+        return {};
+    return slideMaps(m_liveItems[m_selected].slides);
 }
 
 void ServiceList::setReport(const QString &report)

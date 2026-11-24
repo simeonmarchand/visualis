@@ -168,16 +168,10 @@ QString SongLibrary::selectedTitle() const
 
 QVariantList SongLibrary::selectedSlides() const
 {
-    QVariantList list;
     if (!m_selected)
-        return list;
+        return {};
     // What goLive() shows, so grid index n is live slide n and the tile matches the output.
-    for (const LiveSlide &l : liveSong(*m_selected, {}, templates()).slides) {
-        const SongSlide &s = l.slide;
-        list.append(QVariantMap{{"text", s.text}, {"groupLabel", s.groupLabel}, {"groupColor", s.groupColor},
-                                {"content", QVariant::fromValue(l.content)}});
-    }
-    return list;
+    return slideMaps(liveSong(*m_selected, {}, templates()).slides);
 }
 
 bool SongLibrary::goLive(int index)
