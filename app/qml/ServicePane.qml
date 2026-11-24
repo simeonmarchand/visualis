@@ -248,6 +248,32 @@ ColumnLayout {
 
     Menu {
         id: itemMenu
+        // The template for this service only (#95); the song keeps its own.
+        Menu {
+            id: templateMenu
+            objectName: "itemTemplateMenu"
+            title: "Template"
+            readonly property string chosen: ServiceList.items[ServiceList.selectedIndex]?.templateId ?? ""
+            MenuItem {
+                text: "The song's own"
+                checkable: true
+                checked: templateMenu.chosen === ""
+                onTriggered: ServiceList.setItemTemplate(ServiceList.selectedIndex, "")
+            }
+            MenuSeparator {}
+            Instantiator {
+                model: TemplateLibrary.entries.filter(t => t.kind === "lyrics")
+                delegate: MenuItem {
+                    required property var modelData
+                    text: modelData.name
+                    checkable: true
+                    checked: templateMenu.chosen === modelData.id
+                    onTriggered: ServiceList.setItemTemplate(ServiceList.selectedIndex, modelData.id)
+                }
+                onObjectAdded: (index, object) => templateMenu.insertItem(index + 2, object)
+                onObjectRemoved: (index, object) => templateMenu.removeItem(object)
+            }
+        }
         MenuItem { text: "Remove from service"; onTriggered: ServiceList.removeItem(ServiceList.selectedIndex) }
     }
 

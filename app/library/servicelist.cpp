@@ -8,6 +8,7 @@
 #include "service/servicestore.h"
 #include "song/songmatch.h"
 #include "song/songstore.h"
+#include "template/overrides.h"
 
 #include <QDir>
 #include <QFile>
@@ -245,6 +246,38 @@ bool ServiceList::leaveBlank(int index)
     return true;
 }
 
+bool ServiceList::setItemTemplate(int index, const QString &templateId)
+{
+    if (!m_open || index < 0 || index >= m_open->items.size())
+        return false;
+    const QUuid itemId = m_open->items[index].id;
+    const QUuid chosen = QUuid::fromString(templateId);
+    Service saved;
+    const ServiceStore::Result r = m_store->applyWithoutWaiting(
+        m_open->id,
+        [&](const Service &current) -> std::optional<ServiceStore::Decision> {
+            Service s = current;
+            for (ServiceItem &item : s.items) {
+                if (item.id != itemId)
+                    continue;
+                if (chosen.isNull())
+                    overrides::resetTemplate(item.overrides);
+                else
+                    overrides::setTemplate(item.overrides, chosen);
+                return ServiceStore::Decision{s, {}};
+            }
+            return std::nullopt;
+        },
+        &saved);
+    if (!r.ok) {
+        setReport(r.busy ? tr("The template wasn't changed: the library is in use by another program. Try again.") : r.error);
+        return false;
+    }
+    m_open = saved;
+    refresh();
+    return true;
+}
+
 bool ServiceList::insert(ServiceItem item)
 {
     if (!m_open)
@@ -449,7 +482,8 @@ QVariantList ServiceList::items() const
                                 {"hasSlides", !m_liveItems.value(i).slides.isEmpty()},
                                 {"warnings", m_liveItems.value(i).warnings.join('\n')},
                                 {"songPlaceholder", songPlaceholder}, {"suggestions", m_suggestions.value(i)},
-                                {"pcoRemoved", it.pcoRemoved}});
+                                {"pcoRemoved", it.pcoRemoved},
+                                {"templateId", braceless(overrideTemplateId(it.overrides))}});
     }
     return list;
 }

@@ -83,6 +83,15 @@ struct LiveItem {
 // For QML's slide grids and previews: each slide's text, group label and color, and content.
 QVariantList slideMaps(const QList<LiveSlide> &slides);
 
+// The template an item with template `wanted` (null: the built-in) renders with: that one, or
+// the built-in when it isn't in `templates` or has no "main" region to hold the text, with
+// `problem` saying why for the operator.
+struct TemplateChoice {
+    Template tmpl;
+    QString problem;
+};
+TemplateChoice chooseTemplate(const TemplateSet &templates, const QUuid &wanted);
+
 // `song` is the item's song from the library, for song items; without it a song item has
 // no slides. `templates` must include the built-ins (templateSet()).
 LiveItem liveItem(const ServiceItem &item, const std::optional<Song> &song, const TemplateSet &templates);

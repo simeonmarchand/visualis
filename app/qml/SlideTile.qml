@@ -11,7 +11,10 @@ Item {
     property string groupColor
     property bool isCurrent: false
     property bool isNext: false
-    signal clicked()
+    // In the song editor (#95): picked for styling, and how many template properties it overrides.
+    property bool isSelected: false
+    property int overrideCount: 0
+    signal clicked(int modifiers)
 
     readonly property color accent: groupColor !== "" ? groupColor : "#555b63"
     height: label.height + preview.height
@@ -59,13 +62,33 @@ Item {
     }
 
     // Live: a thick outline in the group's color with a LIVE tag. Next: a thin gray one.
+    // Selected for styling: a blue one.
     Rectangle {
         anchors.fill: parent
         anchors.margins: -3
         color: "transparent"
         radius: 4
-        border.width: tile.isCurrent ? 3 : tile.isNext ? 2 : 0
-        border.color: tile.isCurrent ? "#ff9f1a" : "#8b8f96"
+        border.width: tile.isCurrent || tile.isSelected ? 3 : tile.isNext ? 2 : 0
+        border.color: tile.isCurrent ? "#ff9f1a" : tile.isSelected ? "#4a90e2" : "#8b8f96"
+    }
+    Rectangle {
+        objectName: "overrideMarker"
+        visible: tile.overrideCount > 0
+        anchors.left: preview.left
+        anchors.bottom: preview.bottom
+        anchors.margins: 4
+        width: markerText.implicitWidth + 8
+        height: markerText.implicitHeight + 2
+        color: "#4a90e2"
+        radius: 2
+        Text {
+            id: markerText
+            anchors.centerIn: parent
+            text: "Styled · " + tile.overrideCount
+            color: "white"
+            font.pixelSize: 11
+            font.bold: true
+        }
     }
     Rectangle {
         visible: tile.isCurrent
@@ -81,6 +104,6 @@ Item {
 
     MouseArea {
         anchors.fill: parent
-        onClicked: tile.clicked()
+        onClicked: mouse => tile.clicked(mouse.modifiers)
     }
 }

@@ -631,6 +631,37 @@ private slots:
         QVERIFY(!findItem(window->contentItem(), "itemWarning1")->isVisible());
     }
 
+    // #95: a service item can use another template for this service only.
+    void anItemsTemplateIsChosenFromTheServiceList()
+    {
+        auto *templates = m_engine->singletonInstance<TemplateLibrary *>("Visualis.Ui", "TemplateLibrary");
+        Template t = builtInLyricsTemplate();
+        t.id = QUuid();
+        t.name = "Christmas";
+        t.regions[0].style.color = "#ff0000";
+        QVERIFY(templates->save(t).ok);
+        const QStringList ids = makeSongs({"Amazing Grace", "Holy Spirit"});
+        QVERIFY(m_services->createService("Sunday"));
+        QVERIFY(m_services->addSong(ids[0]));
+        QVERIFY(m_services->addSong(ids[1]));
+        const QString tid = t.id.toString(QUuid::WithoutBraces);
+
+        QVERIFY(m_services->setItemTemplate(0, tid));
+        QCOMPARE(m_services->items()[0].toMap()["templateId"].toString(), tid);
+        QCOMPARE(m_services->items()[1].toMap()["templateId"].toString(), QString());
+        QVERIFY(m_live->goToItem(0, 1));
+        QCOMPARE(m_live->content().regions.value("main").style.color, QStringLiteral("#ff0000"));
+        // Saved with the service; the song itself keeps its own template.
+        const Service stored = *ServiceStore(*m_songs->library()).load(QUuid::fromString(m_services->openId()));
+        QCOMPARE(overrideTemplateId(stored.items[0].overrides), t.id);
+        QVERIFY(m_songs->loadSong(QUuid::fromString(ids[0]))->defaultTemplate.isNull());
+
+        QVERIFY(m_services->setItemTemplate(0, ""));   // back to the song's
+        QCOMPARE(m_services->items()[0].toMap()["templateId"].toString(), QString());
+        QCOMPARE(m_live->content().regions.value("main").style.color, builtInLyricsTemplate().regions[0].style.color);
+        QVERIFY(!m_services->setItemTemplate(5, tid));
+    }
+
     void tileClicksOnAServiceItemAreCommands()
     {
         QQuickWindow *window = serviceOperatorWindow();
