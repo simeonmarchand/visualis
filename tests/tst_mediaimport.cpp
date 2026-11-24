@@ -337,10 +337,11 @@ private slots:
         QVERIFY(importAndWait({QUrl::fromLocalFile(in.filePath("broken.png")), QUrl::fromLocalFile(in.filePath("broken.mp4")),
                                QUrl::fromLocalFile(in.filePath("notes.txt")), QUrl::fromLocalFile(in.filePath("fine.png"))}));
         const QString report = m_media->report();
-        QVERIFY2(report.startsWith("Imported 1 files."), qPrintable(report));
         QVERIFY2(report.contains("broken.png"), qPrintable(report));
         QVERIFY2(report.contains("notes.txt") && report.contains("not an image or video"), qPrintable(report));
 #ifdef Q_OS_MACOS
+        // Only macOS probes videos, so elsewhere broken.mp4 is imported too.
+        QVERIFY2(report.startsWith("Imported 1 files."), qPrintable(report));
         QVERIFY2(report.contains("broken.mp4"), qPrintable(report));
         QCOMPARE(filesUnder(m_songs->library()->mediaPath(), "").size(), 2);   // fine.png and its thumbnail
 #endif
