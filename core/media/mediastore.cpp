@@ -49,20 +49,20 @@ std::optional<MediaAsset> one(QSqlDatabase db, const QString &where, const QStri
 // One statement that writes, without waiting on another program's lock (#88).
 MediaStore::Result write(QSqlDatabase db, QSqlQuery &q, int *rowsAffected = nullptr)
 {
-    QSqlQuery pragma(db);
-    pragma.exec("PRAGMA busy_timeout = 0");
-    const bool done = q.exec();
-    const QSqlError error = q.lastError();
+    const Library::WriteNow w = Library::writeNow(db, q);
     if (rowsAffected)
-        *rowsAffected = q.numRowsAffected();
-    pragma.exec(QStringLiteral("PRAGMA busy_timeout = %1").arg(Library::kBusyTimeoutMs));
-    if (done)
+        *rowsAffected = w.rowsAffected;
+    switch (w.outcome) {
+    case Library::WriteNow::Outcome::Ok:
         return {};
-    if (error.nativeErrorCode() == QLatin1String("5"))   // SQLITE_BUSY
+    case Library::WriteNow::Outcome::Busy:
         return {false, QStringLiteral("The library is in use by another program."), true};
-    if (error.nativeErrorCode() == QLatin1String("2067"))   // SQLITE_CONSTRAINT_UNIQUE
+    case Library::WriteNow::Outcome::UniqueViolation:
         return {false, QStringLiteral("This file is already in the library.")};
-    return {false, error.text()};
+    case Library::WriteNow::Outcome::Failed:
+        break;
+    }
+    return {false, w.error};
 }
 } // namespace
 
