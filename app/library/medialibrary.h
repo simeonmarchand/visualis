@@ -30,10 +30,9 @@ class MediaStore;
 // rows, and deletes media, so those never race (#97 review). A save never waits for another
 // program's lock: it's retried on the next poll until a deadline (#88).
 //
-// This relies on one Visualis process per library (#109, the library lock). Within the process
-// it's safe because the GUI thread is the only place that publishes and deletes. Two processes
-// could still race: one could unlink a file the other reused, or save a row after the other
-// deleted its file (the cross-process findings H2, M4, and M5 of the #104 review).
+// This relies on one Visualis process per library, which the library lock (#109) enforces:
+// a second process can't open it, so the cross-process races in the #104 review (H2, M4, M5)
+// can't happen. Within the process, the GUI thread is the only place that publishes and deletes.
 class MediaLibrary : public QObject
 {
     Q_OBJECT
