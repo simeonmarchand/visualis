@@ -15,6 +15,8 @@
 #include <QTemporaryDir>
 #include <QtTest>
 
+#include "otherprogram.h"
+
 using namespace visualis;
 
 namespace {
@@ -421,6 +423,68 @@ private slots:
         QVERIFY(finished.wait(10'000));
         QVERIFY(m_media->assets().isEmpty());
         QVERIFY(filesUnder(oldMedia, "").isEmpty());
+    }
+
+    // #114: a file published while its save waits on another program's lock is removed when
+    // the operator switches library or quits, rather than left in media/ with no row.
+    void aFileWaitingToBeSavedIsRemovedOnSwitchOrQuit_data()
+    {
+        QTest::addColumn<bool>("quit");
+        QTest::newRow("switch") << false;
+        QTest::newRow("quit") << true;
+    }
+    void aFileWaitingToBeSavedIsRemovedOnSwitchOrQuit()
+    {
+        QFETCH(bool, quit);
+        QTemporaryDir in, elsewhere;
+        QImage image(8, 8, QImage::Format_RGB32);
+        image.fill(Qt::magenta);
+        QVERIFY(image.save(in.filePath("Cross.png")));
+        m_media->setLockWaitLimit(60'000);
+        const QString media = m_songs->library()->mediaPath();
+        OtherProgram other(m_songs->library()->folder());
+        QVERIFY(QSqlQuery(other.database()).exec("BEGIN IMMEDIATE"));
+        QSignalSpy finished(m_media.get(), &MediaLibrary::importFinished);
+        QVERIFY(m_media->importFiles({QUrl::fromLocalFile(in.filePath("Cross.png"))}));
+        QTRY_VERIFY_WITH_TIMEOUT(m_media->importProgress().contains("Waiting for the library"), 5'000);
+        QStringList published = filesUnder(media, "");
+        published.removeIf([](const QString &f) { return f.contains("/.partial/"); });
+        QCOMPARE(published.size(), 2);   // the file and its thumbnail, waiting for their row
+
+        if (quit) {
+            m_media.reset();
+        } else {
+            QVERIFY(m_songs->openLibrary(elsewhere.path()));
+            QVERIFY(finished.count() == 1 || finished.wait(5'000));
+        }
+        QVERIFY(QSqlQuery(other.database()).exec("ROLLBACK"));
+        QVERIFY2(filesUnder(media, "").isEmpty(), qPrintable(filesUnder(media, "").join('\n')));
+    }
+
+    // #114: a crash between publishing and saving leaves a file no row uses. Opening the
+    // library removes it, and keeps every file a row uses.
+    void openingALibraryRemovesFilesNoRowUses()
+    {
+        QTemporaryDir in, elsewhere;
+        QImage image(8, 8, QImage::Format_RGB32);
+        image.fill(Qt::blue);
+        QVERIFY(image.save(in.filePath("Cross.png")));
+        QVERIFY(importAndWait({QUrl::fromLocalFile(in.filePath("Cross.png"))}));
+        const QString folder = m_songs->library()->folder();
+        const QString media = m_songs->library()->mediaPath();
+        const QStringList kept = filesUnder(media, "");
+        const QString orphanHash(64, QChar('e'));
+        QVERIFY(QDir(media).mkpath(orphanHash.left(2)));
+        const QString orphan = writeFile(QDir(media).filePath(mediaFileFor(orphanHash, "mov")), "left by a crash");
+        const QString orphanThumb = writeFile(QDir(media).filePath(thumbnailFile(orphanHash)), "its thumbnail");
+        QVERIFY(!orphan.isEmpty() && !orphanThumb.isEmpty());
+
+        QVERIFY(m_songs->openLibrary(elsewhere.path()));
+        QVERIFY(m_songs->openLibrary(folder));
+        QVERIFY(!QFile::exists(orphan));
+        QVERIFY(!QFile::exists(orphanThumb));
+        QCOMPARE(filesUnder(media, ""), kept);
+        QCOMPARE(m_media->assets().size(), 1);
     }
 };
 

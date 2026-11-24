@@ -52,6 +52,20 @@ void removePartials(const MediaImportFile &f)
         QFile::remove(f.thumbnailPartial);
 }
 
+// For a file whose row will never be saved: its partials, and the file and thumbnail this
+// import published if it was the one to put them there (#114). No row uses those. The
+// hash wasn't in the library when the file was published, and only this thread saves rows.
+void removeUnsaved(const MediaImportFile &f, const QString &mediaFolder)
+{
+    removePartials(f);
+    if (!f.createdFile || !f.asset)
+        return;
+    for (const QString &relative : {f.asset->file, thumbnailFile(f.asset->contentHash)}) {
+        if (const QString path = containedPath(mediaFolder, relative); !path.isEmpty())
+            QFile::remove(path);
+    }
+}
+
 qint64 sizeLimit(MediaAsset::Kind kind)
 {
     return kind == MediaAsset::Kind::Video ? medialimits::kVideoBytes : medialimits::kImageBytes;
@@ -177,7 +191,10 @@ MediaLibrary::~MediaLibrary()
         return;
     // As SongLibrary: stop, give the file in hand a moment, and leave the worker to the
     // process exit if it's still busy. It holds nothing of this object's. Unsaved copies stay
-    // in .partial/ and are swept once stale.
+    // in .partial/ and are swept once stale; files published but still waiting for their row
+    // are removed now (#114).
+    for (const MediaImportFile &f : std::as_const(m_import->pending))
+        removeUnsaved(f, m_import->mediaFolder);
     m_import->state->stop = true;
     disconnect(m_import->thread, nullptr, this, nullptr);
     if (m_import->thread->wait(3000))
@@ -194,8 +211,9 @@ MediaLibrary *MediaLibrary::create(QQmlEngine *qml, QJSEngine *)
 void MediaLibrary::libraryChanged()
 {
     if (m_import) {
-        // Stop without waiting. Nothing it finishes is published: its copies are all still
-        // in .partial/ and are removed as they arrive (#97 review).
+        // Stop without waiting. Nothing more is published: what's left is removed as it
+        // arrives, along with any file published but still waiting for its row (#97
+        // review, #114).
         m_import->state->stop = true;
         m_import->discard = true;
         emit importProgressChanged();
@@ -205,6 +223,10 @@ void MediaLibrary::libraryChanged()
     if (library) {
         removeStalePartialCopies(library->mediaPath(), kStalePartial);
         m_store = std::make_unique<MediaStore>(*library);
+        // A crash between publishing and saving leaves a file no row uses (#114). Swept only
+        // when every hash could be read, since a missing one would cost a file in use.
+        if (const std::optional<QSet<QString>> inUse = m_store->contentHashes())
+            removeUnusedMediaFiles(library->mediaPath(), *inUse);
     }
     m_assets = m_store ? m_store->list() : QList<MediaAsset>{};
     emit assetsChanged();
@@ -276,7 +298,7 @@ bool MediaLibrary::saveOne(MediaImportFile &f)
 {
     SongLibrary::ImportSummary &summary = m_import->summary;
     if (m_import->discard || !m_store) {
-        removePartials(f);
+        removeUnsaved(f, m_import->mediaFolder);
         return true;
     }
     if (!f.skipped.isEmpty()) {

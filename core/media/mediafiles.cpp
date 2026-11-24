@@ -250,4 +250,38 @@ void removeStalePartialCopies(const QString &mediaFolder, std::chrono::seconds o
     }
 }
 
+void removeUnusedMediaFiles(const QString &mediaFolder, const QSet<QString> &inUse)
+{
+    const QString root = QFileInfo(mediaFolder).canonicalFilePath();
+    if (root.isEmpty())
+        return;
+    // Only a plain file inside the media folder: containedPath refuses a link, or a file in a
+    // linked folder.
+    auto removeIfContained = [&](const QString &relative) {
+        const QString path = containedPath(mediaFolder, relative);
+        if (!path.isEmpty() && QFileInfo(path).isFile())
+            QFile::remove(path);
+    };
+    static const QRegularExpression prefix(QStringLiteral("^[0-9a-f]{2}$"));
+    const QDir media(root);
+    for (const QFileInfo &sub : media.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot | QDir::Hidden)) {
+        if (sub.isSymLink() || !prefix.match(sub.fileName()).hasMatch())
+            continue;
+        for (const QFileInfo &f : QDir(sub.absoluteFilePath()).entryInfoList(QDir::Files | QDir::Hidden | QDir::System)) {
+            const QString hash = f.fileName().section('.', 0, 0);
+            const QString relative = sub.fileName() + '/' + f.fileName();
+            if (!f.isSymLink() && isValidMediaFile(relative, hash) && !inUse.contains(hash))
+                removeIfContained(relative);
+        }
+    }
+    const QFileInfo thumbs(media.filePath(QStringLiteral("thumbs")));
+    if (!thumbs.isDir() || thumbs.isSymLink())
+        return;
+    for (const QFileInfo &f : QDir(thumbs.absoluteFilePath()).entryInfoList(QDir::Files | QDir::Hidden | QDir::System)) {
+        const QString hash = f.fileName().section('.', 0, 0);
+        if (!f.isSymLink() && isValidHash(hash) && f.fileName() == hash + QLatin1String(".jpg") && !inUse.contains(hash))
+            removeIfContained(thumbnailFile(hash));
+    }
+}
+
 } // namespace visualis

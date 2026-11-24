@@ -183,6 +183,46 @@ private slots:
         QVERIFY(QFile::exists(fresh));
     }
 
+    // #114: a crash between publishing a file and saving its row leaves a file no row uses.
+    // Only those are swept: files and thumbnails named for a hash no row has. Never a link,
+    // never what a link points at, and nothing else in the folder.
+    void onlyMediaFilesNoRowUsesAreRemoved()
+    {
+        QTemporaryDir media, outside;
+        const QString used = sha256("used"), unused = sha256("unused"), linked = sha256("linked"), far = sha256("far");
+        const QDir dir(media.path());
+        for (const QString &sub : {used.left(2), unused.left(2), linked.left(2), QString("thumbs"), QString(".partial")})
+            QVERIFY(dir.mkpath(sub));
+        QVERIFY(!writeFile(dir.filePath(mediaFileFor(used, "mp4")), "in use").isEmpty());
+        QVERIFY(!writeFile(dir.filePath(thumbnailFile(used)), "its thumbnail").isEmpty());
+        QVERIFY(!writeFile(dir.filePath(mediaFileFor(unused, "mov")), "orphan").isEmpty());
+        QVERIFY(!writeFile(dir.filePath(mediaFileFor(unused, {})), "orphan without an extension").isEmpty());
+        QVERIFY(!writeFile(dir.filePath(thumbnailFile(unused)), "orphan thumbnail").isEmpty());
+        QVERIFY(!writeFile(dir.filePath(unused.left(2) + "/notes.txt"), "not Visualis's").isEmpty());
+        QVERIFY(!writeFile(dir.filePath("README.txt"), "not Visualis's").isEmpty());
+        QVERIFY(!writeFile(dir.filePath(".partial/copying.mov"), "in progress").isEmpty());
+        // A hash-named link to a file outside, and a hash-named folder that's a link outside.
+        const QString victim = writeFile(outside.filePath("victim.mp4"), "not the library's");
+        QVERIFY(QFile::link(victim, dir.filePath(mediaFileFor(linked, "mp4"))));
+        QVERIFY(QDir(outside.path()).mkpath("far"));
+        const QString farVictim = writeFile(outside.filePath("far/" + far + ".mp4"), "not the library's");
+        QVERIFY(QFile::link(outside.filePath("far"), dir.filePath(far.left(2))));   // the four prefixes differ
+
+        removeUnusedMediaFiles(media.path(), {used});
+
+        QVERIFY(QFile::exists(dir.filePath(mediaFileFor(used, "mp4"))));
+        QVERIFY(QFile::exists(dir.filePath(thumbnailFile(used))));
+        QVERIFY(!QFile::exists(dir.filePath(mediaFileFor(unused, "mov"))));
+        QVERIFY(!QFile::exists(dir.filePath(mediaFileFor(unused, {}))));
+        QVERIFY(!QFile::exists(dir.filePath(thumbnailFile(unused))));
+        QVERIFY(QFile::exists(dir.filePath(unused.left(2) + "/notes.txt")));
+        QVERIFY(QFile::exists(dir.filePath("README.txt")));
+        QVERIFY(QFile::exists(dir.filePath(".partial/copying.mov")));
+        QVERIFY(QFileInfo(dir.filePath(mediaFileFor(linked, "mp4"))).isSymLink());
+        QVERIFY(QFile::exists(victim));
+        QVERIFY(QFile::exists(farVictim));
+    }
+
     // #97 review, second pass (H1): a .partial that's a link elsewhere is neither swept nor
     // copied into.
     void aSymlinkedPartialFolderIsNeverUsed()
@@ -367,6 +407,17 @@ private slots:
         for (const MediaAsset &a : store.list())
             names << a.originalName;
         QCOMPARE(names, (QStringList{"aurora.mov", "Cross.png", "waves.mp4"}));
+    }
+
+    void contentHashesListsEveryRowsHash()
+    {
+        QTemporaryDir lib;
+        auto library = Library::open(lib.path()).library;
+        MediaStore store(*library);
+        QCOMPARE(store.contentHashes(), std::optional(QSet<QString>{}));
+        MediaAsset a = asset("waves.mp4"), b = asset("Cross.png");
+        QVERIFY(store.save(a).ok && store.save(b).ok);
+        QCOMPARE(store.contentHashes(), std::optional(QSet<QString>{a.contentHash, b.contentHash}));
     }
 
     // Deleting asks first when a service shows the asset.
