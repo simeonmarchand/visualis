@@ -300,8 +300,8 @@ private slots:
         QCOMPARE(m_services->load(s.id)->items.size(), 1);
 
         // Busy: neither is written.
-        auto other = Library::open(m_library->folder()).library;
-        QSqlQuery lock(other->database());
+        OtherProgram other(m_library->folder());
+        QSqlQuery lock(other.database());
         QVERIFY(lock.exec("BEGIN IMMEDIATE"));
         song.pcoSongId = "p-78";
         const ServiceStore::Result busy = m_services->applyWithoutWaiting(s.id, [&](const Service &current) {
@@ -310,7 +310,7 @@ private slots:
             return std::optional(ServiceStore::Decision{next, link});
         });
         QVERIFY(busy.busy);
-        QVERIFY(QSqlQuery(other->database()).exec("ROLLBACK"));
+        QVERIFY(QSqlQuery(other.database()).exec("ROLLBACK"));
         QCOMPARE(m_songs->load(m_songId)->pcoSongId, QStringLiteral("p-77"));
         QCOMPARE(m_services->load(s.id)->title, QStringLiteral("Imported"));
     }
@@ -355,8 +355,8 @@ private slots:
         QCOMPARE(m_services->load(s.id)->title, QStringLiteral("Sunday"));
 
         // Busy: refused at once, before `decide` runs, and nothing changes; free again, it saves.
-        auto other = Library::open(m_library->folder()).library;
-        QSqlQuery lock(other->database());
+        OtherProgram other(m_library->folder());
+        QSqlQuery lock(other.database());
         QVERIFY(lock.exec("BEGIN IMMEDIATE"));
         bool decided = false;
         QElapsedTimer took;
@@ -371,7 +371,7 @@ private slots:
         QVERIFY(busy.busy);
         QVERIFY(!decided);
         QVERIFY2(took.elapsed() < Library::kBusyTimeoutMs / 2, qPrintable(QString("waited %1 ms").arg(took.elapsed())));
-        QVERIFY(QSqlQuery(other->database()).exec("ROLLBACK"));
+        QVERIFY(QSqlQuery(other.database()).exec("ROLLBACK"));
         QCOMPARE(m_services->load(s.id)->title, QStringLiteral("Sunday"));
         QVERIFY(m_services->applyWithoutWaiting(s.id, rename).ok);
         QCOMPARE(m_services->load(s.id)->title, QStringLiteral("Evening"));

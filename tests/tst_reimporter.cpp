@@ -24,6 +24,8 @@
 #include <utility>
 #include <QtTest>
 
+#include "otherprogram.h"
+
 using namespace visualis;
 using namespace visualis::testing;
 
@@ -184,9 +186,8 @@ private slots:
         PlanImporter importer;
         const QString id = readyReimport(songs, server, importer);
 
-        auto other = Library::open(folder).library;   // stands in for another program
-        QVERIFY(other);
-        QSqlQuery lock(other->database());
+        OtherProgram other(folder);   // stands in for another program
+        QSqlQuery lock(other.database());
         QVERIFY(lock.exec("BEGIN IMMEDIATE"));
         QSignalSpy reimported(&importer, &PlanImporter::reimported);
         QElapsedTimer clock;
@@ -195,7 +196,7 @@ private slots:
         QVERIFY2(clock.elapsed() < Library::kBusyTimeoutMs / 2, "Apply waited on the lock");
         QVERIFY(importer.busy());
         QVERIFY(importer.status().contains("Waiting for the library"));
-        QTimer::singleShot(300, this, [&] { QSqlQuery(other->database()).exec("ROLLBACK"); });
+        QTimer::singleShot(300, this, [&] { QSqlQuery(other.database()).exec("ROLLBACK"); });
         QVERIFY(idle(importer));
         QCOMPARE(reimported.size(), 1);
         QCOMPARE(byPco(*ServiceStore(*songs.library()).load(QUuid::fromString(id)), "9002")->title, QStringLiteral("Worship Set"));
@@ -211,8 +212,8 @@ private slots:
         const QString id = readyReimport(songs, server, importer);
         const Service before = *ServiceStore(*songs.library()).load(QUuid::fromString(id));
 
-        auto other = Library::open(folder).library;
-        QSqlQuery lock(other->database());
+        OtherProgram other(folder);
+        QSqlQuery lock(other.database());
         QVERIFY(lock.exec("BEGIN IMMEDIATE"));
         importer.setLockWaitLimit(600);
         QSignalSpy reimported(&importer, &PlanImporter::reimported);
@@ -221,7 +222,7 @@ private slots:
         QCOMPARE(reimported.size(), 0);
         QVERIFY2(importer.status().contains("kept the library busy"), qPrintable(importer.status()));
         QVERIFY(importer.reimportServiceId().isEmpty());
-        QVERIFY(QSqlQuery(other->database()).exec("ROLLBACK"));
+        QVERIFY(QSqlQuery(other.database()).exec("ROLLBACK"));
         QCOMPARE(*ServiceStore(*songs.library()).load(QUuid::fromString(id)), before);
     }
 
