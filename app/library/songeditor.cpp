@@ -12,6 +12,8 @@
 #include <QLoggingCategory>
 #include <QQmlEngine>
 
+#include <algorithm>
+
 using namespace visualis;
 
 Q_LOGGING_CATEGORY(lcSongEditor, "visualis.songs.editor")
@@ -389,17 +391,27 @@ QVariantMap SongEditor::slideTransition() const
     const QList<QJsonObject> selected = selectedOverrides();
     if (selected.isEmpty())
         return {};
+    return transitionToJson(effectiveTransition(songTemplate().transitions.content, {selected.first()})).toVariantMap();
+}
+
+bool SongEditor::slideTransitionOverridden() const
+{
+    const QList<QJsonObject> selected = selectedOverrides();
+    return std::any_of(selected.cbegin(), selected.cend(), overrides::overridesTransition);
+}
+
+bool SongEditor::slideTransitionMixed() const
+{
+    const QList<QJsonObject> selected = selectedOverrides();
     const Transition content = songTemplate().transitions.content;
-    const Transition first = effectiveTransition(content, {selected.first()});
-    bool overridden = false, mixed = false;
-    for (const QJsonObject &o : selected) {
-        overridden = overridden || overrides::overridesTransition(o);
-        mixed = mixed || effectiveTransition(content, {o}) != first;
-    }
-    QVariantMap out = transitionToJson(first).toVariantMap();
-    out.insert("overridden", overridden);
-    out.insert("mixed", mixed);
-    return out;
+    return std::any_of(selected.cbegin(), selected.cend(), [&](const QJsonObject &o) {
+        return effectiveTransition(content, {o}) != effectiveTransition(content, {selected.first()});
+    });
+}
+
+int SongEditor::maxTransitionMs()
+{
+    return templatelimits::kMaxTransitionMs;
 }
 
 void SongEditor::editSelected(const std::function<QString(QJsonObject &)> &edit)
@@ -471,9 +483,7 @@ void SongEditor::resetSlides()
 
 void SongEditor::setSlideTransition(const QString &kind, int ms)
 {
-    QStringList warnings;
-    const Transition t = applyTransition({}, {{"kind", kind}, {"ms", ms}}, QStringLiteral("transition"), &warnings);
-    editSelected([&](QJsonObject &o) { return warnings.isEmpty() ? overrides::setTransition(o, t) : warnings.first(); });
+    editSelected([&](QJsonObject &o) { return overrides::setTransition(o, {{"kind", kind}, {"ms", ms}}); });
 }
 
 void SongEditor::resetSlideTransition()

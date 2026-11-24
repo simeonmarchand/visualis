@@ -32,7 +32,9 @@ The method is the P1 benchmarks' (`spikes/output/src/framestats.cpp`): `frameSwa
 | Video, 2 | 579 | 0 | 19.6 ms | 349 | 0 | 19.6 ms |
 | Video, 3 | 580 | 0 | 19.9 ms | 349 | 0 | 19.8 ms |
 
-That's 2 late intervals in about 5,560, each in a different run, which is the same rate the P1 windowed runs saw with no video at all (2 in 25 s). The fades don't add dropped frames. A 500 ms fade had at least 28 counted intervals out of a possible 29 at 60 Hz.
+A seventh run, after the idle layer was hidden (no second shadow pass), had 0 late in 576 and 349.
+
+That's 2 late intervals in about 5,560 for the first six, each in a different run, which is the same rate the P1 windowed runs saw with no video at all (2 in 25 s). The fades don't add dropped frames. A 500 ms fade had at least 28 counted intervals out of a possible 29 at 60 Hz.
 
 ## Findings
 

@@ -57,9 +57,10 @@ void resetAll(QJsonObject &overrides);
 // A service item's template; a null id removes the choice.
 void setTemplate(QJsonObject &overrides, const QUuid &templateId);
 
-// The text's transition, on a slide or an item. Empty when set; otherwise why not (a length
-// out of range), and `overrides` is unchanged. Keys Visualis doesn't know inside it stay.
-QString setTransition(QJsonObject &overrides, const Transition &transition);
+// Sets the text's transition, on a slide or an item, from `transition` ({"kind", "ms"}, either
+// alone). Empty when set; otherwise why not (a kind this version doesn't know, a length out of
+// range), and `overrides` is unchanged. Keys Visualis doesn't know inside it stay.
+QString setTransition(QJsonObject &overrides, const QJsonObject &transition);
 void resetTransition(QJsonObject &overrides);
 bool overridesTransition(const QJsonObject &overrides);
 

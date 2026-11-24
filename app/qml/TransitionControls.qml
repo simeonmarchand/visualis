@@ -14,6 +14,7 @@ RowLayout {
     property var transition: ({kind: "cut", ms: 300})
     property bool overridden: false
     property bool mixed: false
+    required property int maxMs
 
     signal edited(string kind, int ms)
     signal resetRequested()
@@ -38,7 +39,7 @@ RowLayout {
         objectName: "transitionMs"
         enabled: kind.currentValue === "fade"
         from: 0
-        to: 10000   // templatelimits::kMaxTransitionMs
+        to: controls.maxMs
         stepSize: 50
         editable: true
         value: controls.transition.ms ?? 300

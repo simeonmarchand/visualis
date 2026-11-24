@@ -314,7 +314,7 @@ Window {
                     Button {
                         objectName: "resetSlides"
                         text: "Reset all"
-                        enabled: editor.overriddenProperties.length > 0 || (editor.slideTransition.overridden ?? false)
+                        enabled: editor.overriddenProperties.length > 0 || editor.slideTransitionOverridden
                         onClicked: editor.resetSlides()
                     }
                     Button { text: "Done"; onClicked: editor.clearSelection() }
@@ -335,9 +335,10 @@ Window {
                         TransitionControls {
                             objectName: "slideTransition"
                             label: "Transition"
+                            maxMs: editor.maxTransitionMs
                             transition: editor.slideTransition
-                            overridden: editor.slideTransition.overridden ?? false
-                            mixed: editor.slideTransition.mixed ?? false
+                            overridden: editor.slideTransitionOverridden
+                            mixed: editor.slideTransitionMixed
                             onEdited: (kind, ms) => editor.setSlideTransition(kind, ms)
                             onResetRequested: editor.resetSlideTransition()
                         }

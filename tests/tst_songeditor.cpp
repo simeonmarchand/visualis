@@ -391,11 +391,12 @@ private slots:
         QVERIFY(m_templates->save(t).ok);
         m_editor->setTemplateId(idText(t.id));
         m_editor->selectSlide(slideKey(2), false);
-        QCOMPARE(m_editor->slideTransition(), (QVariantMap{{"kind", "fade"}, {"ms", 400}, {"overridden", false}, {"mixed", false}}));
+        QCOMPARE(m_editor->slideTransition(), (QVariantMap{{"kind", "fade"}, {"ms", 400}}));
+        QVERIFY(!m_editor->slideTransitionOverridden());
         m_editor->setSlideTransition("cut", 400);
         QVERIFY(m_editor->warnings().isEmpty());
         QCOMPARE(m_editor->slideTransition()["kind"].toString(), QStringLiteral("cut"));
-        QVERIFY(m_editor->slideTransition()["overridden"].toBool());
+        QVERIFY(m_editor->slideTransitionOverridden());
         QCOMPARE(previewSlide(2)["content"].value<Content>().transition.kind, TransitionKind::Cut);
         QCOMPARE(previewSlide(1)["content"].value<Content>().transition.kind, TransitionKind::Fade);
         QCOMPARE(previewSlide(2)["overrides"].toInt(), 1);
@@ -403,11 +404,11 @@ private slots:
         QCOMPARE(storedOverride(2), (QJsonObject{{"transition", QJsonObject{{"kind", "cut"}, {"ms", 400}}}}));
 
         m_editor->selectSlide(slideKey(1), true);
-        QVERIFY(m_editor->slideTransition()["mixed"].toBool());
+        QVERIFY(m_editor->slideTransitionMixed());
         m_editor->setSlideTransition("fade", 60'000);   // too long: refused for both
         QVERIFY(!m_editor->warnings().isEmpty());
         m_editor->resetSlideTransition();
-        QVERIFY(!m_editor->slideTransition()["overridden"].toBool());
+        QVERIFY(!m_editor->slideTransitionOverridden());
         QVERIFY(m_editor->flush());
         QCOMPARE(storedOverride(2), QJsonObject());
     }
@@ -620,7 +621,7 @@ private slots:
         QCOMPARE(windowEditor->slideTransition()["kind"].toString(), QStringLiteral("fade"));
         QTRY_VERIFY(item(transition, "resetTransition") && item(transition, "resetTransition")->isVisible());
         QTest::mouseClick(editorWindow, Qt::LeftButton, {}, centre(item(transition, "resetTransition")));
-        QTRY_VERIFY(!windowEditor->slideTransition()["overridden"].toBool());
+        QTRY_VERIFY(!windowEditor->slideTransitionOverridden());
 
         if (const QString dir = qEnvironmentVariable("VISUALIS_SNAPSHOT_DIR"); !dir.isEmpty()) {
             windowEditor->setSlideProperty("weight", 800);

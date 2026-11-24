@@ -80,12 +80,12 @@ private slots:
         overrides::setTemplate(o, QUuid::createUuid());
         overrides::setTemplate(o, QUuid());
         QCOMPARE(o, parse("{'later': 1, 'regions': {'main': {'glow': true, 'shadow': {'spread': 2}}, 'other': {'x': 1}}}"));
-        overrides::setTransition(o, {TransitionKind::Fade, 400});
+        overrides::setTransition(o, parse("{'kind': 'fade', 'ms': 400}"));
         overrides::resetAll(o);
         QCOMPARE(o, parse("{'later': 1}"));
 
         QJsonObject t = parse("{'transition': {'kind': 'cut', 'ms': 0, 'easing': 'outCubic'}}");
-        QCOMPARE(overrides::setTransition(t, {TransitionKind::Fade, 500}), QString());
+        QCOMPARE(overrides::setTransition(t, parse("{'kind': 'fade', 'ms': 500}")), QString());
         QCOMPARE(t, parse("{'transition': {'kind': 'fade', 'ms': 500, 'easing': 'outCubic'}}"));
     }
 
@@ -100,7 +100,7 @@ private slots:
         QCOMPARE(overrides::overriddenProperties(o, "main"), (QStringList{"color", "frame.x", "shadow.opacity"}));
         QCOMPARE(overrides::overriddenProperties(o, "other"), QStringList{"weight"});
         QCOMPARE(overrides::propertyCount(o), 4);   // in every region
-        overrides::setTransition(o, {TransitionKind::Cut, 300});
+        overrides::setTransition(o, parse("{'kind': 'cut'}"));
         QCOMPARE(overrides::propertyCount(o), 5);   // and the transition
         // Unknown keys stored alongside aren't properties.
         o = parse("{'regions': {'main': {'glow': true, 'shadow': {'spread': 2, 'blur': 0.1}}}}");
@@ -122,18 +122,19 @@ private slots:
         const QJsonObject original = parse("{'regions': {'main': {'color': '#ffcc00'}}}");
         QJsonObject o = original;
         QVERIFY(!overrides::overridesTransition(o));
-        QCOMPARE(overrides::setTransition(o, {TransitionKind::Fade, 450}), QString());
+        QCOMPARE(overrides::setTransition(o, parse("{'kind': 'fade', 'ms': 450}")), QString());
         QVERIFY(overrides::overridesTransition(o));
         QCOMPARE(o, parse("{'regions': {'main': {'color': '#ffcc00'}}, 'transition': {'kind': 'fade', 'ms': 450}}"));
         overrides::resetTransition(o);
         QCOMPARE(o, original);
     }
 
-    void aTransitionLengthOutOfRangeIsRefused()
+    void anInvalidTransitionIsRefused()
     {
         QJsonObject o;
-        QVERIFY(!overrides::setTransition(o, {TransitionKind::Fade, -1}).isEmpty());
-        const QString why = overrides::setTransition(o, {TransitionKind::Fade, 60'000});
+        QVERIFY(!overrides::setTransition(o, parse("{'kind': 'fade', 'ms': -1}")).isEmpty());
+        QVERIFY(!overrides::setTransition(o, parse("{'kind': 'wipe'}")).isEmpty());   // not a kind this version has
+        const QString why = overrides::setTransition(o, parse("{'ms': 60000}"));
         QVERIFY2(why.contains("ms"), qPrintable(why));
         QCOMPARE(o, QJsonObject());
     }
@@ -147,7 +148,7 @@ private slots:
         t.transitions.content = {TransitionKind::Fade, 400};
         Song song = oneSlideSong(t.id);
         song.groups[0].fitSlideOverrides();
-        QCOMPARE(overrides::setTransition(song.groups[0].slideOverrides[1], {TransitionKind::Cut, 300}), QString());
+        QCOMPARE(overrides::setTransition(song.groups[0].slideOverrides[1], parse("{'kind': 'cut', 'ms': 300}")), QString());
 
         auto transition = [&](int slide) { return liveSong(song, {}, templateSet({t})).slides[slide].content.transition; };
         QCOMPARE(transition(0), (Transition{TransitionKind::Fade, 400}));

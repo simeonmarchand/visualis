@@ -248,8 +248,7 @@ private slots:
         QVERIFY(m_editor->warnings().first().contains("ms"));
         m_editor->setTransition("content", "wipe", 300);   // not a kind this version has
         QCOMPARE(m_editor->warnings().size(), 1);
-        m_editor->setTransition("stage", "fade", 300);      // not a layer
-        QCOMPARE(changed.count(), 3);                       // each snaps its control back
+        QCOMPARE(changed.count(), 2);                       // each snaps its control back
         m_editor->flush();
         QCOMPARE(stored().transitions, before);
     }

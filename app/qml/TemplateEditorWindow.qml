@@ -274,14 +274,22 @@ Window {
                 TransitionControls {
                     objectName: "contentTransition"
                     label: "Text"
+                    maxMs: editor.maxTransitionMs
                     transition: editor.transitions.content
                     onEdited: (kind, ms) => editor.setTransition("content", kind, ms)
                 }
                 TransitionControls {
                     objectName: "backgroundTransition"
                     label: "Background"
+                    maxMs: editor.maxTransitionMs
                     transition: editor.transitions.background
                     onEdited: (kind, ms) => editor.setTransition("background", kind, ms)
+                }
+                Label {
+                    Layout.fillWidth: true
+                    text: "Saved with the template. The outputs don't use the background transition yet: clearing the background still fades."
+                    wrapMode: Text.WordWrap
+                    color: "#8b8f96"
                 }
             }
         }

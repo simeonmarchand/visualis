@@ -56,9 +56,12 @@ class SongEditor : public QObject
     // value differs between the selected slides.
     Q_PROPERTY(QStringList overriddenProperties READ overriddenProperties NOTIFY selectionChanged)
     Q_PROPERTY(QStringList mixedProperties READ mixedProperties NOTIFY selectionChanged)
-    // The first selected slide's text transition (#96) as it shows: {kind, ms, overridden,
-    // mixed}, overridden when any selected slide overrides it, mixed when they differ.
+    // The first selected slide's text transition (#96) as it shows, {kind, ms}; whether any
+    // selected slide overrides it, and whether they differ.
     Q_PROPERTY(QVariantMap slideTransition READ slideTransition NOTIFY selectionChanged)
+    Q_PROPERTY(bool slideTransitionOverridden READ slideTransitionOverridden NOTIFY selectionChanged)
+    Q_PROPERTY(bool slideTransitionMixed READ slideTransitionMixed NOTIFY selectionChanged)
+    Q_PROPERTY(int maxTransitionMs READ maxTransitionMs CONSTANT)
     // The template it shows with (#94); the built-in's id when it has none of its own.
     Q_PROPERTY(QString templateId READ templateId WRITE setTemplateId NOTIFY changed)
     Q_PROPERTY(QStringList warnings READ warnings NOTIFY changed)
@@ -94,6 +97,9 @@ public:
     QStringList overriddenProperties() const;
     QStringList mixedProperties() const;
     QVariantMap slideTransition() const;
+    bool slideTransitionOverridden() const;
+    bool slideTransitionMixed() const;
+    static int maxTransitionMs();
     QStringList warnings() const { return m_warnings; }
     QString error() const { return m_error; }
 

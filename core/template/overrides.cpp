@@ -126,13 +126,14 @@ void setTemplate(QJsonObject &overrides, const QUuid &templateId)
         overrides["template"] = templateId.toString(QUuid::WithoutBraces);
 }
 
-QString setTransition(QJsonObject &overrides, const Transition &transition)
+QString setTransition(QJsonObject &overrides, const QJsonObject &transition)
 {
-    if (transition.ms < 0 || transition.ms > templatelimits::kMaxTransitionMs)
-        return QStringLiteral("A transition can be 0 to %1 ms long.").arg(templatelimits::kMaxTransitionMs);
+    QStringList warnings;
+    applyTransition(Transition{}, transition, QStringLiteral("transition"), &warnings);
+    if (!warnings.isEmpty())
+        return warnings.first();
     QJsonObject t = overrides.value("transition").toObject();
-    const QJsonObject json = transitionToJson(transition);
-    for (auto it = json.begin(); it != json.end(); ++it)
+    for (auto it = transition.begin(); it != transition.end(); ++it)
         t[it.key()] = *it;
     overrides["transition"] = t;
     return {};

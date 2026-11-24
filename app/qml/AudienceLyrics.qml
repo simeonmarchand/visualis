@@ -21,14 +21,20 @@ Item {
     readonly property string text: root.incomingText()
     property bool showingA: true
 
+    readonly property bool cleared: root.showsLive && LiveState.textCleared
+
+    // Functions, not bindings, so sync() always reads what `content` holds now.
+    function mainRegion() {
+        return root.content.regions.main ?? root.blank
+    }
     function incomingText() {
-        return root.showsLive && LiveState.textCleared ? "" : (root.content.regions.main ?? root.blank).text
+        return root.cleared ? "" : root.mainRegion().text
     }
 
     // Brings the Text items up to date with `content`. Reads everything from `content` itself,
     // so it doesn't matter which change notified first.
     function sync() {
-        const region = root.content.regions.main ?? root.blank
+        const region = root.mainRegion()
         const text = root.incomingText()
         const shown = root.showingA ? layerA : layerB
         if (text === shown.text) {
@@ -56,10 +62,11 @@ Item {
     }
 
     onContentChanged: sync()
-    onTextChanged: sync()
+    onClearedChanged: sync()
+    // Shown at once: a window opening (or reopening) shows what's live without a fade.
     Component.onCompleted: {
         layerA.text = incomingText()
-        layerA.textStyle = (content.regions.main ?? blank).style
+        layerA.textStyle = mainRegion().style
     }
 
     ParallelAnimation {
@@ -78,6 +85,7 @@ Item {
         property regionStyle textStyle
         property real lyricOpacity
         anchors.fill: parent
+        visible: lyricOpacity > 0   // the idle layer's shadow pass costs nothing
 
         Item {
             id: frame
