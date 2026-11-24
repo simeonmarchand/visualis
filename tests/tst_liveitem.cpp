@@ -194,7 +194,7 @@ private slots:
         ServiceItem item = songItem(song, mainStyle({{"weight", 800}}));
         item.customSequence = {"Intro", "Verse 1", "Chorus", "Ending"};   // adds blank groups and an arrangement
         const LiveItem live = liveItem(item, song, templateSet({}));
-        QCOMPARE(live.source, item);
+        QCOMPARE(live.source, std::optional(item));
         QCOMPARE(live.slides.size(), 5);
         QCOMPARE(liveItem(item, live.song, templateSet({})), live);
     }

@@ -70,7 +70,7 @@ void SongLibrary::refreshLive()
 {
     QQmlEngine *engine = qmlEngine(this);
     auto *live = engine ? engine->singletonInstance<LiveState *>("Visualis.Ui", "LiveState") : nullptr;
-    if (!live || !live->itemId().isNull() || live->song().id.isNull())
+    if (!live || live->item().source || live->song().id.isNull())
         return;   // nothing from the library is live
     live->update(liveSong(live->song(), live->arrangementId(), templates()));   // the song as it went live
 }

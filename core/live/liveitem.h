@@ -62,8 +62,8 @@ struct LiveSlide {
 };
 
 struct LiveItem {
-    QUuid id;            // the service item's; null for a song taken live from the library
-    ServiceItem source;  // the service item it came from, overrides and all; empty for a library song
+    // The service item it came from, overrides and all; none for a song taken live from the library.
+    std::optional<ServiceItem> source;
     Song song;
     QUuid arrangement;
     QList<LiveSlide> slides;
@@ -76,6 +76,7 @@ struct LiveItem {
 
     bool operator==(const LiveItem &) const = default;
 
+    QUuid id() const { return source ? source->id : QUuid(); }   // the service item's
     QUuid templateId() const { return tmpl.id; }
 };
 

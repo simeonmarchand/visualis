@@ -93,7 +93,6 @@ LiveItem liveSong(const Song &song, const QUuid &arrangement, const TemplateSet 
 LiveItem liveItem(const ServiceItem &item, const std::optional<Song> &song, const TemplateSet &templates)
 {
     LiveItem live;
-    live.id = item.id;
     live.source = item;
     switch (item.kind) {
     case ServiceItem::Kind::Song:

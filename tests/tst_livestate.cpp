@@ -578,7 +578,7 @@ private slots:
         LiveState live;
         live.restore(items[3], 6, true, false, id);
         QCOMPARE(live.itemIndex(), -1);   // the service isn't loaded yet
-        QCOMPARE(live.itemIdString(), items[3].id.toString(QUuid::WithoutBraces));
+        QCOMPARE(live.itemIdString(), items[3].id().toString(QUuid::WithoutBraces));
         QVERIFY(!live.next());
         live.setService(id, items);
         QCOMPARE(live.itemIndex(), 3);

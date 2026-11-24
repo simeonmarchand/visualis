@@ -118,9 +118,9 @@ public:
     bool textCleared() const { return m_textCleared; }
     bool backgroundCleared() const { return m_backgroundCleared; }
     QUuid serviceId() const { return m_serviceId; }
-    QUuid itemId() const { return m_live.id; }
+    QUuid itemId() const { return m_live.id(); }
     QString serviceIdString() const { return braceless(m_serviceId); }
-    QString itemIdString() const { return braceless(m_live.id); }
+    QString itemIdString() const { return braceless(m_live.id()); }
     int itemIndex() const;
 
 signals:

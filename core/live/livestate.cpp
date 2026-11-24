@@ -54,8 +54,9 @@ void LiveState::setService(const QUuid &id, const QList<LiveItem> &items)
 
 bool LiveState::update(const LiveItem &item)
 {
-    const bool live = m_live.id.isNull() ? item.id.isNull() && !item.song.id.isNull() && item.song.id == m_live.song.id
-                                         : item.id == m_live.id;
+    // A service item by its id, a library song by its song's.
+    const bool live = m_live.source ? item.id() == m_live.id()
+                                    : !item.source && !item.song.id.isNull() && item.song.id == m_live.song.id;
     if (!live)
         return false;
     replaceLive(item);
@@ -72,10 +73,10 @@ void LiveState::replaceLive(const LiveItem &item)
 
 int LiveState::itemIndex() const
 {
-    if (m_live.id.isNull())
+    if (!m_live.source)
         return -1;
     for (int i = 0; i < m_items.size(); ++i) {
-        if (m_items[i].id == m_live.id)
+        if (m_items[i].id() == m_live.id())
             return i;
     }
     return -1;
@@ -108,7 +109,7 @@ bool LiveState::next()
         return moveTo(m_index + 1);
     const int item = itemIndex();
     // Nothing live yet: Next starts the service.
-    if (item < 0 && (!m_live.id.isNull() || !m_live.slides.isEmpty()))
+    if (item < 0 && (m_live.source || !m_live.slides.isEmpty()))
         return false;
     for (int i = item + 1; i < m_items.size(); ++i) {
         if (!m_items[i].slides.isEmpty()) {
