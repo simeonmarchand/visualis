@@ -499,6 +499,42 @@ private slots:
         QVERIFY(!m_services->items()[0].toMap()["warnings"].toString().isEmpty());
     }
 
+    // #93: a stored template that can't be read is left out and logged; what uses it shows
+    // in the built-in, never blank.
+    void anUnreadableTemplateFallsBackToTheBuiltIn()
+    {
+        auto *templates = m_engine->singletonInstance<TemplateLibrary *>("Visualis.Ui", "TemplateLibrary");
+        Template t = builtInLyricsTemplate();
+        t.id = QUuid();
+        t.name = "Damaged";
+        t.regions[0].style.fontFamily = "Avenir";
+        QVERIFY(templates->save(t));
+        const QStringList ids = makeSongs({"Amazing Grace"});
+        Song song = *m_songs->loadSong(QUuid::fromString(ids[0]));
+        song.defaultTemplate = t.id;
+        QString error;
+        QVERIFY2(m_songs->saveSong(song, &error), qPrintable(error));
+
+        {
+            QSqlQuery q(m_songs->library()->database());
+            q.prepare("UPDATE template SET body = '{not json' WHERE id = ?");
+            q.addBindValue(t.id.toString(QUuid::WithoutBraces));
+            QVERIFY2(q.exec() && q.numRowsAffected() == 1, qPrintable(q.lastError().text()));
+        }
+        const QString folder = m_songs->folder();   // a copy: openLibrary closes the old library first
+        QTest::ignoreMessage(QtWarningMsg, QRegularExpression("template \"Damaged\":"));
+        QVERIFY(m_songs->openLibrary(folder));   // re-read, as at startup
+
+        QVERIFY(!templates->templates().contains(t.id));
+        QVERIFY(m_services->createService("Sunday"));
+        QTest::ignoreMessage(QtWarningMsg, QRegularExpression("built-in"));
+        QVERIFY(m_services->addSong(ids[0]));
+        QVERIFY(m_live->goToItem(0, 0));
+        QCOMPARE(m_live->content().regions.value("main").style.fontFamily,
+                 builtInLyricsTemplate().regions[0].style.fontFamily);
+        QVERIFY(m_services->items()[0].toMap()["warnings"].toString().contains("built-in"));
+    }
+
     // #93: the grid's tiles draw the slide's content, so a preview matches the output.
     void previewTilesRenderThroughTheSlidesTemplate()
     {
