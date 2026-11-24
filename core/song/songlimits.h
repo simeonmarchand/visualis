@@ -2,7 +2,11 @@
 
 #include "song.h"
 
+#include <QByteArray>
+#include <QJsonObject>
+#include <QSet>
 #include <QString>
+#include <QStringList>
 
 namespace visualis {
 
@@ -19,11 +23,29 @@ constexpr int kArrangements = 100;
 constexpr int kSteps = 1'000;             // per arrangement, or a played sequence
 constexpr int kCharactersPerSlide = 10'000;
 constexpr int kPlayedSlides = 10'000;     // one arrangement expanded (songSlides)
+// Slide overrides as compact JSON (#95). One with every property set is under 1 KB.
+constexpr int kSlideOverrideBytes = 16 * 1024;
+constexpr int kOverrideBytes = 1024 * 1024;   // all of a song's together
 } // namespace songlimits
 
 // Why the song is over a limit, for the operator ("too many groups: 40,000; the limit is
 // 500"), or empty when it's within all of them. Cheap: it never expands the song.
 QString songLimitError(const Song &song);
+
+// Slide overrides are bounded on write: SongStore refuses a song for this. What a library
+// already holds (stored before the limits) is kept as stored and may be written back
+// unchanged: an override in `stored.oversized`, and a total up to `stored.total`. Rendering
+// leaves an oversized one out, and imports drop it (dropOversizedOverrides). Empty when
+// within them.
+struct StoredOverrides {
+    QSet<QByteArray> oversized;   // compact JSON; may hold small ones too
+    qint64 total = 0;
+};
+QString overrideLimitError(const Song &song, const StoredOverrides &stored = {});
+bool slideOverrideTooLarge(const QJsonObject &override);
+// Empties each slide override over kSlideOverrideBytes, and all of them if the song's are
+// still over kOverrideBytes; one warning, for the operator, per drop.
+QStringList dropOversizedOverrides(Song &song);
 
 // The same wording for any one limit.
 QString limitError(const QString &what, qint64 count, int limit);

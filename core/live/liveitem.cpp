@@ -42,27 +42,25 @@ QList<QUuid> customSteps(Song &song, const QUuid &itemId, const QStringList &lab
 // item's overrides and then each slide's applied.
 void render(LiveItem &live, const TemplateSet &templates, const QUuid &wanted, const QJsonObject &itemOverrides)
 {
-    const QUuid id = wanted.isNull() ? builtInLyricsTemplateId() : wanted;
-    const auto found = templates.constFind(id);
-    // The text goes in "main": a template without one can't hold it.
-    const bool usable = found != templates.cend()
-        && std::any_of(found->regions.cbegin(), found->regions.cend(),
-                       [](const TextRegion &r) { return r.id == QStringLiteral("main"); });
-    const Template t = usable ? *found : builtInLyricsTemplate();
+    const TemplateChoice choice = chooseTemplate(templates, wanted);
+    const Template &t = choice.tmpl;
     QStringList warnings;
-    if (!usable) {
+    if (!choice.problem.isEmpty()) {
         live.templateFellBack = true;
-        warnings << (found == templates.cend()
-                         ? QStringLiteral("Its template isn't in the library, so it shows with the built-in \"%1\" template.").arg(t.name)
-                         : QStringLiteral("Its template \"%1\" has no lyrics region, so it shows with the built-in \"%2\" template.")
-                               .arg(found->name, t.name));
+        warnings << choice.problem;
     }
     live.tmpl = t;
     for (const SongSlide &s : songSlides(live.song, live.arrangement, &live.error)) {
         Content content;
         content.transition = t.transitions.content;
         const Group *group = live.song.group(s.groupId);
-        const QList<QJsonObject> layers{itemOverrides, group ? group->slideOverride(s.indexInGroup) : QJsonObject()};
+        QJsonObject slideOverride = group ? group->slideOverride(s.indexInGroup) : QJsonObject();
+        // A journal or file from before the limits (#95): the slide shows with the template's.
+        if (slideOverrideTooLarge(slideOverride)) {
+            warnings << QStringLiteral("A slide of \"%1\" has too much style, so it shows with the template's.").arg(s.groupLabel);
+            slideOverride = {};
+        }
+        const QList<QJsonObject> layers{itemOverrides, slideOverride};
         for (const TextRegion &region : t.regions) {
             content.regions.insert(region.id, {region.id == QStringLiteral("main") ? s.text : QString(),
                                                effectiveStyle(t, region.id, layers, &warnings).value_or(region.style)});
@@ -74,6 +72,20 @@ void render(LiveItem &live, const TemplateSet &templates, const QUuid &wanted, c
 }
 
 } // namespace
+
+TemplateChoice chooseTemplate(const TemplateSet &templates, const QUuid &wanted)
+{
+    const QUuid id = wanted.isNull() ? builtInLyricsTemplateId() : wanted;
+    const auto found = templates.constFind(id);
+    // The text goes in "main": a template without one can't hold it.
+    if (found != templates.cend() && found->region(QStringLiteral("main")))
+        return {*found, {}};
+    const Template builtIn = builtInLyricsTemplate();
+    return {builtIn, found == templates.cend()
+                         ? QStringLiteral("Its template isn't in the library, so it shows with the built-in \"%1\" template.").arg(builtIn.name)
+                         : QStringLiteral("Its template \"%1\" has no lyrics region, so it shows with the built-in \"%2\" template.")
+                               .arg(found->name, builtIn.name)};
+}
 
 QVariantMap Content::regionMap() const
 {

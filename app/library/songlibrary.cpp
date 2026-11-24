@@ -446,6 +446,18 @@ bool SongLibrary::saveSong(Song &song, QString *error)
     return true;   // what's live stays as shown until the next go-live (#44)
 }
 
+SongStore::Result SongLibrary::saveSlideOverrides(Song &song, Library::Transaction::Lock lock)
+{
+    if (!m_store)
+        return {false, QStringLiteral("The song library isn't open.")};
+    const SongStore::Result r = m_store->saveSlideOverrides(song, lock);
+    if (r.ok && m_selected && m_selected->id == song.id) {
+        m_selected = song;
+        emit selectionChanged();
+    }
+    return r;
+}
+
 void SongLibrary::setReport(const QString &report)
 {
     m_report = report;

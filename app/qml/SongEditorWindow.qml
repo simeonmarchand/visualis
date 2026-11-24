@@ -7,12 +7,13 @@ import Visualis.Ui
 
 // Edit a song (#44, plan W3): title and credits, lyrics as text with "[Label]" headers and
 // blank-line slide breaks, its groups, its arrangements, and its template, with a preview
-// through that template. Every change saves at once.
+// through that template. Click preview slides (Command or Shift for more) to override the
+// template's style on just those (#95). Every change saves on its own.
 Window {
     id: window
     objectName: "songEditorWindow"
     title: editor.loaded ? "Edit: " + editor.title : "Edit song"
-    width: 1280
+    width: 1440
     height: 820
     minimumWidth: 960
     minimumHeight: 600
@@ -25,6 +26,8 @@ Window {
         raise()
         requestActivate()
     }
+
+    onClosing: editor.flush()
 
     SongEditor {
         id: editor
@@ -280,10 +283,62 @@ Window {
                     ScrollBar.vertical: ScrollBar {}
                     delegate: SlideTile {
                         required property var modelData
+                        required property int index
+                        objectName: "previewTile" + index
                         width: preview.cellWidth - 10
                         content: modelData.content
                         groupLabel: modelData.groupLabel
                         groupColor: modelData.groupColor
+                        isSelected: editor.selectedKeys.includes(modelData.key)
+                        overrideCount: modelData.overrides
+                        onClicked: modifiers => editor.selectSlide(modelData.key, (modifiers & (Qt.ControlModifier | Qt.MetaModifier | Qt.ShiftModifier)) !== 0)
+                    }
+                }
+            }
+
+            // The selected slides' style: what they override sticks, the rest follows the template.
+            ColumnLayout {
+                objectName: "slideStyle"
+                visible: editor.selectedKeys.length > 0
+                Layout.preferredWidth: 380
+                Layout.fillHeight: true
+                spacing: 8
+                RowLayout {
+                    Layout.fillWidth: true
+                    Label {
+                        Layout.fillWidth: true
+                        text: editor.selectedKeys.length === 1 ? "This slide's style" : editor.selectedKeys.length + " slides' style"
+                        color: "#d0d3d8"
+                        font.bold: true
+                    }
+                    Button {
+                        objectName: "resetSlides"
+                        text: "Reset all"
+                        enabled: editor.overriddenProperties.length > 0
+                        onClicked: editor.resetSlides()
+                    }
+                    Button { text: "Done"; onClicked: editor.clearSelection() }
+                }
+                Label {
+                    Layout.fillWidth: true
+                    text: "Changes here apply to the selected slides only. Highlighted fields override the template; ↺ puts one back."
+                    wrapMode: Text.WordWrap
+                    color: "#8b8f96"
+                }
+                ScrollView {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    contentWidth: availableWidth
+                    RegionStyleControls {
+                        width: parent.width
+                        style: editor.slideStyle
+                        regions: editor.regions
+                        regionId: editor.regionId
+                        overridden: editor.overriddenProperties
+                        mixed: editor.mixedProperties
+                        onRegionChosen: id => editor.regionId = id
+                        onEdited: (path, value) => editor.setSlideProperty(path, value)
+                        onResetRequested: path => editor.resetSlideProperty(path)
                     }
                 }
             }

@@ -219,6 +219,7 @@ SongJsonResult songFromJson(const QByteArray &json)
         if (s.defaultArrangement.isNull())
             return fail(QStringLiteral("the default arrangement \"%1\" isn't one of the song's arrangements").arg(def));
     }
+    r.warnings << dropOversizedOverrides(s);   // the rest of the song still imports
     r.song = s;
     return r;
 }

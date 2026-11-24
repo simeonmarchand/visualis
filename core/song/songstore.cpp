@@ -65,6 +65,29 @@ QString run(QSqlDatabase db, const QString &sql, const QVariantList &values, int
     return {};
 }
 
+// The song's slide overrides as the library has them now, so a write can carry one stored
+// before the limits (#95) without anything writing a new one.
+StoredOverrides storedOverrides(QSqlDatabase db, const QUuid &songId)
+{
+    StoredOverrides out;
+    if (songId.isNull())
+        return out;
+    QSqlQuery q(db);
+    q.prepare("SELECT slide_overrides FROM song_group WHERE song_id = ?");
+    q.addBindValue(key(songId));
+    q.exec();
+    while (q.next()) {
+        for (const QJsonObject &o : overridesFromJson(q.value(0))) {
+            if (o.isEmpty())
+                continue;
+            const QByteArray bytes = QJsonDocument(o).toJson(QJsonDocument::Compact);
+            out.total += bytes.size();
+            out.oversized.insert(bytes);
+        }
+    }
+    return out;
+}
+
 QList<QUuid> ids(QSqlDatabase db, const QString &sql, const QString &songId)
 {
     QList<QUuid> out;
@@ -124,6 +147,8 @@ SongStore::Result SongStore::save(Song &song)
     // Before anything else, so no caller (paste, the editor, an import) can make this thread
     // write an unbounded song (#83).
     if (QString tooBig = songLimitError(song); !tooBig.isEmpty())
+        return {false, tooBig};
+    if (QString tooBig = overrideLimitError(song, storedOverrides(m_library.database(), song.id)); !tooBig.isEmpty())
         return {false, tooBig};
     // Work on a copy so a failed save leaves the caller's song exactly as it was.
     Song s = song;
@@ -226,6 +251,41 @@ SongStore::Result SongStore::save(Song &song)
     if (const QString released = run(db, "RELEASE song_save", {}); !released.isEmpty())
         return fail(released);
     song = s;
+    return {};
+}
+
+SongStore::Result SongStore::saveSlideOverrides(Song &song, Library::Transaction::Lock lock)
+{
+    if (QString tooBig = songLimitError(song); !tooBig.isEmpty())
+        return {false, tooBig};
+    for (Group &g : song.groups)
+        g.fitSlideOverrides();   // the same song: fitted overrides compare equal
+    Library::Transaction t(m_library, lock);
+    if (!t.ok())
+        return {false, t.error(), t.busy()};
+    // Under the lock, against what's stored now.
+    if (QString tooBig = overrideLimitError(song, storedOverrides(m_library.database(), song.id)); !tooBig.isEmpty())
+        return {false, tooBig};
+    QSqlDatabase db = m_library.database();
+    const QDateTime now = QDateTime::currentDateTimeUtc();
+    auto fail = [&](const QString &error) { return Result{false, QStringLiteral("Couldn't save \"%1\": %2").arg(song.title, error)}; };
+    int rows = 0;
+    if (QString err = run(db, "UPDATE song SET updated_at = ? WHERE id = ?", {timestamp(now), key(song.id)}, &rows); !err.isEmpty())
+        return fail(err);
+    if (rows != 1)
+        return {false, QStringLiteral("\"%1\" isn't in the library.").arg(song.title)};
+    for (const Group &g : song.groups) {
+        // Only while its slides are the ones the overrides were made for.
+        if (QString err = run(db, "UPDATE song_group SET slide_overrides = ? WHERE id = ? AND song_id = ? AND slides = ?",
+                              {overridesJson(g.slideOverrides), key(g.id), key(song.id), slidesJson(g.slides)}, &rows);
+            !err.isEmpty())
+            return fail(err);
+        if (rows != 1)
+            return {false, QStringLiteral("\"%1\" changed in the library since it was opened; open it again.").arg(song.title)};
+    }
+    if (QString err = t.commit(); !err.isEmpty())
+        return fail(err);
+    song.updated = now;
     return {};
 }
 

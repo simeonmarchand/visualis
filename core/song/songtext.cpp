@@ -44,6 +44,44 @@ QStringList slidesAsEdited(const Group &g)
     return parsed.groups.size() == 1 ? parsed.groups[0].slides : QStringList();
 }
 
+// Gives `edited`, the group `was` after a text edit, the slide overrides of `was`, so each
+// follows its slide (see applyLyricsText). `wasText` is was's slides as the parser reads
+// them, to compare with edited's. Returns how many non-empty overrides found no slide.
+int remapSlideOverrides(const Group &was, QStringList wasText, Group &edited)
+{
+    if (wasText.size() != was.slides.size())
+        wasText = was.slides;   // can't line them up as parsed; compare as stored
+    const qsizetype count = edited.slides.size();
+    edited.slideOverrides = QList<QJsonObject>(count);
+    QList<bool> taken(wasText.size(), false);
+    QList<bool> placed(count, false);
+    // The same text, in order, so a reordered or repeated slide keeps its own.
+    for (qsizetype n = 0; n < count; ++n) {
+        for (qsizetype o = 0; o < wasText.size(); ++o) {
+            if (!taken[o] && wasText[o] == edited.slides[n]) {
+                edited.slideOverrides[n] = was.slideOverride(o);
+                taken[o] = placed[n] = true;
+                break;
+            }
+        }
+    }
+    // A typo fix: with as many slides as before, the rest match by position.
+    if (count == wasText.size()) {
+        for (qsizetype n = 0; n < count; ++n) {
+            if (!placed[n] && !taken[n]) {
+                edited.slideOverrides[n] = was.slideOverride(n);
+                taken[n] = true;
+            }
+        }
+    }
+    int lost = 0;
+    for (qsizetype o = 0; o < wasText.size(); ++o) {
+        if (!taken[o] && !was.slideOverride(o).isEmpty())
+            ++lost;
+    }
+    return lost;
+}
+
 } // namespace
 
 QString lyricsText(const Song &song)
@@ -99,15 +137,15 @@ LyricsEdit applyLyricsText(const Song &song, const QString &text)
             g.id = was.id;
             g.color = was.color;
             // A group whose text wasn't touched keeps its slides exactly as they were (the parser
-            // would trim them) and its slide overrides. Remapping edited text is #95's.
-            const bool hadOverrides = std::any_of(was.slideOverrides.cbegin(), was.slideOverrides.cend(),
-                                                  [](const QJsonObject &o) { return !o.isEmpty(); });
-            if (g.slides == slidesAsEdited(was)) {
+            // would trim them).
+            // Remapped first, so parsed text is compared with parsed text.
+            const QStringList wasEdited = slidesAsEdited(was);
+            const int lost = remapSlideOverrides(was, wasEdited, g);
+            if (g.slides == wasEdited)
                 g.slides = was.slides;
-                g.slideOverrides = was.slideOverrides;
-            }
-            else if (hadOverrides)
-                out.warnings << QStringLiteral("\"%1\"'s lyrics changed, so its per-slide style changes were dropped.").arg(g.label);
+            if (lost > 0)
+                out.warnings << QStringLiteral("\"%1\"'s slides changed, so the style changes of %2 %3 were dropped.")
+                                    .arg(g.label).arg(lost).arg(lost == 1 ? QStringLiteral("slide") : QStringLiteral("slides"));
         } else if (!song.arrangements.isEmpty()) {
             out.warnings << QStringLiteral("\"%1\" is new and isn't in any arrangement yet.").arg(g.label);
         }
@@ -122,6 +160,10 @@ LyricsEdit applyLyricsText(const Song &song, const QString &text)
             a.sequence.removeAll(old[o].id);
         if (arranged)
             out.warnings << QStringLiteral("\"%1\" was removed, and with it its places in the arrangements.").arg(old[o].label);
+        if (const auto styled = std::count_if(old[o].slideOverrides.cbegin(), old[o].slideOverrides.cend(),
+                                              [](const QJsonObject &so) { return !so.isEmpty(); }))
+            out.warnings << QStringLiteral("\"%1\" was removed, and with it the style changes of %2 %3.")
+                                .arg(old[o].label).arg(styled).arg(styled == 1 ? QStringLiteral("slide") : QStringLiteral("slides"));
     }
     return out;
 }

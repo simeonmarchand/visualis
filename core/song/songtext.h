@@ -22,12 +22,17 @@ struct LyricsEdit {
 
 // Applies edited lyrics text to a song. Slides are taken exactly as written (no automatic
 // splitting). Groups keep their ids and colors, so arrangements stay intact:
-//  - a header with an existing group's label is that group (ignoring case), and keeps its
-//    per-slide overrides if its slides are unchanged (otherwise they're dropped, with a
-//    warning, until #95 remaps them);
+//  - a header with an existing group's label is that group (ignoring case);
 //  - a new header where a group disappeared at the same position is that group renamed;
 //  - other new headers are new groups, with the default color for their label;
 //  - groups whose header is gone are removed, along with their arrangement steps.
+// A matched group's per-slide overrides follow their slides, since the text has no slide
+// identity (ADR 0002):
+//  1. a slide whose text exactly equals an unused old slide of the group takes its override,
+//     in order, so reordered or repeated slides keep theirs;
+//  2. then, if the group has as many slides as before, the rest match by position, so
+//     fixing a typo keeps the slide's style;
+//  3. any other override is dropped, with one warning per group saying how many.
 LyricsEdit applyLyricsText(const Song &song, const QString &text);
 
 } // namespace visualis

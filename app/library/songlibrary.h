@@ -84,6 +84,10 @@ public:
     // For the song editor: load a song, and save it whole (every edit saves at once).
     std::optional<visualis::Song> loadSong(const QUuid &id) const;
     bool saveSong(visualis::Song &song, QString *error);
+    // Only its slide overrides (SongStore::saveSlideOverrides); by default without waiting on
+    // another program.
+    visualis::SongStore::Result saveSlideOverrides(visualis::Song &song,
+                                                   visualis::Library::Transaction::Lock lock = visualis::Library::Transaction::Lock::NowOrBusy);
 
     // The open library, or null; for ServiceList, which keeps services in it.
     visualis::Library *library() const { return m_library.get(); }

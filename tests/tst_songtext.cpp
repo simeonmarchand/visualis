@@ -46,6 +46,12 @@ void verifyLossless(const Song &s)
     QVERIFY2(e.warnings.isEmpty(), qPrintable(e.warnings.join('\n')));
 }
 
+// A slide override setting the main region's color.
+QJsonObject styled(const char *color)
+{
+    return {{"regions", QJsonObject{{"main", QJsonObject{{"color", color}}}}}};
+}
+
 QStringList labels(const Song &s)
 {
     QStringList out;
@@ -263,6 +269,98 @@ private slots:
         const Song s = sample();
         const LyricsEdit e = applyLyricsText(s, lyricsText(s));
         QCOMPARE(e.song.groups[0].slides, QStringList{""});
+    }
+
+    // #95: a slide's overrides follow it through a text edit.
+    void reorderingSlidesKeepsTheirOverrides()
+    {
+        Song s = withGroups({Group{QUuid::createUuid(), "Verse 1", {}, {"one", "two", "three"}}});
+        s.groups[0].slideOverrides = {styled("#000001"), {}, styled("#000003")};
+        const LyricsEdit e = applyLyricsText(s, "[Verse 1]\nthree\n\none\n\ntwo");
+        QCOMPARE(e.song.groups[0].slides, (QStringList{"three", "one", "two"}));
+        QCOMPARE(e.song.groups[0].slideOverrides, (QList<QJsonObject>{styled("#000003"), styled("#000001"), {}}));
+        QVERIFY2(e.warnings.isEmpty(), qPrintable(e.warnings.join('\n')));
+    }
+
+    void aTypoFixWithTheSameSlideCountKeepsTheOverrides()
+    {
+        Song s = withGroups({Group{QUuid::createUuid(), "Verse 1", {}, {"Amazng grace", "how sweet"}}});
+        s.groups[0].slideOverrides = {styled("#000001"), styled("#000002")};
+        const LyricsEdit e = applyLyricsText(s, "[Verse 1]\nAmazing grace\n\nhow sweet the sound");
+        QCOMPARE(e.song.groups[0].slideOverrides, s.groups[0].slideOverrides);
+        QVERIFY2(e.warnings.isEmpty(), qPrintable(e.warnings.join('\n')));
+    }
+
+    void insertingASlideKeepsExactMatchesAndWarnsOnceForTheRest()
+    {
+        Song s = withGroups({Group{QUuid::createUuid(), "Chorus", {}, {"one", "two", "three"}}});
+        s.groups[0].slideOverrides = {styled("#000001"), styled("#000002"), styled("#000003")};
+        // "two" is reworded and a slide inserted: the count changed, so "two"'s can't follow by position.
+        const LyricsEdit e = applyLyricsText(s, "[Chorus]\none\n\nnew\n\ntwo, changed\n\nthree");
+        QCOMPARE(e.song.groups[0].slideOverrides,
+                 (QList<QJsonObject>{styled("#000001"), {}, {}, styled("#000003")}));
+        QCOMPARE(e.warnings.size(), 1);
+        QVERIFY2(e.warnings[0].contains("\"Chorus\"") && e.warnings[0].contains("1 slide"), qPrintable(e.warnings[0]));
+    }
+
+    void duplicateTextsMatchInOrderNeverTwice()
+    {
+        Song s = withGroups({Group{QUuid::createUuid(), "Chorus", {}, {"sing", "sing", "amen"}}});
+        s.groups[0].slideOverrides = {styled("#000001"), styled("#000002"), {}};
+        // One "sing" removed: the first keeps the first's, the other's is dropped.
+        const LyricsEdit e = applyLyricsText(s, "[Chorus]\nsing\n\namen");
+        QCOMPARE(e.song.groups[0].slideOverrides, (QList<QJsonObject>{styled("#000001"), {}}));
+        QCOMPARE(e.warnings.size(), 1);
+
+        // Three where there were two: the third has none to take.
+        const LyricsEdit more = applyLyricsText(s, "[Chorus]\nsing\n\nsing\n\nsing\n\namen");
+        QCOMPARE(more.song.groups[0].slideOverrides, (QList<QJsonObject>{styled("#000001"), styled("#000002"), {}, {}}));
+        QVERIFY(more.warnings.isEmpty());
+    }
+
+    // Thermo review: stored text the parser would trim still matches its own slide.
+    void anUntouchedGroupWithUntrimmedRepeatsKeepsItsOverrides()
+    {
+        Song s = withGroups({Group{QUuid::createUuid(), "Chorus", {}, {"sing ", "sing"}}});
+        s.groups[0].slideOverrides = {styled("#000001"), styled("#000002")};
+        const LyricsEdit e = applyLyricsText(s, lyricsText(s));
+        QCOMPARE(e.song.groups[0].slides, s.groups[0].slides);
+        QCOMPARE(e.song.groups[0].slideOverrides, s.groups[0].slideOverrides);
+        QVERIFY2(e.warnings.isEmpty(), qPrintable(e.warnings.join('\n')));
+    }
+
+    void aRenamedGroupCarriesItsOverrides()
+    {
+        Song s = withGroups({Group{QUuid::createUuid(), "Verse 1", {}, {"one", "two"}}});
+        s.groups[0].slideOverrides = {{}, styled("#000002")};
+        const LyricsEdit e = applyLyricsText(s, "[Verse 2]\none\n\ntwo!");
+        QCOMPARE(e.song.groups[0].id, s.groups[0].id);
+        QCOMPARE(e.song.groups[0].slideOverrides, s.groups[0].slideOverrides);
+    }
+
+    // PR #123 review: a removed group's styles go with it, and the operator is told.
+    void removingAStyledGroupSaysSo()
+    {
+        Song s;
+        s.title = "Unarranged";
+        s.groups = {Group{QUuid::createUuid(), "Verse 1", {}, {"one"}}, Group{QUuid::createUuid(), "Tag", {}, {"end it"}}};
+        s.groups[1].slideOverrides = {styled("#000001")};
+        const LyricsEdit e = applyLyricsText(s, "[Verse 1]\none");
+        QCOMPARE(e.song.groups.size(), 1);
+        QCOMPARE(e.warnings.size(), 1);
+        QVERIFY2(e.warnings[0].contains("\"Tag\"") && e.warnings[0].contains("1 slide"), qPrintable(e.warnings[0]));
+    }
+
+    void removingASlideDropsOnlyItsOverrides()
+    {
+        Song s = withGroups({Group{QUuid::createUuid(), "Verse 1", {}, {"one", "two", "three"}},
+                             Group{QUuid::createUuid(), "Chorus", {}, {"sing"}}});
+        s.groups[0].slideOverrides = {styled("#000001"), styled("#000002"), styled("#000003")};
+        s.groups[1].slideOverrides = {styled("#000004")};
+        const LyricsEdit e = applyLyricsText(s, "[Verse 1]\none\n\nthree\n\n[Chorus]\nsing");
+        QCOMPARE(e.song.groups[0].slideOverrides, (QList<QJsonObject>{styled("#000001"), styled("#000003")}));
+        QCOMPARE(e.song.groups[1].slideOverrides, s.groups[1].slideOverrides);
+        QCOMPARE(e.warnings.size(), 1);
     }
 };
 

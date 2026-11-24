@@ -36,8 +36,9 @@ class ServiceList : public QObject
     Q_PROPERTY(QString openTitle READ openTitle NOTIFY serviceChanged)
     // Whether the open service came from a Planning Center plan, so it can be re-imported.
     Q_PROPERTY(bool openImported READ openImported NOTIFY serviceChanged)
-    // {id, kind, title, hasSlides, songPlaceholder, suggestions, pcoRemoved} per item of the
-    // open service, in order. `songPlaceholder`: an imported song not linked to the library
+    // {id, kind, title, hasSlides, songPlaceholder, suggestions, pcoRemoved, templateId}
+    // per item of the open service, in order. `templateId`: the template the item picks, or
+    // "". `songPlaceholder`: an imported song not linked to the library
     // yet; `suggestions`: [{id, title}] of library songs it may be (#55); `pcoRemoved`: taken
     // out of the plan in Planning Center (#56).
     Q_PROPERTY(QVariantList items READ items NOTIFY serviceChanged)
@@ -77,6 +78,9 @@ public:
     Q_INVOKABLE bool linkSong(int index, const QString &songId);
     // Keeps the item's place as one blank slide.
     Q_INVOKABLE bool leaveBlank(int index);
+    // The template the item shows with in this service (#95); "" for the song's own. Never
+    // waits on another program's lock: if one holds it, nothing changes and `report` says so.
+    Q_INVOKABLE bool setItemTemplate(int index, const QString &templateId);
     // Moves the item at `from` to `to` (both indexes before the move); the moved item stays
     // selected if it was.
     Q_INVOKABLE bool moveItem(int from, int to);

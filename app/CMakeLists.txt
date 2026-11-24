@@ -21,6 +21,8 @@ qt_add_qml_module(visualis_ui
         qml/ImportReportDialog.qml
         qml/MediaDeleteDialog.qml
         qml/MediaPane.qml
+        qml/PercentField.qml
+        qml/RegionStyleControls.qml
         qml/SlideGrid.qml
         qml/SlideTile.qml
         qml/SongEditorWindow.qml

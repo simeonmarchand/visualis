@@ -2,16 +2,22 @@
 #include "song/songlimits.h"
 #include "library/songlibrary.h"
 #include "library/templatelibrary.h"
+#include "library/library.h"
 #include "live/livestate.h"
+#include "song/slidelist.h"
+#include "song/songtext.h"
+#include "template/overrides.h"
 
 #include <QQmlApplicationEngine>
 #include <QQmlComponent>
 #include <QQuickItem>
 #include <QQuickWindow>
+#include <QSqlQuery>
 #include <QTemporaryDir>
 #include <QtQml/qqmlextensionplugin.h>
 #include <QtTest>
 
+#include "otherprogram.h"
 #include "testkeychain.h"
 
 Q_IMPORT_QML_PLUGIN(Visualis_UiPlugin)
@@ -49,6 +55,7 @@ private slots:
         m_engine = std::make_unique<QQmlApplicationEngine>();
         m_songs = m_engine->singletonInstance<SongLibrary *>("Visualis.Ui", "SongLibrary");
         m_live = m_engine->singletonInstance<LiveState *>("Visualis.Ui", "LiveState");
+        m_templates = m_engine->singletonInstance<TemplateLibrary *>("Visualis.Ui", "TemplateLibrary");
         QVERIFY(m_songs->openLibrary(m_dir.filePath(QString::number(++m_n))));
         QVERIFY(m_songs->createFromPaste("Amazing Grace", kLyrics));
         QQmlComponent component(m_engine.get());
@@ -333,13 +340,300 @@ private slots:
         QTRY_COMPARE(picker->property("displayText").toString(), QStringLiteral("Lyrics"));
     }
 
+    // #95 acceptance: changing the template updates every slide except what a slide overrides.
+    void aSlideStyleSticksThroughATemplateChange()
+    {
+        Template t = saveTemplate("Ours");
+        m_editor->setTemplateId(idText(t.id));
+        m_editor->selectSlide(slideKey(1), false);   // Verse 1's first slide, played twice
+        QCOMPARE(m_editor->selectedKeys(), QStringList{slideKey(1)});
+        m_editor->setSlideProperty("color", "#ffcc00");
+        QVERIFY2(m_editor->warnings().isEmpty(), qPrintable(m_editor->warnings().join('\n')));
+        QVERIFY(m_editor->flush());
+        QCOMPARE(storedOverride(1), (QJsonObject{{"regions", QJsonObject{{"main", QJsonObject{{"color", "#ffcc00"}}}}}}));
+
+        t.regions[0].style.color = "#00ff00";
+        t.regions[0].style.fontFamily = "Georgia";
+        QVERIFY(m_templates->save(t).ok);
+        QCOMPARE(previewStyle(1).color, QStringLiteral("#ffcc00"));       // sticks
+        QCOMPARE(previewStyle(1).fontFamily, QStringLiteral("Georgia"));  // follows
+        QCOMPARE(previewStyle(3).color, QStringLiteral("#ffcc00"));       // the same slide, played again
+        QCOMPARE(previewStyle(2).color, QStringLiteral("#00ff00"));
+        QCOMPARE(previewSlide(1)["overrides"].toInt(), 1);
+        QCOMPARE(previewSlide(2)["overrides"].toInt(), 0);
+        // And on screen.
+        QVERIFY(m_songs->goLive(1));
+        QCOMPARE(m_live->content().regions.value("main").style.color, QStringLiteral("#ffcc00"));
+        QCOMPARE(m_live->content().regions.value("main").style.fontFamily, QStringLiteral("Georgia"));
+    }
+
+    void resetBringsBackTheTemplatesValue()
+    {
+        m_editor->selectSlide(slideKey(2), false);
+        m_editor->setSlideProperty("color", "#ffcc00");
+        m_editor->setSlideProperty("shadow.opacity", 0.2);
+        QCOMPARE(m_editor->slideStyle()["color"].toString(), QStringLiteral("#ffcc00"));
+        QCOMPARE(m_editor->overriddenProperties(), (QStringList{"color", "shadow.opacity"}));
+        m_editor->resetSlideProperty("color");
+        QCOMPARE(previewStyle(2).color, builtInLyricsTemplate().regions[0].style.color);
+        QCOMPARE(m_editor->overriddenProperties(), QStringList{"shadow.opacity"});
+        m_editor->resetSlides();
+        QVERIFY(m_editor->overriddenProperties().isEmpty());
+        QVERIFY(m_editor->flush());
+        QCOMPARE(storedOverride(2), QJsonObject());
+    }
+
+    void severalSlidesAreStyledTogetherAndMixedValuesShow()
+    {
+        m_editor->selectSlide(slideKey(1), false);
+        m_editor->setSlideProperty("color", "#ffcc00");
+        m_editor->selectSlide(slideKey(2), true);
+        QCOMPARE(m_editor->selectedKeys().size(), 2);
+        QCOMPARE(m_editor->mixedProperties(), QStringList{"color"});
+        QCOMPARE(m_editor->overriddenProperties(), QStringList{"color"});   // by any of them
+        m_editor->setSlideProperty("weight", 800);
+        QCOMPARE(previewStyle(1).weight, 800);
+        QCOMPARE(previewStyle(2).weight, 800);
+        QCOMPARE(previewStyle(1).color, QStringLiteral("#ffcc00"));
+        m_editor->selectSlide(slideKey(1), true);   // toggled off again
+        QCOMPARE(m_editor->selectedKeys(), QStringList{slideKey(2)});
+        QVERIFY(m_editor->mixedProperties().isEmpty());
+    }
+
+    void anInvalidStyleIsRefusedWithTheReason()
+    {
+        m_editor->selectSlide(slideKey(1), false);
+        m_editor->selectSlide(slideKey(2), true);
+        m_editor->setSlideProperty("color", "gold");
+        QVERIFY(!m_editor->warnings().isEmpty());
+        // Valid alone, but not with the template: larger than the largest size.
+        m_editor->setSlideProperty("minSize", 0.2);
+        QVERIFY2(m_editor->warnings().join(' ').contains("minSize"), qPrintable(m_editor->warnings().join(' ')));
+        QVERIFY(m_editor->overriddenProperties().isEmpty());
+        QVERIFY(m_editor->flush());
+        QCOMPARE(storedOverride(1), QJsonObject());
+    }
+
+    // Thermo review: a reset is checked like a set.
+    void aResetThatBreaksARuleIsRefused()
+    {
+        m_editor->selectSlide(slideKey(1), false);
+        m_editor->setSlideProperty("maxSize", 0.2);
+        m_editor->setSlideProperty("minSize", 0.15);
+        QCOMPARE(m_editor->overriddenProperties(), (QStringList{"maxSize", "minSize"}));
+        m_editor->resetSlideProperty("maxSize");   // the template's largest is smaller
+        QVERIFY(m_editor->warnings().join(' ').contains("minSize"));
+        QCOMPARE(m_editor->overriddenProperties(), (QStringList{"maxSize", "minSize"}));
+        m_editor->resetSlides();   // both together is fine
+        QVERIFY(m_editor->overriddenProperties().isEmpty());
+    }
+
+    // Thermo review: a save that failed for good doesn't keep the editor on that song.
+    void anotherSongOpensAfterAStyleSaveFails()
+    {
+        QVERIFY(m_songs->createFromPaste("Other", "Verse 1\nOne\n"));
+        const QString other = m_songs->selectedId();
+        m_editor->selectSlide(slideKey(1), false);
+        m_editor->setSlideProperty("color", "#ffcc00");
+        QVERIFY(m_songs->removeSong(m_editor->songId()));
+        QVERIFY(!m_editor->flush());
+        m_editor->setSongId(other);
+        QCOMPARE(m_editor->songId(), other);
+    }
+
+    // Thermo review: the region edited is one the song's template has.
+    void theRegionFollowsTheTemplate()
+    {
+        Template two = saveTemplate("Two regions");
+        two.regions << TextRegion{"title", "Title", two.regions[0].style, {}};
+        QVERIFY(m_templates->save(two).ok);
+        m_editor->setTemplateId(idText(two.id));
+        m_editor->selectRegion("title");
+        QCOMPARE(m_editor->regionId(), QStringLiteral("title"));
+        m_editor->setTemplateId(idText(builtInLyricsTemplateId()));
+        QCOMPARE(m_editor->regionId(), QStringLiteral("main"));
+    }
+
+    // GUI-thread writes never wait on another program's lock: the edit stays and saves later.
+    void aBusyLibraryKeepsTheStyleAndSavesItLater()
+    {
+        m_editor->selectSlide(slideKey(1), false);
+        {
+            OtherProgram other(m_dir.filePath(QString::number(m_n)));
+            QVERIFY(QSqlQuery(other.database()).exec("BEGIN IMMEDIATE"));
+            QElapsedTimer t;
+            t.start();
+            m_editor->setSlideProperty("color", "#ffcc00");
+            QVERIFY(!m_editor->flush());
+            QVERIFY(t.elapsed() < Library::kBusyTimeoutMs / 2);
+            QVERIFY2(m_editor->error().startsWith("Not saved yet"), qPrintable(m_editor->error()));
+            QCOMPARE(previewStyle(1).color, QStringLiteral("#ffcc00"));   // still shown
+            QVERIFY(QSqlQuery(other.database()).exec("ROLLBACK"));
+        }
+        QTRY_COMPARE(storedColor(1), QStringLiteral("#ffcc00"));
+        QVERIFY(m_editor->error().isEmpty());
+    }
+
+    // PR #123 review (2): a lyrics edit that didn't save isn't lost to a style save, and its
+    // error stays until a save fixes it.
+    void aFailedLyricsSaveKeepsTheEditAndItsError()
+    {
+        m_editor->selectSlide(slideKey(1), false);
+        QSignalSpy reset(m_editor.get(), &SongEditor::lyricsReset);
+        {
+            OtherProgram other(m_dir.filePath(QString::number(m_n)));
+            QVERIFY(QSqlQuery(other.database()).exec("BEGIN IMMEDIATE"));
+            m_editor->setSlideProperty("color", "#ffcc00");
+            QVERIFY(!m_editor->flush());   // busy: waits to retry
+            QVERIFY(QSqlQuery(other.database()).exec("ROLLBACK"));
+        }
+        const QString tooLong = m_editor->lyrics().replace("My chains are gone", QString(songlimits::kCharactersPerSlide + 1, 'a'));
+        m_editor->applyLyrics(tooLong);
+        QVERIFY2(m_editor->error().contains("characters"), qPrintable(m_editor->error()));
+        QTest::qWait(3 * SongEditor::kSaveDelayMs);   // the style retry would have run
+        m_editor->setSlideProperty("weight", 800);    // and another style edit
+        QTest::qWait(3 * SongEditor::kSaveDelayMs);
+        QVERIFY2(m_editor->error().contains("characters"), qPrintable(m_editor->error()));
+        QCOMPARE(reset.count(), 0);
+        QCOMPARE(m_editor->lyrics(), lyricsText(applyLyricsText(*m_songs->loadSong(QUuid::fromString(m_editor->songId())), tooLong).song));
+        QCOMPARE(m_editor->slideStyle()["color"].toString(), QStringLiteral("#ffcc00"));
+
+        // A save that works takes everything, and the error goes.
+        m_editor->applyLyrics(m_editor->lyrics().replace(QString(songlimits::kCharactersPerSlide + 1, 'a'), "My chains are GONE"));
+        QVERIFY2(m_editor->error().isEmpty(), qPrintable(m_editor->error()));
+        const Song saved = *m_songs->loadSong(QUuid::fromString(m_editor->songId()));
+        QCOMPARE(saved.groups[2].slides[0].left(18), QStringLiteral("My chains are GONE"));
+        QCOMPARE(storedColor(1), QStringLiteral("#ffcc00"));
+    }
+
+    // PR #123 review: a style the library can't show is pointed out, and kept.
+    void anOversizedStoredStyleIsReportedAndKept()
+    {
+        const Song song = *m_songs->loadSong(QUuid::fromString(m_editor->songId()));
+        QSqlQuery q(m_songs->library()->database());
+        q.prepare("UPDATE song_group SET slide_overrides = ? WHERE id = ?");
+        q.addBindValue(QStringLiteral("[{\"later\":\"%1\"}]").arg(QString(20 * 1024, 'x')));
+        q.addBindValue(song.groups[1].id.toString(QUuid::WithoutBraces));
+        QVERIFY(q.exec());
+        m_editor->setSongId(m_editor->songId());
+        QVERIFY2(m_editor->warnings().join(' ').contains("too much style"), qPrintable(m_editor->warnings().join(' ')));
+
+        m_editor->selectSlide(slideKey(2), false);   // the chorus
+        m_editor->setSlideProperty("color", "#ffcc00");
+        QVERIFY(m_editor->flush());
+        m_editor->setTitle("Renamed");
+        QVERIFY(m_editor->error().isEmpty());
+        QCOMPARE(m_songs->loadSong(song.id)->groups[1].slideOverride(0)["later"].toString().size(), 20 * 1024);
+    }
+
+    // PR #123 review: a failed save on one song doesn't stop another's style edits saving.
+    void aFailedSaveOnOneSongDoesntBlockTheNext()
+    {
+        const QString tooLong = m_editor->lyrics().replace("My chains are gone", QString(songlimits::kCharactersPerSlide + 1, 'a'));
+        m_editor->applyLyrics(tooLong);
+        QVERIFY(!m_editor->error().isEmpty());
+        QVERIFY(m_songs->createFromPaste("Other", "Verse 1\nOne\n"));
+        m_editor->setSongId(m_songs->selectedId());
+        QVERIFY(m_editor->error().isEmpty());
+        m_editor->selectSlide(slideKey(0), false);
+        m_editor->setSlideProperty("color", "#ffcc00");
+        QVERIFY(m_editor->flush());
+        QCOMPARE(storedColor(0), QStringLiteral("#ffcc00"));
+    }
+
+    void lyricEditsKeepSlideStyles()
+    {
+        m_editor->selectSlide(slideKey(1), false);
+        m_editor->setSlideProperty("color", "#ffcc00");
+        QString text = m_editor->lyrics();
+        text.replace("Amazing grace how sweet", "Amazing grace, how sweet");
+        m_editor->applyLyrics(text);
+        QCOMPARE(m_editor->selectedKeys(), QStringList{slideKey(1)});
+        QCOMPARE(storedColor(1), QStringLiteral("#ffcc00"));
+        QVERIFY(m_songs->loadSong(QUuid::fromString(m_editor->songId()))->groups[1].slides[0].startsWith("Amazing grace, how"));
+    }
+
+    // The controls in the window: select a tile, see its marker and the highlighted field, reset it.
+    void theWindowStylesASlide()
+    {
+        m_engine->loadFromModule("Visualis.Ui", "Main");
+        auto *main = qobject_cast<QQuickWindow *>(m_engine->rootObjects().value(0));
+        QVERIFY(main);
+        auto *editorWindow = main->findChild<QQuickWindow *>("songEditorWindow");
+        QVERIFY(editorWindow);
+        QMetaObject::invokeMethod(editorWindow, "edit", Q_ARG(QVariant, m_songs->selectedId()));
+        QVERIFY(QTest::qWaitForWindowExposed(editorWindow));
+        auto *windowEditor = editorWindow->findChild<SongEditor *>();
+        auto *controls = findItem(editorWindow->contentItem(), "slideStyle");
+        QVERIFY(controls);
+        QVERIFY(!controls->isVisible());   // nothing selected
+
+        // Looked up each time: the grid makes new tiles whenever the slides change.
+        auto item = [&](QQuickItem *in, const char *name) { return in ? findItem(in, name) : nullptr; };
+        auto tile = [&] { return item(editorWindow->contentItem(), "previewTile1"); };
+        auto centre = [](QQuickItem *i) { return i->mapToScene(QPointF(i->width() / 2, i->height() / 2)).toPoint(); };
+        QTRY_VERIFY(tile());
+        QTest::mouseClick(editorWindow, Qt::LeftButton, {}, centre(tile()));
+        QCOMPARE(windowEditor->selectedKeys().size(), 1);
+        QTRY_VERIFY(controls->isVisible());
+
+        windowEditor->setSlideProperty("color", "#ffcc00");
+        QTRY_VERIFY(item(tile(), "overrideMarker") && item(tile(), "overrideMarker")->isVisible());
+        QTRY_VERIFY(item(controls, "reset_color") && item(controls, "reset_color")->isVisible());
+        QTest::mouseClick(editorWindow, Qt::LeftButton, {}, centre(item(controls, "reset_color")));
+        QTRY_VERIFY(windowEditor->overriddenProperties().isEmpty());
+        QTRY_VERIFY(item(tile(), "overrideMarker") && !item(tile(), "overrideMarker")->isVisible());
+
+        if (const QString dir = qEnvironmentVariable("VISUALIS_SNAPSHOT_DIR"); !dir.isEmpty()) {
+            windowEditor->setSlideProperty("weight", 800);
+            QTest::qWait(300);
+            editorWindow->grabWindow().save(dir + "/song-editor-slide-style.png");
+        }
+    }
+
 private:
+    // In the visual tree: a view's delegates have no QObject parent to find them by.
+    static QQuickItem *findItem(QQuickItem *item, const QString &name)
+    {
+        if (item->objectName() == name)
+            return item;
+        for (QQuickItem *child : item->childItems()) {
+            if (QQuickItem *found = findItem(child, name))
+                return found;
+        }
+        return nullptr;
+    }
+
+    Template saveTemplate(const char *name)
+    {
+        Template t = builtInLyricsTemplate();
+        t.id = QUuid();
+        t.name = name;
+        return m_templates->save(t).ok ? t : Template{};
+    }
+    QVariantMap previewSlide(int i) const { return m_editor->previewSlides().value(i).toMap(); }
+    QString slideKey(int i) const { return previewSlide(i)["key"].toString(); }
+    RegionStyle previewStyle(int i) const { return previewSlide(i)["content"].value<Content>().regions.value("main").style; }
+    // The stored override of preview slide `i`.
+    QJsonObject storedOverride(int i) const
+    {
+        const SongSlide slide = songSlides(*m_songs->loadSong(QUuid::fromString(m_editor->songId())),
+                                           QUuid::fromString(m_editor->arrangementId()))[i];
+        return m_songs->loadSong(QUuid::fromString(m_editor->songId()))->group(slide.groupId)->slideOverride(slide.indexInGroup);
+    }
+
+    QString storedColor(int i) const
+    {
+        return overrides::propertyValue(storedOverride(i).value("regions").toObject().value("main").toObject(), "color").toString();
+    }
+
     QTemporaryDir m_dir;
     int m_n = 0;
     std::unique_ptr<QQmlApplicationEngine> m_engine;
     std::unique_ptr<SongEditor> m_editor;
     SongLibrary *m_songs = nullptr;
     LiveState *m_live = nullptr;
+    TemplateLibrary *m_templates = nullptr;
 };
 
 QTEST_MAIN(SongEditorTest)

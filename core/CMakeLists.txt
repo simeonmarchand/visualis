@@ -15,6 +15,7 @@ qt_add_library(visualis_core STATIC
     import/rtf.h import/rtf.cpp
     import/propresenter.h import/propresenter.cpp
     song/songstore.h song/songstore.cpp
+    template/overrides.h template/overrides.cpp
     template/template.h template/template.cpp
     template/templatejson.h template/templatejson.cpp
     template/templatestore.h template/templatestore.cpp

@@ -3,9 +3,12 @@
 #include "song/songlimits.h"
 #include "song/songstore.h"
 
+#include <QElapsedTimer>
 #include <QSqlQuery>
 #include <QTemporaryDir>
 #include <QtTest>
+
+#include "otherprogram.h"
 
 using namespace visualis;
 
@@ -242,6 +245,70 @@ private slots:
         SAVE_OK(store, other);
         QVERIFY(caller.commit().ok);
         QCOMPARE(store.list().size(), 2);
+    }
+
+    // #95: the song editor saves a slide's style from the GUI thread while the service runs.
+    void saveSlideOverridesWritesOnlyTheOverrides()
+    {
+        SongStore store(*m_lib);
+        Song s = sampleSong();
+        SAVE_OK(store, s);
+        const QDateTime before = s.updated;
+        Song edited = s;
+        edited.title = "Not saved by this";
+        edited.groups[1].fitSlideOverrides();
+        edited.groups[1].slideOverrides[1] = {{"regions", QJsonObject{{"main", QJsonObject{{"color", "#ffcc00"}}}}}};
+        QTest::qWait(2);
+        const SongStore::Result r = store.saveSlideOverrides(edited);
+        QVERIFY2(r.ok, qPrintable(r.error));
+        QVERIFY(edited.updated > before);
+
+        const Song loaded = *store.load(s.id);
+        QCOMPARE(loaded.title, s.title);
+        QCOMPARE(loaded.groups[1].slideOverrides, edited.groups[1].slideOverrides);
+        QCOMPARE(loaded.updated, edited.updated);
+    }
+
+    void saveSlideOverridesIsBusyAtOnceWhileAnotherProgramWrites()
+    {
+        SongStore store(*m_lib);
+        Song s = sampleSong();
+        SAVE_OK(store, s);
+        s.groups[0].slideOverrides = {{{"regions", QJsonObject{{"main", QJsonObject{{"weight", 700}}}}}}};
+        OtherProgram other(m_lib->folder());
+        QVERIFY(QSqlQuery(other.database()).exec("BEGIN IMMEDIATE"));
+        QElapsedTimer t;
+        t.start();
+        const SongStore::Result r = store.saveSlideOverrides(s);
+        QVERIFY(!r.ok && r.busy);
+        QVERIFY2(t.elapsed() < Library::kBusyTimeoutMs / 2, qPrintable(QString::number(t.elapsed())));
+        QVERIFY(QSqlQuery(other.database()).exec("ROLLBACK"));
+        QVERIFY(store.saveSlideOverrides(s).ok);
+    }
+
+    void saveSlideOverridesRefusesWhatSaveWould()
+    {
+        SongStore store(*m_lib);
+        Song s = sampleSong();
+        SAVE_OK(store, s);
+        Song gone = s;
+        gone.id = QUuid::createUuid();
+        QVERIFY(!store.saveSlideOverrides(gone).ok);    // not in the library
+        Song regrouped = s;
+        regrouped.groups << Group{QUuid::createUuid(), "Tag", {}, {"new"}};
+        QVERIFY(!store.saveSlideOverrides(regrouped).ok);   // a group the library doesn't have
+        Song stale = s;   // the slides changed in the library since this copy was loaded
+        Song moved = s;
+        moved.groups[1].slides.swapItemsAt(0, 1);
+        SAVE_OK(store, moved);
+        stale.groups[1].slideOverrides = {{{"regions", QJsonObject{{"main", QJsonObject{{"weight", 700}}}}}}, {}};
+        QVERIFY(store.saveSlideOverrides(stale).error.contains("changed in the library"));
+        s = moved;
+        Song big = s;
+        big.groups[0].slideOverrides = {{{"later", QString(songlimits::kSlideOverrideBytes, 'x')}}};
+        const SongStore::Result r = store.saveSlideOverrides(big);
+        QVERIFY(!r.ok && r.error.contains("too much style"));
+        QCOMPARE(*store.load(s.id), s);
     }
 
     void savingGivesIdsToNewParts()
