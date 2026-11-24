@@ -172,6 +172,43 @@ private slots:
         QVERIFY(m_media->report().startsWith("Imported 0 files."));
     }
 
+    // #113: a power loss can leave a row whose file is cut short or gone. Importing the same
+    // content again puts the file back, rather than saying it's already in the library.
+    void reimportingRepairsAMissingOrDamagedFile_data()
+    {
+        QTest::addColumn<bool>("truncate");
+        QTest::newRow("cut short") << true;
+        QTest::newRow("gone") << false;
+    }
+    void reimportingRepairsAMissingOrDamagedFile()
+    {
+        QFETCH(bool, truncate);
+        QTemporaryDir in;
+        QImage image(64, 48, QImage::Format_RGB32);
+        image.fill(Qt::red);
+        QVERIFY(image.save(in.filePath("Cross.png")));
+        QVERIFY(importAndWait({QUrl::fromLocalFile(in.filePath("Cross.png"))}));
+        MediaStore store(*m_songs->library());
+        QCOMPARE(store.list().size(), 1);
+        const MediaAsset stored = store.list()[0];
+        const QString file = store.filePath(stored);
+        const qint64 size = QFileInfo(file).size();
+        if (truncate)
+            QVERIFY(QFile::resize(file, 0));
+        else
+            QVERIFY(QFile::remove(file));
+        QVERIFY(QFile::remove(store.thumbnailPath(stored)));
+
+        QVERIFY(importAndWait({QUrl::fromLocalFile(in.filePath("Cross.png"))}));
+        QVERIFY2(m_media->report().startsWith("Imported 1 files."), qPrintable(m_media->report()));
+        QVERIFY2(m_media->report().contains("replaced the library's missing or damaged copy"), qPrintable(m_media->report()));
+        QCOMPARE(store.list().size(), 1);
+        QCOMPARE(store.list()[0].id, stored.id);   // the same asset, so services that show it still do
+        QCOMPARE(QFileInfo(file).size(), size);
+        QVERIFY(QFile::exists(store.thumbnailPath(stored)));
+        QVERIFY(filesUnder(m_songs->library()->mediaPath(), ".partial").isEmpty());
+    }
+
     // #97 review (H1): while another program holds the library's write lock, the save waits
     // on a timer, not on the GUI thread; it lands once the lock is let go.
     void aLockedLibraryDelaysTheSaveWithoutBlocking()

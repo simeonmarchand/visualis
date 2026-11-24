@@ -289,8 +289,28 @@ bool MediaLibrary::saveOne(MediaImportFile &f)
     }
     // The same content is already an asset, under whatever extension: one file, one row.
     if (const std::optional<MediaAsset> existing = m_store->findByHash(f.asset->contentHash)) {
-        removePartials(f);
-        summary.skipped << std::pair{f.name, QStringLiteral("already in the library as \"%1\"").arg(existing->originalName)};
+        const QFileInfo there(m_store->filePath(*existing));
+        if (there.isFile() && there.size() == QFileInfo(f.partial).size()) {
+            removePartials(f);
+            summary.skipped << std::pair{f.name, QStringLiteral("already in the library as \"%1\"").arg(existing->originalName)};
+            return true;
+        }
+        // A crash or power loss left the row without its whole file (#113). This copy has the
+        // same content, so it takes the file's place under the existing row.
+        const Publish published = publishPartial(f.partial, m_import->mediaFolder, existing->file);
+        f.partial.clear();
+        if (!published.ok()) {
+            removePartials(f);
+            summary.failed << std::pair{f.name, published.error};
+            return true;
+        }
+        if (!f.thumbnailPartial.isEmpty()) {
+            publishPartial(f.thumbnailPartial, m_import->mediaFolder, thumbnailFile(existing->contentHash));
+            f.thumbnailPartial.clear();
+        }
+        summary.imported << f.name;
+        summary.warnings << QStringLiteral("%1: replaced the library's missing or damaged copy of \"%2\"")
+                                .arg(f.name, existing->originalName);
         return true;
     }
 
