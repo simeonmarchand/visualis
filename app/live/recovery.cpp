@@ -50,6 +50,8 @@ bool Recovery::start(const QString &journalPath, LiveState *live)
                 live->restore(LiveItem{}, -1, false, s.background, s.service);
             }
             disconnect(onRefused);
+            if (!refusal.isEmpty())   // the song stays out; its background needn't
+                live->restoreBackground(s.background);
             if (s.skippedBackgroundUrl)
                 qCInfo(lcRecovery) << "the journal's background is a file URL from before #98; not restored";
             restored = true;
@@ -60,7 +62,8 @@ bool Recovery::start(const QString &journalPath, LiveState *live)
             } else {
                 const QString where = s.song
                     ? QStringLiteral("\"%1\", slide %2 of %3").arg(s.song->title).arg(live->slideIndex() + 1).arg(live->slideCount())
-                    : QStringLiteral("the background");
+                    : live->background().asset.isNull() ? QStringLiteral("no background (its file is missing)")
+                                                        : QStringLiteral("the background");
                 m_message = QStringLiteral("Visualis didn't quit normally last time. Back on %1 as of %2.")
                                 .arg(where, s.savedAt.toLocalTime().toString("h:mm:ss AP"));
                 qCInfo(lcRecovery).noquote() << "restored after a crash:" << where;

@@ -382,6 +382,22 @@ private slots:
         QVERIFY(!live.hasSlide());
     }
 
+    // A refused song doesn't take its background with it.
+    void anOversizedJournalStillRestoresItsBackground()
+    {
+        LiveSnapshot big;
+        big.song = repeated(500, 1000);
+        big.background = {QUuid::createUuid(), false, {}};
+        big.savedAt = QDateTime::currentDateTimeUtc();
+        QVERIFY(writeJournal(m_path, big));
+
+        LiveState live;
+        Recovery recovery;
+        recovery.start(m_path, &live);
+        QVERIFY(live.songTitle().isEmpty());
+        QCOMPARE(live.background(), big.background);
+    }
+
     // #83: journals are capped at 4 MiB, but what they expand to isn't.
     void anOversizedJournalIsReportedNotRestored()
     {

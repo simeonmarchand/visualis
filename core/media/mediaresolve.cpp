@@ -61,11 +61,14 @@ MediaCheck verifyMedia(const MediaSnapshot &snapshot, const QUuid &id, const Med
             out.message = QStringLiteral("Checking \"%1\" was stopped.").arg(asset.originalName);
             return out;
         }
-        if (!hash.ok() || hash.hash != asset.contentHash) {
+        if (!hash.ok()) {   // there a moment ago, but unreadable: the same fix as missing
+            out.status = MediaStatus::Missing;
+            out.message = QStringLiteral("\"%1\" can't be read: %2").arg(asset.originalName, hash.error);
+            return out;
+        }
+        if (hash.hash != asset.contentHash) {
             out.status = MediaStatus::HashMismatch;
-            out.message = hash.ok() ? QStringLiteral("\"%1\" has changed or is damaged on disk. Import it again.")
-                                          .arg(asset.originalName)
-                                    : QStringLiteral("\"%1\" can't be read: %2").arg(asset.originalName, hash.error);
+            out.message = QStringLiteral("\"%1\" has changed or is damaged on disk. Import it again.").arg(asset.originalName);
             return out;
         }
     }

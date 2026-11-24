@@ -14,6 +14,6 @@ Terms used across the code, issues, and plan. Plan sections are in `docs/DEVELOP
 
 **Media verification**: the full preflight check: the media check plus hash and decode (`verifyMedia`).
 
-**Background layer**: the live asset id, whether it's cleared, and the transition it arrived with. `BackgroundLayer` in `core/live/livestate.h`; outputs are views of it.
+**Background layer**: the live asset id, whether it's cleared, and the transition it arrived with. `BackgroundLayer` in `core/live/liveitem.h`; outputs are views of it.
 
 **Background player**: the app module that plays the background layer through the video or still adapter, in two slots so a fade can overlap them. `BackgroundPlayer` in `app/background/`.

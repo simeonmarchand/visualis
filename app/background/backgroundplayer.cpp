@@ -12,14 +12,13 @@ struct BackgroundPlayer::Slot {
     std::unique_ptr<BackgroundSource> video;
     std::unique_ptr<BackgroundSource> still;
     QUuid asset;   // null when empty
-    bool empty = true;
     MediaAsset::Kind kind = MediaAsset::Kind::Image;
     double opacity = 0;
     quint64 imageGeneration = 0;   // so each new still is a new URL, which QML loads afresh
 
     BackgroundSource *source() const
     {
-        return empty ? nullptr : kind == MediaAsset::Kind::Video ? video.get() : still.get();
+        return asset.isNull() ? nullptr : kind == MediaAsset::Kind::Video ? video.get() : still.get();
     }
 };
 
@@ -75,7 +74,7 @@ BackgroundPlayer::BackgroundPlayer(LiveState *live, const SourceFactory &makeSou
         const double t = value.toDouble();
         Slot &in = *m_slots[m_front];
         in.opacity = t;
-        if (in.empty)   // fading to nothing: the old one fades out over black instead
+        if (in.asset.isNull())   // fading to nothing: the old one fades out over black instead
             back().opacity = 1 - t;
         emit slotsChanged();
     });
@@ -154,7 +153,6 @@ void BackgroundPlayer::play(const QUuid &asset, const Transition &transition)
 {
     finishFade();
     cancelPending();
-    setAlert({});
     if (asset == m_slots[m_front]->asset) {   // back to what's showing
         emit statusChanged();
         return;
@@ -165,14 +163,15 @@ void BackgroundPlayer::play(const QUuid &asset, const Transition &transition)
         swapIn();
         return;
     }
+    // LiveState checked it a moment ago; this finds the file, which may have gone since.
     const MediaCheck check = m_live->checkMedia(asset);
     if (!check.ok() || check.path.isEmpty()) {
-        setAlert(check.message.isEmpty() ? QStringLiteral("The background's file can't be found.") : check.message);
+        m_live->backgroundFailed(asset, showing(), check.message.isEmpty() ? QStringLiteral("The background's file can't be found.")
+                                                                            : check.message);
         return;
     }
     next.asset = asset;
     next.kind = check.kind;
-    next.empty = false;
     m_pending = Pending{asset, transition};
     next.source()->load(check.path);
     emit statusChanged();
@@ -188,8 +187,10 @@ void BackgroundPlayer::sourceFailed(int n, BackgroundSource *source, const QStri
 {
     if (!m_pending || n == m_front || m_slots[n]->source() != source)
         return;
+    const QUuid asset = m_pending->asset;
     cancelPending();
-    setAlert(QStringLiteral("The background can't be shown: %1").arg(why));
+    emit statusChanged();
+    m_live->backgroundFailed(asset, showing(), QStringLiteral("The background can't be shown: %1").arg(why));
 }
 
 void BackgroundPlayer::swapIn()
@@ -198,7 +199,7 @@ void BackgroundPlayer::swapIn()
     const int old = m_front;
     m_front = 1 - m_front;
     Slot &in = *m_slots[m_front];
-    if (!in.empty && in.kind == MediaAsset::Kind::Image)
+    if (!in.asset.isNull() && in.kind == MediaAsset::Kind::Image)
         ++in.imageGeneration;
     if (transition.kind == TransitionKind::Fade && transition.ms > 0) {
         in.opacity = 0;
@@ -241,32 +242,19 @@ void BackgroundPlayer::retire(int n)
     s.video->stop();
     s.still->stop();
     s.asset = {};
-    s.empty = true;
     s.opacity = 0;
-}
-
-void BackgroundPlayer::setAlert(const QString &alert)
-{
-    if (alert == m_alert)
-        return;
-    m_alert = alert;
-    emit statusChanged();
 }
 
 QString BackgroundPlayer::status() const
 {
     if (m_pending)
         return QStringLiteral("Loading");
-    const Slot &front = *m_slots[m_front];
-    if (front.empty)
-        return QStringLiteral("No background");
-    return front.kind == MediaAsset::Kind::Video ? front.video->status() : QStringLiteral("Showing a still");
+    const BackgroundSource *front = m_slots[m_front]->source();
+    return front ? front->status() : QStringLiteral("No background");
 }
 
 QString BackgroundPlayer::alert() const
 {
-    if (!m_alert.isEmpty())
-        return m_alert;
     for (const Slot *s : {m_slots[1 - m_front].get(), m_slots[m_front].get()}) {
         if (const BackgroundSource *source = s->source(); source && !source->alert().isEmpty())
             return source->alert();
@@ -290,7 +278,7 @@ BackgroundSlot BackgroundPlayer::slot(int n) const
     BackgroundSlot out;
     out.opacity = s.opacity;
     out.front = n == m_front;
-    if (s.empty)
+    if (s.asset.isNull())
         return out;
     out.kind = s.kind == MediaAsset::Kind::Video ? QStringLiteral("video") : QStringLiteral("image");
     const bool loading = m_pending && n != m_front;   // a still being decoded isn't drawn yet

@@ -30,7 +30,7 @@ enum class MediaStatus {
     Ok,
     UnknownId,      // no such asset in the library
     InvalidPath,    // its row's file isn't its hash's, or resolves outside the media folder
-    Missing,        // no file there, or an empty one, or not a regular file
+    Missing,        // no file there, an empty one, not a regular file, or (verifying) unreadable
     HashMismatch,   // verification only: the file isn't what was imported
     Undecodable,    // verification only: the file can't be decoded
     Stopped,        // verification only: the stop flag ended it before it finished

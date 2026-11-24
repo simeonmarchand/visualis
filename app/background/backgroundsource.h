@@ -83,6 +83,7 @@ public:
     void load(const QString &path) override;
     void stop() override;
     QImage image() const override { return m_image; }
+    QString status() const override { return QStringLiteral("Showing a still"); }
 
     // The size stills decode at: the largest screen, in pixels, as output windows fill their
     // display.

@@ -868,6 +868,26 @@ private slots:
         QVERIFY(!live.backgroundAlert().isEmpty());
     }
 
+    void aBackgroundThePlayerCantShowGoesBackToWhatItShows()
+    {
+        const QUuid a = QUuid::createUuid(), b = QUuid::createUuid(), c = QUuid::createUuid();
+        LiveState live;
+        live.setMediaCheck(FakeMedia{{a, b, c}}.fn());
+        live.setBackground(a, kFade);
+        live.setBackground(b, kFade);
+        live.backgroundFailed(b, a, "it won't decode");
+        QCOMPARE(live.background().asset, a);
+        QCOMPARE(live.backgroundAlert(), QStringLiteral("it won't decode"));
+        QVERIFY(live.setBackground(b, kFade));   // asked for again: tried again
+        QCOMPARE(live.background().asset, b);
+
+        live.setBackground(c, kFade);
+        QSignalSpy changed(&live, &LiveState::changed);
+        live.backgroundFailed(b, a, "too late");   // the layer has moved on
+        QCOMPARE(changed.count(), 0);
+        QCOMPARE(live.background().asset, c);
+    }
+
     // Without a library there's nothing to check against: every asset is taken as given.
     void withoutAMediaCheckEveryAssetIsAccepted()
     {

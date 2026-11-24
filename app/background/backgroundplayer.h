@@ -45,7 +45,8 @@ public:
 // goes black in between, and swaps in once it has a picture: at once for a cut, or fading in
 // over the old one for a fade. Afterwards the old slot is stopped, so a still never keeps a
 // video decoder running, and two decoders run only while a video-to-video fade overlaps them
-// (ADR 0001). A background that can't be shown leaves the old one up and sets alert().
+// (ADR 0001). A background that can't be shown leaves the old one up and is handed back to
+// LiveState::backgroundFailed(), so the layer says what's showing and why.
 // Clearing fades the whole layer out (or cuts) with the layer's transition, and keeps it playing
 // so showing it again is instant.
 class BackgroundPlayer : public QObject
@@ -60,7 +61,8 @@ class BackgroundPlayer : public QObject
     // How stills meet the output's shape: "fill" (cropped to cover it) or "fit" (whole, with
     // bars). Saved in the settings.
     Q_PROPERTY(QString fillMode READ fillMode WRITE setFillMode NOTIFY fillModeChanged)
-    // For the operator: what's playing, and what went wrong; empty when fine.
+    // For the operator: what's playing, and trouble playing it (a stalled video); empty when
+    // fine. Why a background was refused is LiveState.backgroundAlert.
     Q_PROPERTY(QString status READ status NOTIFY statusChanged)
     Q_PROPERTY(QString alert READ alert NOTIFY statusChanged)
 
@@ -117,7 +119,6 @@ private:
     void cancelPending();
     // Stops slot n's sources and empties it.
     void retire(int n);
-    void setAlert(const QString &alert);
     BackgroundSlot slot(int n) const;
     Slot &back() { return *m_slots[1 - m_front]; }
 
@@ -131,5 +132,4 @@ private:
     QVariantAnimation m_clearFade;      // the layer's opacity
     double m_opacity = 1;
     QString m_fillMode;
-    QString m_alert;
 };

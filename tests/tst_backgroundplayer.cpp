@@ -240,8 +240,17 @@ private slots:
         sourceFor("/media/b")->fail("the image is damaged");
         QCOMPARE(m_player->showing(), a);
         QCOMPARE(running(), QStringList{"/media/a"});
-        QVERIFY2(m_player->alert().contains("the image is damaged"), qPrintable(m_player->alert()));
         QCOMPARE(front().opacity, 1.0);
+        // The layer says what the outputs show, and why the other isn't.
+        QCOMPARE(m_live->background().asset, a);
+        QVERIFY2(m_live->backgroundAlert().contains("the image is damaged"), qPrintable(m_live->backgroundAlert()));
+
+        // Asking again tries again.
+        QVERIFY(m_live->setBackground(b, kCut));
+        QCOMPARE(running(), (QStringList{"/media/a", "/media/b"}));
+        sourceFor("/media/b")->becomeReady();
+        QCOMPARE(m_player->showing(), b);
+        QVERIFY(m_live->backgroundAlert().isEmpty());
     }
 
     // The layer checked it, but the file can still vanish before the player opens it.
@@ -252,7 +261,8 @@ private slots:
         m_media[b] = {MediaAsset::Kind::Image, QString()};
         QVERIFY(m_live->setBackground(b, kCut));
         QCOMPARE(m_player->showing(), a);
-        QVERIFY(!m_player->alert().isEmpty());
+        QCOMPARE(m_live->background().asset, a);
+        QVERIFY(!m_live->backgroundAlert().isEmpty());
     }
 
     void noBackgroundTakesTheOldOneAwayWithTheTransition()

@@ -33,8 +33,8 @@ class LiveState : public QObject
     Q_PROPERTY(bool backgroundCleared READ backgroundCleared NOTIFY changed)
     // The background layer's asset id without braces, empty for none.
     Q_PROPERTY(QString backgroundId READ backgroundId NOTIFY changed)
-    // Why the last background asked for isn't showing (its file is missing), for the
-    // operator; empty once a background shows.
+    // Why the last background asked for isn't showing (its file is missing or won't decode),
+    // for the operator; empty once a background shows.
     Q_PROPERTY(QString backgroundAlert READ backgroundAlert NOTIFY changed)
     // The live service and, when what's live came from it, the item (#51). Ids without
     // braces, empty when none; itemIndex is -1 when the live item isn't in the service.
@@ -120,6 +120,14 @@ public:
     // the live item's template's background transition.
     Q_INVOKABLE bool pickBackground(const QString &assetId);
     const BackgroundLayer &background() const { return m_background; }
+    // The player couldn't show `asset` after all (its file went, or it won't decode) and is
+    // still showing `showing`: the layer goes back to that, so it says what the outputs show,
+    // and backgroundAlert() says why. Asking for `asset` again tries again. Nothing changes
+    // when the layer has moved on from `asset` already.
+    void backgroundFailed(const QUuid &asset, const QUuid &showing, const QString &why);
+    // Puts back a journal's background on its own, checked as setBackground() does: for when
+    // the journal's item was refused but its background can still show.
+    void restoreBackground(const BackgroundLayer &layer);
 
     // How assets are checked before they go live: checkMedia over the media library's
     // snapshot in the app. It runs on this thread, so it must be quick (one stat). Without

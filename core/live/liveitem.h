@@ -56,12 +56,6 @@ public:
 // The live background (GLOSSARY.md "Background layer"): a media asset, whether it's
 // cleared, and the transition it arrived with, which clearing and showing it use too (#98).
 struct BackgroundLayer {
-    Q_GADGET
-    Q_PROPERTY(QString assetId READ assetId)   // without braces; empty for none
-    Q_PROPERTY(bool cleared MEMBER cleared)
-    Q_PROPERTY(visualis::Transition transition MEMBER transition)
-
-public:
     QUuid asset;   // null: no background
     bool cleared = false;
     Transition transition = Transitions{}.background;
