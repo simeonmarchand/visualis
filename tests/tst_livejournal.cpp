@@ -106,27 +106,26 @@ private slots:
     }
 
     // Written on the GUI thread on every slide change, so it must stay cheap.
-    // A shared CI runner can stall any one batch (#108), so this bounds the fastest of
-    // several: a real regression makes every batch slow.
+    // A shared CI runner can stall one run (#108), so the whole run gets three tries. Each
+    // run is a mean over 100 writes, so a cost that only some writes pay still fails all three.
     void writingIsCheap()
     {
         QTemporaryDir dir;
         LiveSnapshot s;
         s.song = sample();
-        constexpr int batches = 10;
-        constexpr int writesPerBatch = 10;
-        double fastest = std::numeric_limits<double>::max();
-        for (int b = 0; b < batches; ++b) {
+        constexpr int writes = 100;
+        double best = std::numeric_limits<double>::max();
+        for (int run = 0; run < 3 && best >= 5; ++run) {
             QElapsedTimer timer;
             timer.start();
-            for (int i = 0; i < writesPerBatch; ++i) {
+            for (int i = 0; i < writes; ++i) {
                 s.slideIndex = i % 3;
                 QVERIFY(writeJournal(dir.filePath("live.json"), s));
             }
-            fastest = std::min(fastest, timer.nsecsElapsed() / 1e6 / writesPerBatch);
+            best = std::min(best, timer.nsecsElapsed() / 1e6 / writes);
         }
-        qInfo() << "journal write, fastest batch:" << fastest << "ms";
-        QVERIFY2(fastest < 5, qPrintable(QString::number(fastest)));
+        qInfo() << "journal write:" << best << "ms";
+        QVERIFY2(best < 5, qPrintable(QString::number(best)));
     }
 
     void badJournalsAreRefusedNotFatal_data()
