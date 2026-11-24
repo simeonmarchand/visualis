@@ -269,6 +269,20 @@ Window {
                     Label { text: "Top, bottom"; color: "#d0d3d8" }
                     PercentField { to: Math.round(editor.maxSafeArea * 1000); fraction: editor.safeAreaY; onFractionEdited: f => editor.setSafeArea(editor.safeAreaX, f) }
                 }
+
+                Label { text: "Transitions"; color: "#d0d3d8"; font.bold: true; Layout.topMargin: 8 }
+                TransitionControls {
+                    objectName: "contentTransition"
+                    label: "Text"
+                    transition: editor.transitions.content
+                    onEdited: (kind, ms) => editor.setTransition("content", kind, ms)
+                }
+                TransitionControls {
+                    objectName: "backgroundTransition"
+                    label: "Background"
+                    transition: editor.transitions.background
+                    onEdited: (kind, ms) => editor.setTransition("background", kind, ms)
+                }
             }
         }
     }

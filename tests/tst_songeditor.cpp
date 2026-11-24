@@ -383,6 +383,35 @@ private slots:
         QCOMPARE(storedOverride(2), QJsonObject());
     }
 
+    // #96: a slide overrides its text transition; the rest follow the template's.
+    void aSlideOverridesItsTransition()
+    {
+        Template t = saveTemplate("Ours");
+        t.transitions.content = {TransitionKind::Fade, 400};
+        QVERIFY(m_templates->save(t).ok);
+        m_editor->setTemplateId(idText(t.id));
+        m_editor->selectSlide(slideKey(2), false);
+        QCOMPARE(m_editor->slideTransition(), (QVariantMap{{"kind", "fade"}, {"ms", 400}, {"overridden", false}, {"mixed", false}}));
+        m_editor->setSlideTransition("cut", 400);
+        QVERIFY(m_editor->warnings().isEmpty());
+        QCOMPARE(m_editor->slideTransition()["kind"].toString(), QStringLiteral("cut"));
+        QVERIFY(m_editor->slideTransition()["overridden"].toBool());
+        QCOMPARE(previewSlide(2)["content"].value<Content>().transition.kind, TransitionKind::Cut);
+        QCOMPARE(previewSlide(1)["content"].value<Content>().transition.kind, TransitionKind::Fade);
+        QCOMPARE(previewSlide(2)["overrides"].toInt(), 1);
+        QVERIFY(m_editor->flush());
+        QCOMPARE(storedOverride(2), (QJsonObject{{"transition", QJsonObject{{"kind", "cut"}, {"ms", 400}}}}));
+
+        m_editor->selectSlide(slideKey(1), true);
+        QVERIFY(m_editor->slideTransition()["mixed"].toBool());
+        m_editor->setSlideTransition("fade", 60'000);   // too long: refused for both
+        QVERIFY(!m_editor->warnings().isEmpty());
+        m_editor->resetSlideTransition();
+        QVERIFY(!m_editor->slideTransition()["overridden"].toBool());
+        QVERIFY(m_editor->flush());
+        QCOMPARE(storedOverride(2), QJsonObject());
+    }
+
     void severalSlidesAreStyledTogetherAndMixedValuesShow()
     {
         m_editor->selectSlide(slideKey(1), false);
@@ -583,6 +612,15 @@ private slots:
         QTest::mouseClick(editorWindow, Qt::LeftButton, {}, centre(item(controls, "reset_color")));
         QTRY_VERIFY(windowEditor->overriddenProperties().isEmpty());
         QTRY_VERIFY(item(tile(), "overrideMarker") && !item(tile(), "overrideMarker")->isVisible());
+
+        // The transition control edits the slide's override, and its reset puts it back.
+        QQuickItem *transition = item(controls, "slideTransition");
+        QVERIFY(transition);
+        QMetaObject::invokeMethod(transition, "edited", Q_ARG(QString, "fade"), Q_ARG(int, 500));
+        QCOMPARE(windowEditor->slideTransition()["kind"].toString(), QStringLiteral("fade"));
+        QTRY_VERIFY(item(transition, "resetTransition") && item(transition, "resetTransition")->isVisible());
+        QTest::mouseClick(editorWindow, Qt::LeftButton, {}, centre(item(transition, "resetTransition")));
+        QTRY_VERIFY(!windowEditor->slideTransition()["overridden"].toBool());
 
         if (const QString dir = qEnvironmentVariable("VISUALIS_SNAPSHOT_DIR"); !dir.isEmpty()) {
             windowEditor->setSlideProperty("weight", 800);

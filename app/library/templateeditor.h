@@ -38,6 +38,9 @@ class TemplateEditor : public QObject, public QQmlParserStatus
     Q_PROPERTY(double safeAreaX READ safeAreaX NOTIFY templateChanged)
     Q_PROPERTY(double safeAreaY READ safeAreaY NOTIFY templateChanged)
     Q_PROPERTY(double maxSafeArea READ maxSafeArea CONSTANT)
+    // Each layer's transition (#96), as in the template JSON:
+    // {content: {kind: "cut", ms: 300}, background: {kind: "fade", ms: 600}}.
+    Q_PROPERTY(QVariantMap transitions READ transitions NOTIFY templateChanged)
     Q_PROPERTY(QString sampleText READ sampleText WRITE setSampleText NOTIFY sampleTextChanged)
     // The sample text through the template as edited, saved or not, as the output draws it.
     Q_PROPERTY(visualis::Content preview READ preview NOTIFY previewChanged)
@@ -65,6 +68,7 @@ public:
     double safeAreaX() const { return m_tmpl.safeAreaX; }
     double safeAreaY() const { return m_tmpl.safeAreaY; }
     static double maxSafeArea();
+    QVariantMap transitions() const;
     QString sampleText() const { return m_sampleText; }
     void setSampleText(const QString &text);
     visualis::Content preview() const;
@@ -85,6 +89,9 @@ public:
     // `warnings` says why.
     Q_INVOKABLE void setStyle(const QVariantMap &properties);
     Q_INVOKABLE void setSafeArea(double x, double y);
+    // `layer` is "content" or "background", `kind` "cut" or "fade". Refused, with `warnings`
+    // saying why, for anything else or a length out of range.
+    Q_INVOKABLE void setTransition(const QString &layer, const QString &kind, int ms);
     // The region's frame after dragging `edges` (Qt.LeftEdge | ..., all four to move it) by
     // (dx, dy) from `start`, the frame when the drag began: see draggedFrame.
     Q_INVOKABLE void dragFrame(const QRectF &start, int edges, double dx, double dy);

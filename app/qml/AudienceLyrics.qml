@@ -72,7 +72,7 @@ Item {
 
     // One slide's text in its frame and style, with its shadow. Its Text's opacity is what fades.
     component Layer: Item {
-        id: layer
+        id: slot
         required property string lyricName
         property string text
         property regionStyle textStyle
@@ -81,46 +81,46 @@ Item {
 
         Item {
             id: frame
-            x: layer.width * layer.textStyle.frame.x
-            y: layer.height * layer.textStyle.frame.y
-            width: layer.width * layer.textStyle.frame.width
-            height: layer.height * layer.textStyle.frame.height
-            visible: !layer.textStyle.shadow.enabled   // drawn through the shadow effect instead
+            x: slot.width * slot.textStyle.frame.x
+            y: slot.height * slot.textStyle.frame.y
+            width: slot.width * slot.textStyle.frame.width
+            height: slot.height * slot.textStyle.frame.height
+            visible: !slot.textStyle.shadow.enabled   // drawn through the shadow effect instead
 
             Text {
-                objectName: layer.lyricName
+                objectName: slot.lyricName
                 anchors.fill: parent
-                text: layer.text
-                opacity: layer.lyricOpacity
-                horizontalAlignment: layer.textStyle.horizontalAlignment
-                verticalAlignment: layer.textStyle.verticalAlignment
+                text: slot.text
+                opacity: slot.lyricOpacity
+                horizontalAlignment: slot.textStyle.horizontalAlignment
+                verticalAlignment: slot.textStyle.verticalAlignment
                 textFormat: Text.PlainText   // lyrics are never markup
                 wrapMode: Text.WordWrap
                 // Shrink to fit the frame; at the smallest size, elide rather than overflow.
                 fontSizeMode: Text.Fit
-                font.pixelSize: Math.max(1, Math.round(layer.height * layer.textStyle.maxSize))
-                minimumPixelSize: Math.max(1, Math.round(layer.height * layer.textStyle.minSize))
+                font.pixelSize: Math.max(1, Math.round(slot.height * slot.textStyle.maxSize))
+                minimumPixelSize: Math.max(1, Math.round(slot.height * slot.textStyle.minSize))
                 elide: Text.ElideRight
-                font.family: layer.textStyle.fontFamily
-                font.weight: layer.textStyle.weight
-                lineHeight: layer.textStyle.lineHeight
-                color: layer.textStyle.color
+                font.family: slot.textStyle.fontFamily
+                font.weight: slot.textStyle.weight
+                lineHeight: slot.textStyle.lineHeight
+                color: slot.textStyle.color
                 // QML draws a 1 px outline; wider ones are left for later.
-                style: layer.textStyle.outline.width > 0 ? Text.Outline : Text.Normal
-                styleColor: layer.textStyle.outline.color
+                style: slot.textStyle.outline.width > 0 ? Text.Outline : Text.Normal
+                styleColor: slot.textStyle.outline.color
             }
         }
 
         MultiEffect {
-            visible: layer.textStyle.shadow.enabled
+            visible: slot.textStyle.shadow.enabled
             source: frame
             anchors.fill: frame
             shadowEnabled: true
-            shadowColor: layer.textStyle.shadow.color
-            shadowOpacity: layer.textStyle.shadow.opacity
-            shadowBlur: layer.textStyle.shadow.blur
-            shadowHorizontalOffset: layer.height * layer.textStyle.shadow.offset
-            shadowVerticalOffset: layer.height * layer.textStyle.shadow.offset
+            shadowColor: slot.textStyle.shadow.color
+            shadowOpacity: slot.textStyle.shadow.opacity
+            shadowBlur: slot.textStyle.shadow.blur
+            shadowHorizontalOffset: slot.height * slot.textStyle.shadow.offset
+            shadowVerticalOffset: slot.height * slot.textStyle.shadow.offset
             autoPaddingEnabled: true
         }
     }

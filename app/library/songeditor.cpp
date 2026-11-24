@@ -384,6 +384,24 @@ QStringList SongEditor::mixedProperties() const
     return out;
 }
 
+QVariantMap SongEditor::slideTransition() const
+{
+    const QList<QJsonObject> selected = selectedOverrides();
+    if (selected.isEmpty())
+        return {};
+    const Transition content = songTemplate().transitions.content;
+    const Transition first = effectiveTransition(content, {selected.first()});
+    bool overridden = false, mixed = false;
+    for (const QJsonObject &o : selected) {
+        overridden = overridden || overrides::overridesTransition(o);
+        mixed = mixed || effectiveTransition(content, {o}) != first;
+    }
+    QVariantMap out = transitionToJson(first).toVariantMap();
+    out.insert("overridden", overridden);
+    out.insert("mixed", mixed);
+    return out;
+}
+
 void SongEditor::editSelected(const std::function<QString(QJsonObject &)> &edit)
 {
     if (!loaded())
@@ -447,6 +465,21 @@ void SongEditor::resetSlides()
 {
     editSelected([](QJsonObject &o) {
         overrides::resetAll(o);
+        return QString();
+    });
+}
+
+void SongEditor::setSlideTransition(const QString &kind, int ms)
+{
+    QStringList warnings;
+    const Transition t = applyTransition({}, {{"kind", kind}, {"ms", ms}}, QStringLiteral("transition"), &warnings);
+    editSelected([&](QJsonObject &o) { return warnings.isEmpty() ? overrides::setTransition(o, t) : warnings.first(); });
+}
+
+void SongEditor::resetSlideTransition()
+{
+    editSelected([](QJsonObject &o) {
+        overrides::resetTransition(o);
         return QString();
     });
 }

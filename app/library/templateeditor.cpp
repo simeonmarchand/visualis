@@ -149,6 +149,12 @@ double TemplateEditor::maxSafeArea()
     return templatelimits::kMaxSafeArea;
 }
 
+QVariantMap TemplateEditor::transitions() const
+{
+    return {{"content", transitionToJson(m_tmpl.transitions.content).toVariantMap()},
+            {"background", transitionToJson(m_tmpl.transitions.background).toVariantMap()}};
+}
+
 void TemplateEditor::setSampleText(const QString &text)
 {
     if (text == m_sampleText)
@@ -221,6 +227,26 @@ void TemplateEditor::setSafeArea(double x, double y)
     }
     m_tmpl.safeAreaX = x;
     m_tmpl.safeAreaY = y;
+    edited();
+}
+
+void TemplateEditor::setTransition(const QString &layer, const QString &kind, int ms)
+{
+    if (!requireEditable())
+        return;
+    Transition *t = layer == QLatin1String("content")      ? &m_tmpl.transitions.content
+                    : layer == QLatin1String("background") ? &m_tmpl.transitions.background
+                                                           : nullptr;
+    QStringList warnings;
+    const Transition next = t ? applyTransition(*t, {{"kind", kind}, {"ms", ms}}, layer, &warnings) : Transition();
+    if (!t)
+        warnings << QStringLiteral("\"%1\" isn't a layer").arg(layer.left(40));
+    if (!warnings.isEmpty()) {
+        setProblems(warnings, {});
+        emit templateChanged();   // a control showing the refused value goes back
+        return;
+    }
+    *t = next;
     edited();
 }
 
