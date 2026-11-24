@@ -167,20 +167,8 @@ using TemplateSet = QHash<QUuid, Template>;
 // `stored` and the built-ins; a stored template can't replace a built-in.
 TemplateSet templateSet(const QList<Template> &stored);
 
-// Overrides, as stored in ServiceItem::overrides and per slide (Group::slideOverrides):
-//
-//   {"template": "<template id>",
-//    "regions": {"main": {"color": "#ffcc00", "maxSize": 0.07, "shadow": {"opacity": 0.5},
-//                         "frame": {"y": 0.6}}}}
-//
-// Every key is optional. Region properties use the template JSON's names (templatejson.h),
-// nested objects key by key, so overriding shadow.opacity leaves the shadow's color following
-// the template. "template" picks another template for the item; on a slide it's ignored.
-// Layers apply in order, later winning: the item's overrides, then the slide's.
-//
-// Per-slide overrides are an array parallel to the group's slides (Group::slideOverrides).
-// When lyrics text is edited (#95), the editor must remap that array by matching unchanged
-// slide text, so an override follows its slide rather than its index.
+// Overrides (ServiceItem::overrides, Group::slideOverrides): the format, and the only code
+// that edits them, are in overrides.h.
 
 // The template an override picks, or null.
 QUuid overrideTemplateId(const QJsonObject &overrides);
