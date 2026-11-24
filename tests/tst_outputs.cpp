@@ -1,18 +1,22 @@
 #include "live/livestate.h"
 #include "output/latencyprobe.h"
+#include "video/videoengine.h"
 
+#include <QElapsedTimer>
 #include <QFont>
 #include <QJSValue>
 #include <QQmlApplicationEngine>
 #include <QQmlComponent>
 #include <QQuickItem>
 #include <QQuickWindow>
+#include <QScreen>
 #include <QtQml/qqmlextensionplugin.h>
 #include <QtTest>
 
 #include "testkeychain.h"
 
 #include <memory>
+#include <mutex>
 
 Q_IMPORT_QML_PLUGIN(Visualis_UiPlugin)
 
@@ -337,6 +341,75 @@ private slots:
             QVERIFY2(ms < 50, qPrintable(QString::number(ms)));
     }
 
+    // #96, plan 5.5: a fade drops no frames. The P1 benchmarks' check: a frame interval over
+    // 1.5 refresh periods is late. Needs a real display, so it runs only when asked:
+    //   VISUALIS_FRAME_BENCH=1 QT_QPA_PLATFORM=cocoa tst_outputs fadesDropNoFrames
+    // with VISUALIS_BENCH_VIDEO=<clip> to fade over a playing background. Results are in
+    // docs/benchmarks/2026-11-24-fade-frame-timing.md.
+    void fadesDropNoFrames()
+    {
+        if (qEnvironmentVariableIsEmpty("VISUALIS_FRAME_BENCH") || QGuiApplication::platformName() == "offscreen")
+            QSKIP("a benchmark; run with VISUALIS_FRAME_BENCH=1 and QT_QPA_PLATFORM=cocoa");
+        QQuickWindow *w = output("audience");
+        if (const QString clip = qEnvironmentVariable("VISUALIS_BENCH_VIDEO"); !clip.isEmpty()) {
+            auto *video = m_engine->singletonInstance<VideoEngine *>("Visualis.Ui", "VideoEngine");
+            video->setSource(QUrl::fromLocalFile(clip));
+            QTRY_COMPARE_WITH_TIMEOUT(video->status(), QStringLiteral("Playing"), 10000);
+        }
+        const double periodMs = 1000.0 / w->screen()->refreshRate();
+
+        QElapsedTimer clock;
+        clock.start();
+        std::mutex lock;
+        QList<qint64> swaps;   // ns on `clock`, from the render thread
+        connect(w, &QQuickWindow::frameSwapped, w, [&] {
+            const std::lock_guard<std::mutex> guard(lock);
+            swaps << clock.nsecsElapsed();
+        }, Qt::DirectConnection);
+
+        struct Fade { qint64 from, to; };
+        auto run = [&](int ms, int times, const std::function<void(int)> &step) {
+            QList<Fade> fades;
+            for (int i = 0; i < times; ++i) {
+                const qint64 from = clock.nsecsElapsed();
+                step(i);
+                fades << Fade{from, from + qint64(ms) * 1'000'000};
+                spin(ms + 250);
+            }
+            return fades;
+        };
+        auto report = [&](const char *what, const QList<Fade> &fades) {
+            const std::lock_guard<std::mutex> guard(lock);
+            int frames = 0, late = 0, fewest = INT_MAX;
+            double longest = 0;
+            for (const Fade &f : fades) {
+                int inFade = 0;
+                for (qsizetype i = 1; i < swaps.size(); ++i) {
+                    if (swaps[i - 1] < f.from || swaps[i] > f.to)
+                        continue;   // the first frame of a fade includes the command's latency
+                    const double ms = (swaps[i] - swaps[i - 1]) / 1e6;
+                    ++inFade;
+                    late += ms > 1.5 * periodMs;
+                    longest = std::max(longest, ms);
+                }
+                frames += inFade;
+                fewest = std::min(fewest, inFade);
+            }
+            qInfo("%s: %lld fades, %d frame intervals (fewest in one fade %d), %d late, longest %.2f ms, refresh %.2f Hz",
+                  what, qlonglong(fades.size()), frames, fewest, late, longest, 1000 / periodMs);
+            return late;
+        };
+
+        m_live->show(throughTemplate(sample(), [](Template &t) { t.transitions.content = {TransitionKind::Fade, 500}; }), 1);
+        spin(1000);
+        const int textLate = report("text fade 500 ms", run(500, 20, [&](int i) { i % 2 ? m_live->previous() : m_live->next(); }));
+        const int backgroundLate = report("background fade 600 ms", run(600, 10, [&](int i) {
+            i % 2 ? m_live->showBackground() : m_live->clearBackground();
+        }));
+        QCOMPARE(textLate, 0);
+        QCOMPARE(backgroundLate, 0);
+    }
+
     // Plan 5.2: an output owns no state, so a reopened window shows what's live.
     void aNewOutputWindowShowsWhatIsLive()
     {
@@ -368,6 +441,15 @@ private:
         if (!layer)
             return nullptr;
         return w->findChild<QQuickItem *>(layer->property("showingA").toBool() ? "lyricsA" : "lyricsB");
+    }
+
+    // Runs the event loop for `ms`. QTest::qWait sleeps between batches of events, which
+    // starves animations on the GUI thread and reads as dropped frames.
+    static void spin(int ms)
+    {
+        QEventLoop loop;
+        QTimer::singleShot(ms, &loop, &QEventLoop::quit);
+        loop.exec();
     }
 
     static QObject *fade(QQuickWindow *w) { return w->findChild<QObject *>("lyricsFade"); }
