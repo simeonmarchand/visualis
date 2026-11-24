@@ -2,7 +2,6 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import QtMultimedia
 import Visualis.Ui
 
 // Edit templates (#94, plan 5.4): the list, then the selected region's look and place,
@@ -124,13 +123,7 @@ Window {
                     clip: true
 
                     // What's on the audience's background now, if anything.
-                    VideoOutput {
-                        id: background
-                        anchors.fill: parent
-                        fillMode: VideoOutput.PreserveAspectCrop
-                        visible: VideoEngine.source.toString() !== "" && !LiveState.backgroundCleared
-                        Component.onCompleted: VideoEngine.addTarget(background.videoSink)
-                    }
+                    BackgroundView { anchors.fill: parent }
                     AudienceLyrics {
                         anchors.fill: parent
                         content: editor.preview
@@ -287,7 +280,7 @@ Window {
                 }
                 Label {
                     Layout.fillWidth: true
-                    text: "Saved with the template. The outputs don't use the background transition yet: clearing the background still fades."
+                    text: "Saved with the template. The background transition is used when the background is picked, cleared, or shown again."
                     wrapMode: Text.WordWrap
                     color: "#8b8f96"
                 }

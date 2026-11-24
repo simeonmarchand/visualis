@@ -56,9 +56,11 @@ private slots:
         engine.addTarget(&a);
         engine.addTarget(&b);
         QCOMPARE(engine.status(), QStringLiteral("No background"));
+        QSignalSpy playing(&engine, &VideoEngine::playing);
 
         engine.setSource(QUrl::fromLocalFile(m_clip));
         QTRY_COMPARE_WITH_TIMEOUT(engine.status(), QStringLiteral("Playing"), 10000);
+        QCOMPARE(playing.count(), 1);   // the background player swaps a video in on this (#98)
         QTRY_VERIFY(*framesA > 10 && *framesB > 10);
     }
 

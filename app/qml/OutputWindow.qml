@@ -1,5 +1,4 @@
 import QtQuick
-import QtMultimedia
 import Visualis.Ui
 
 // An audience or stage output: a view of LiveState (plan 5.2) that owns no state of its
@@ -18,16 +17,12 @@ Window {
     color: "black"
     visible: false
 
-    // Background layer: independent of the text, so slide changes never touch it.
-    VideoOutput {
-        id: background
-        objectName: "background"
+    // Background layer: independent of the text, so slide changes never touch it. The stage
+    // display shows text only, so it never asks for the background's frames.
+    Loader {
         anchors.fill: parent
-        fillMode: VideoOutput.PreserveAspectCrop
-        visible: root.showsBackground
-        opacity: LiveState.backgroundCleared ? 0 : 1
-        // The background layer and its transition come with #98/#99.
-        Behavior on opacity { NumberAnimation { duration: 600 } }
+        active: root.showsBackground
+        sourceComponent: BackgroundView { objectName: "background" }
     }
 
     AudienceLyrics {
@@ -39,10 +34,5 @@ Window {
     StageDisplay {
         anchors.fill: parent
         visible: root.role === "stage"
-    }
-
-    Component.onCompleted: {
-        if (showsBackground)
-            VideoEngine.addTarget(background.videoSink)
     }
 }

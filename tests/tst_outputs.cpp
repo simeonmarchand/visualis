@@ -1,6 +1,6 @@
 #include "live/livestate.h"
 #include "output/latencyprobe.h"
-#include "video/videoengine.h"
+#include "background/backgroundplayer.h"
 
 #include <QElapsedTimer>
 #include <QFont>
@@ -10,6 +10,7 @@
 #include <QQuickItem>
 #include <QQuickWindow>
 #include <QScreen>
+#include <QTemporaryDir>
 #include <QtQml/qqmlextensionplugin.h>
 #include <QtTest>
 
@@ -87,12 +88,21 @@ private slots:
         m_engine = std::make_unique<QQmlApplicationEngine>();
         m_live = m_engine->singletonInstance<LiveState *>("Visualis.Ui", "LiveState");
         QVERIFY(m_live);
+        // Media is checked against the files made here, not a library.
+        m_live->setMediaCheck([this](const QUuid &id) {
+            MediaCheck c;
+            c.status = m_media.contains(id) ? MediaStatus::Ok : MediaStatus::UnknownId;
+            c.kind = m_media.value(id).first;
+            c.path = m_media.value(id).second;
+            return c;
+        });
     }
 
     void cleanup()
     {
         m_windows.clear();
         m_engine.reset();
+        m_media.clear();
     }
 
     void audienceShowsTheCurrentSlide()
@@ -311,13 +321,64 @@ private slots:
         QTRY_COMPARE(text(stage, "stageNext"), QString());
     }
 
-    void clearingTheBackgroundFadesTheVideo()
+    // #98: a still from the media library reaches the audience's pixels, stays through slide
+    // changes, and the stage display never shows it.
+    void aStillBackgroundShowsOnTheAudience()
     {
         QQuickWindow *w = output("audience");
-        auto *video = w->findChild<QQuickItem *>("background");
-        QCOMPARE(video->opacity(), 1.0);
+        QQuickWindow *stage = output("stage");
+        m_live->show(libraryItem(sample()), 0);   // the blank intro: nothing over the still
+        const QUuid still = addStill(Qt::red);
+        QVERIFY(m_live->setBackground(still, {}));
+        QTRY_COMPARE_WITH_TIMEOUT(player()->showing(), still, 5000);
+        QTRY_VERIFY(isMostly(w->grabWindow(), Qt::red));
+        QVERIFY(!stage->findChild<QQuickItem *>("background"));
+        m_live->next();
+        m_live->previous();
+        QTRY_VERIFY(isMostly(w->grabWindow(), Qt::red));
+        snapshot(w, "still-background");
+    }
+
+    void switchingStillsShowsTheNewOne()
+    {
+        QQuickWindow *w = output("audience");
+        QVERIFY(m_live->setBackground(addStill(Qt::red), {}));
+        QTRY_VERIFY_WITH_TIMEOUT(isMostly(w->grabWindow(), Qt::red), 5000);
+        const QUuid blue = addStill(Qt::blue);
+        QVERIFY(m_live->setBackground(blue, {}));
+        QTRY_VERIFY_WITH_TIMEOUT(isMostly(w->grabWindow(), Qt::blue), 5000);
+    }
+
+    // Clearing uses the layer's transition: a cut by default.
+    void clearingTheBackgroundUsesItsTransition()
+    {
+        QQuickWindow *w = output("audience");
+        auto *background = w->findChild<QQuickItem *>("background");
+        QVERIFY(background);
+        QVERIFY(m_live->setBackground(addStill(Qt::red), {}));
+        QCOMPARE(background->opacity(), 1.0);
         m_live->clearBackground();
-        QTRY_COMPARE(video->opacity(), 0.0);
+        QCOMPARE(background->opacity(), 0.0);
+        m_live->showBackground();
+        QCOMPARE(background->opacity(), 1.0);
+
+        QVERIFY(m_live->setBackground(addStill(Qt::blue), {TransitionKind::Fade, kLongFadeMs}));
+        m_live->clearBackground();
+        QTest::qWait(150);
+        QVERIFY2(background->opacity() > 0 && background->opacity() < 1, qPrintable(QString::number(background->opacity())));
+        QTRY_COMPARE_WITH_TIMEOUT(background->opacity(), 0.0, 3 * kLongFadeMs);
+    }
+
+    void fillOrFitIsTheStillsFillMode()
+    {
+        QQuickWindow *w = output("audience");
+        QVERIFY(m_live->setBackground(addStill(Qt::red), {}));
+        auto *image = w->findChild<QQuickItem *>("backgroundStill");
+        QVERIFY(image);
+        QCOMPARE(image->property("fillMode").toInt(), 2);   // Image.PreserveAspectCrop
+        player()->setFillMode("fit");
+        QCOMPARE(image->property("fillMode").toInt(), 1);   // Image.PreserveAspectFit
+        player()->setFillMode("fill");
     }
 
     // #24 acceptance: a command reaches the output's next frame in under 50 ms.
@@ -351,10 +412,13 @@ private slots:
         if (qEnvironmentVariableIsEmpty("VISUALIS_FRAME_BENCH") || QGuiApplication::platformName() == "offscreen")
             QSKIP("a benchmark; run with VISUALIS_FRAME_BENCH=1 and QT_QPA_PLATFORM=cocoa");
         QQuickWindow *w = output("audience");
+        // The background fades below need a background that fades.
+        const Transition backgroundFade{TransitionKind::Fade, 600};
         if (const QString clip = qEnvironmentVariable("VISUALIS_BENCH_VIDEO"); !clip.isEmpty()) {
-            auto *video = m_engine->singletonInstance<VideoEngine *>("Visualis.Ui", "VideoEngine");
-            video->setSource(QUrl::fromLocalFile(clip));
-            QTRY_COMPARE_WITH_TIMEOUT(video->status(), QStringLiteral("Playing"), 10000);
+            QVERIFY(m_live->setBackground(addMedia(MediaAsset::Kind::Video, clip), backgroundFade));
+            QTRY_COMPARE_WITH_TIMEOUT(player()->status(), QStringLiteral("Playing"), 10000);
+        } else {
+            QVERIFY(m_live->setBackground(addStill(Qt::darkBlue), backgroundFade));
         }
         const double periodMs = 1000.0 / w->screen()->refreshRate();
 
@@ -419,6 +483,42 @@ private slots:
     }
 
 private:
+    BackgroundPlayer *player() const
+    {
+        return m_engine->singletonInstance<BackgroundPlayer *>("Visualis.Ui", "BackgroundPlayer");
+    }
+
+    QUuid addMedia(MediaAsset::Kind kind, const QString &path)
+    {
+        const QUuid id = QUuid::createUuid();
+        m_media[id] = {kind, path};
+        return id;
+    }
+
+    // A still of one color, as a file the media check points at.
+    QUuid addStill(const QColor &color)
+    {
+        QImage image(320, 180, QImage::Format_RGB32);
+        image.fill(color);
+        const QString path = m_files.filePath(QUuid::createUuid().toString(QUuid::WithoutBraces) + ".png");
+        if (!image.save(path))
+            qFatal("can't write a test still");
+        return addMedia(MediaAsset::Kind::Image, path);
+    }
+
+    static bool isMostly(const QImage &image, const QColor &color)
+    {
+        int matching = 0, total = 0;
+        for (int y = 0; y < image.height(); y += 16) {
+            for (int x = 0; x < image.width(); x += 16, ++total) {
+                const QColor c = image.pixelColor(x, y);
+                matching += qAbs(c.red() - color.red()) < 40 && qAbs(c.green() - color.green()) < 40
+                            && qAbs(c.blue() - color.blue()) < 40;
+            }
+        }
+        return total > 0 && matching > total * 9 / 10;
+    }
+
     QQuickWindow *output(const QString &role)
     {
         QQmlComponent component(m_engine.get(), "Visualis.Ui", "OutputWindow");
@@ -487,6 +587,8 @@ private:
     std::unique_ptr<QQmlApplicationEngine> m_engine;
     LiveState *m_live = nullptr;
     std::vector<std::unique_ptr<QObject>> m_windows;
+    QTemporaryDir m_files;
+    QHash<QUuid, std::pair<MediaAsset::Kind, QString>> m_media;
 };
 
 QTEST_MAIN(OutputsTest)

@@ -1,6 +1,5 @@
 import QtQuick
 import QtQuick.Controls
-import QtQuick.Dialogs
 import QtQuick.Layouts
 import Visualis.Ui
 
@@ -11,16 +10,6 @@ ColumnLayout {
     spacing: 8
 
     signal templatesRequested()
-
-    FileDialog {
-        id: backgroundDialog
-        title: "Choose a background video"
-        nameFilters: ["Video (*.mp4 *.mov *.m4v)", "All files (*)"]
-        onAccepted: {
-            VideoEngine.source = selectedFile
-            Commands.run("show_background")   // choosing one brings a cleared background back
-        }
-    }
 
     PlanningCenterDialog { id: pcoDialog }
     PlanPickerDialog { id: planPicker }
@@ -64,15 +53,10 @@ ColumnLayout {
             Layout.preferredWidth: 80
         }
         Button {
-            text: "Choose video…"
-            focusPolicy: Qt.NoFocus
-            onClicked: backgroundDialog.open()
-        }
-        Button {
             text: "None"
             focusPolicy: Qt.NoFocus
-            enabled: VideoEngine.source.toString() !== ""
-            onClicked: VideoEngine.source = ""
+            enabled: LiveState.backgroundId !== ""
+            onClicked: LiveState.pickBackground("")
         }
         Button {
             objectName: "showBackground"
@@ -83,7 +67,7 @@ ColumnLayout {
         }
         Label {
             objectName: "backgroundStatus"
-            text: VideoEngine.status
+            text: BackgroundPlayer.status
             color: "#8b8f96"
         }
         Button {
@@ -96,8 +80,9 @@ ColumnLayout {
 
     Label {
         objectName: "backgroundAlert"
-        visible: VideoEngine.alert !== ""
-        text: VideoEngine.alert
+        readonly property string message: LiveState.backgroundAlert !== "" ? LiveState.backgroundAlert : BackgroundPlayer.alert
+        visible: message !== ""
+        text: message
         color: "#e0b040"
     }
 
