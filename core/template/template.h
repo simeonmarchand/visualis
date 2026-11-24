@@ -137,6 +137,7 @@ struct Template {
     bool operator==(const Template &) const = default;
 
     const TextRegion *region(const QString &id) const;
+    TextRegion *region(const QString &id);
 };
 
 QString templateKindName(TemplateKind kind);                       // "lower_third"
@@ -153,6 +154,13 @@ Template builtInLyricsTemplate();
 QList<Template> builtInTemplates();
 std::optional<Template> builtInTemplate(const QUuid &id);
 bool isBuiltInTemplate(const QUuid &id);
+
+// The smallest a frame can be dragged to, as a fraction of the output's width or height.
+constexpr double kMinFrameSize = 0.05;
+// `start` after dragging `edges` by `delta` (fractions of the output) in the template editor:
+// all four edges move it, fewer resize it. It stays on the output and no smaller than
+// kMinFrameSize, so a drag past the edge stops there.
+QRectF draggedFrame(const QRectF &start, Qt::Edges edges, QPointF delta);
 
 // The templates an item can use, by id: a value snapshot, so rendering does no I/O (#93).
 using TemplateSet = QHash<QUuid, Template>;

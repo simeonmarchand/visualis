@@ -344,8 +344,8 @@ TemplateJsonResult templateFromJson(const QByteArray &json)
 
     if (const QJsonObject sa = r.object("safeArea"); !sa.isEmpty()) {
         Reader sr(sa, r.where("safeArea"), warnings);
-        sr.number("x", 0, 0.45, t.safeAreaX);
-        sr.number("y", 0, 0.45, t.safeAreaY);
+        sr.number("x", 0, templatelimits::kMaxSafeArea, t.safeAreaX);
+        sr.number("y", 0, templatelimits::kMaxSafeArea, t.safeAreaY);
     }
     if (const QJsonObject tr = r.object("transitions"); !tr.isEmpty()) {
         Reader trr(tr, r.where("transitions"), warnings);

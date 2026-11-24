@@ -35,6 +35,8 @@ class SongEditor : public QObject
     Q_PROPERTY(QVariantList sequence READ sequence NOTIFY changed)
     // {text, groupLabel, groupColor} per slide, in that arrangement's order.
     Q_PROPERTY(QVariantList previewSlides READ previewSlides NOTIFY changed)
+    // The template it shows with (#94); the built-in's id when it has none of its own.
+    Q_PROPERTY(QString templateId READ templateId WRITE setTemplateId NOTIFY changed)
     Q_PROPERTY(QStringList warnings READ warnings NOTIFY changed)
     Q_PROPERTY(QString error READ error NOTIFY changed)
 
@@ -55,6 +57,8 @@ public:
     void selectArrangement(const QString &id);
     QVariantList sequence() const;
     QVariantList previewSlides() const;
+    QString templateId() const;
+    void setTemplateId(const QString &id);
     QStringList warnings() const { return m_warnings; }
     QString error() const { return m_error; }
 

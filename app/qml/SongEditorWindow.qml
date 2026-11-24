@@ -6,8 +6,8 @@ import QtQuick.Layouts
 import Visualis.Ui
 
 // Edit a song (#44, plan W3): title and credits, lyrics as text with "[Label]" headers and
-// blank-line slide breaks, its groups, and its arrangements, with a preview through the
-// lyrics template. Every change saves at once.
+// blank-line slide breaks, its groups, its arrangements, and its template, with a preview
+// through that template. Every change saves at once.
 Window {
     id: window
     objectName: "songEditorWindow"
@@ -78,6 +78,23 @@ Window {
                 placeholderText: "Title"
                 text: editor.title
                 onEditingFinished: editor.setTitle(text)
+            }
+            Label { text: "Template"; color: "#d0d3d8" }
+            ComboBox {
+                id: templateChoice
+                objectName: "songTemplate"
+                Layout.preferredWidth: 200
+                model: TemplateLibrary.entries.filter(t => t.kind === "lyrics")
+                textRole: "name"
+                valueRole: "id"
+                currentIndex: indexOfValue(editor.templateId)
+                function resync() { currentIndex = Qt.binding(() => indexOfValue(editor.templateId)) }
+                // indexOfValue doesn't re-run when the list changes around the chosen one; after
+                // the new list is in, so the index is looked up in it.
+                onModelChanged: Qt.callLater(resync)
+                // A template deleted since: the song shows with the built-in (#93).
+                displayText: currentIndex < 0 ? "Missing (built-in shows)" : currentText
+                onActivated: editor.templateId = currentValue
             }
             Button {
                 text: "Delete song…"
@@ -245,7 +262,7 @@ Window {
                 }
             }
 
-            // Preview through the lyrics template, in play order.
+            // Preview through the song's template, in play order.
             ColumnLayout {
                 Layout.fillWidth: true
                 Layout.fillHeight: true

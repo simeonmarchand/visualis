@@ -1,11 +1,12 @@
 #include "library/templatelibrary.h"
 
 #include "library/songlibrary.h"
-#include "template/templatestore.h"
 
 #include <QJSEngine>
 #include <QLoggingCategory>
 #include <QQmlEngine>
+
+#include <algorithm>
 
 using namespace visualis;
 
@@ -16,7 +17,10 @@ TemplateLibrary::TemplateLibrary(SongLibrary *songs)
     , m_songs(songs)
     , m_templates(templateSet({}))
 {
-    connect(songs, &SongLibrary::libraryChanged, this, &TemplateLibrary::reload);
+    connect(songs, &SongLibrary::libraryChanged, this, [this] {
+        emit libraryChanged();
+        reload();
+    });
     reload();
 }
 
@@ -27,38 +31,38 @@ TemplateLibrary *TemplateLibrary::create(QQmlEngine *qml, QJSEngine *)
     return templates;
 }
 
-bool TemplateLibrary::save(Template &tmpl, QString *error)
+Library *TemplateLibrary::library() const
 {
-    Library *library = m_songs ? m_songs->library() : nullptr;
-    if (!library) {
-        if (error)
-            *error = QStringLiteral("The library isn't open.");
-        return false;
-    }
-    const TemplateStore::Result r = TemplateStore(*library).save(tmpl);
-    if (!r.ok) {
-        if (error)
-            *error = r.error;
-        return false;
-    }
-    reload();
-    return true;
+    return m_songs ? m_songs->library() : nullptr;
 }
 
-bool TemplateLibrary::remove(const QUuid &id)
+TemplateStore::Result TemplateLibrary::save(Template &tmpl, TemplateStore::Lock lock)
 {
-    Library *library = m_songs ? m_songs->library() : nullptr;
-    if (!library || !TemplateStore(*library).remove(id))
-        return false;
-    reload();
-    return true;
+    Library *lib = library();
+    if (!lib)
+        return {false, QStringLiteral("The library isn't open.")};
+    const TemplateStore::Result r = TemplateStore(*lib).save(tmpl, lock);
+    if (r.ok)
+        reload();
+    return r;
+}
+
+TemplateStore::Result TemplateLibrary::remove(const QUuid &id)
+{
+    Library *lib = library();
+    if (!lib)
+        return {false, QStringLiteral("The library isn't open.")};
+    const TemplateStore::Result r = TemplateStore(*lib).remove(id);
+    if (r.ok)
+        reload();
+    return r;
 }
 
 void TemplateLibrary::reload()
 {
     QList<Template> stored;
-    if (Library *library = m_songs ? m_songs->library() : nullptr) {
-        const TemplateStore store(*library);
+    if (Library *lib = library()) {
+        const TemplateStore store(*lib);
         for (const TemplateSummary &summary : store.list()) {
             if (summary.builtIn)
                 continue;
@@ -71,5 +75,19 @@ void TemplateLibrary::reload()
         }
     }
     m_templates = templateSet(stored);
+
+    std::sort(stored.begin(), stored.end(), [](const Template &a, const Template &b) {
+        const int byName = a.name.compare(b.name, Qt::CaseInsensitive);
+        return byName != 0 ? byName < 0 : a.id < b.id;
+    });
+    QVariantList entries;
+    for (const Template &t : builtInTemplates() + stored) {
+        entries.append(QVariantMap{{"id", t.id.toString(QUuid::WithoutBraces)}, {"name", t.name},
+                                   {"kind", templateKindName(t.kind)}, {"builtIn", isBuiltInTemplate(t.id)}});
+    }
+    const bool listChanged = entries != m_entries;
+    m_entries = entries;
     emit templatesChanged();
+    if (listChanged)
+        emit entriesChanged();
 }

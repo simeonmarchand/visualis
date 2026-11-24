@@ -7,6 +7,7 @@
 #include "template/templatestore.h"
 
 #include <QJsonArray>
+#include <QElapsedTimer>
 #include <QJsonDocument>
 #include <QSqlQuery>
 #include <QTemporaryDir>
@@ -245,8 +246,8 @@ private slots:
         QCOMPARE(list[2].name, QStringLiteral("Another"));
         QCOMPARE(list[2].kind, TemplateKind::LowerThird);
 
-        QVERIFY(store.remove(b.id));
-        QVERIFY(!store.remove(b.id));
+        QVERIFY(store.remove(b.id).ok);
+        QVERIFY(!store.remove(b.id).ok);
         QVERIFY(!store.load(b.id));
     }
 
@@ -258,7 +259,7 @@ private slots:
         edited.name = "Mine";
         QVERIFY(!store.save(edited).ok);
         QCOMPARE(edited.revision, builtInLyricsTemplate().revision);   // untouched
-        QVERIFY(!store.remove(builtInLyricsTemplateId()));
+        QVERIFY(!store.remove(builtInLyricsTemplateId()).ok);
         QCOMPARE(store.load(builtInLyricsTemplateId())->name, QStringLiteral("Lyrics"));
 
         Template unnamed;
@@ -637,6 +638,71 @@ private slots:
         QCOMPARE(other.song.groups[0].slides, s.groups[0].slides);
         QCOMPARE(other.song.groups[0].slideOverrides, s.groups[0].slideOverrides);
         QVERIFY(other.warnings.isEmpty());
+    }
+
+    // #122 review: the template editor saves from the GUI thread while the service runs, so
+    // another program holding the write lock makes a save fail at once with `busy` instead of
+    // freezing the operator window and the outputs for the busy timeout.
+    void aSaveWhileAnotherProgramWritesIsBusyAtOnce()
+    {
+        TemplateStore store(*m_library);
+        Template kept = sample();
+        QVERIFY(store.save(kept).ok);
+        {
+            QSqlDatabase other = QSqlDatabase::addDatabase("QSQLITE", "other-program");
+            other.setDatabaseName(m_library->databasePath());
+            QVERIFY(other.open());
+            QVERIFY(QSqlQuery(other).exec("BEGIN IMMEDIATE"));
+
+            QElapsedTimer t;
+            t.start();
+            Template edited = kept;
+            edited.name = "Edited";
+            const TemplateStore::Result saved = store.save(edited);
+            const TemplateStore::Result removed = store.remove(kept.id);
+            QVERIFY(!saved.ok && saved.busy);
+            QVERIFY(!removed.ok && removed.busy);
+            QCOMPARE(edited.name, QStringLiteral("Edited"));   // left as it was
+            QCOMPARE(edited.revision, kept.revision);
+            QVERIFY2(t.elapsed() < Library::kBusyTimeoutMs / 2, qPrintable(QString::number(t.elapsed())));
+
+            QVERIFY(QSqlQuery(other).exec("ROLLBACK"));
+            other.close();
+        }
+        QSqlDatabase::removeDatabase("other-program");
+        Template edited = kept;
+        QVERIFY(store.save(edited).ok);
+        QVERIFY(store.remove(kept.id).ok);
+    }
+
+    // #94: dragging a frame in the editor keeps it on the output and no smaller than the minimum.
+    void draggingAFrameStaysOnTheOutput_data()
+    {
+        QTest::addColumn<int>("edges");
+        QTest::addColumn<QPointF>("delta");
+        QTest::addColumn<QRectF>("expected");
+        const int all = Qt::LeftEdge | Qt::TopEdge | Qt::RightEdge | Qt::BottomEdge;
+        // From (0.1, 0.2, 0.5, 0.4): right edge 0.6, bottom 0.6.
+        QTest::newRow("move") << all << QPointF(0.1, -0.1) << QRectF(0.2, 0.1, 0.5, 0.4);
+        QTest::newRow("move past the right and bottom stops at the edge") << all << QPointF(0.9, 0.9) << QRectF(0.5, 0.6, 0.5, 0.4);
+        QTest::newRow("move past the left and top stops at the edge") << all << QPointF(-1, -1) << QRectF(0, 0, 0.5, 0.4);
+        QTest::newRow("right edge grows") << int(Qt::RightEdge) << QPointF(0.2, 0.5) << QRectF(0.1, 0.2, 0.7, 0.4);
+        QTest::newRow("right edge stops at the output") << int(Qt::RightEdge) << QPointF(2, 0) << QRectF(0.1, 0.2, 0.9, 0.4);
+        QTest::newRow("left edge past 0 shrinks nothing on the right") << int(Qt::LeftEdge) << QPointF(-0.5, 0) << QRectF(0, 0.2, 0.6, 0.4);
+        QTest::newRow("left edge stops at the minimum width") << int(Qt::LeftEdge) << QPointF(0.9, 0) << QRectF(0.6 - kMinFrameSize, 0.2, kMinFrameSize, 0.4);
+        QTest::newRow("top-left corner") << int(Qt::LeftEdge | Qt::TopEdge) << QPointF(-0.05, -0.1) << QRectF(0.05, 0.1, 0.55, 0.5);
+        QTest::newRow("bottom edge stops at the minimum height") << int(Qt::BottomEdge) << QPointF(0, -1) << QRectF(0.1, 0.2, 0.5, kMinFrameSize);
+    }
+
+    void draggingAFrameStaysOnTheOutput()
+    {
+        QFETCH(int, edges);
+        QFETCH(QPointF, delta);
+        QFETCH(QRectF, expected);
+        const QRectF r = draggedFrame(QRectF(0.1, 0.2, 0.5, 0.4), Qt::Edges(edges), delta);
+        QVERIFY2(qAbs(r.x() - expected.x()) < 1e-9 && qAbs(r.y() - expected.y()) < 1e-9
+                     && qAbs(r.width() - expected.width()) < 1e-9 && qAbs(r.height() - expected.height()) < 1e-9,
+                 qPrintable(QStringLiteral("got %1 %2 %3 %4").arg(r.x()).arg(r.y()).arg(r.width()).arg(r.height())));
     }
 
 private:

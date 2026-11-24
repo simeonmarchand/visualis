@@ -189,6 +189,23 @@ QVariantList SongEditor::previewSlides() const
     return slideMaps(liveSong(m_song, m_arrangement, songs ? songs->templates() : templateSet({})).slides);
 }
 
+QString SongEditor::templateId() const
+{
+    return idText(m_song.defaultTemplate.isNull() ? builtInLyricsTemplateId() : m_song.defaultTemplate);
+}
+
+void SongEditor::setTemplateId(const QString &id)
+{
+    // The built-in is stored as none, so the song follows whatever the built-in is.
+    QUuid uuid = QUuid::fromString(id);
+    if (isBuiltInTemplate(uuid))
+        uuid = QUuid();
+    if (!loaded() || uuid == m_song.defaultTemplate)
+        return;
+    m_song.defaultTemplate = uuid;
+    save();
+}
+
 QString SongEditor::addArrangement(const QString &name)
 {
     if (!loaded())

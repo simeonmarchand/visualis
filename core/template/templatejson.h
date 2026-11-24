@@ -38,6 +38,7 @@ namespace templatelimits {
 constexpr int kBytes = 256 * 1024;      // a template is a few KB; this is the whole document
 constexpr int kRegions = 32;
 constexpr int kTextLength = 200;        // names, ids, font families
+constexpr double kMaxSafeArea = 0.45;   // of the output, on each side
 } // namespace templatelimits
 
 QByteArray templateToJson(const Template &tmpl);

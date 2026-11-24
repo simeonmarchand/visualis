@@ -42,6 +42,17 @@ QString validate(const Template &t)
     return {};
 }
 
+// One statement that writes, without waiting on another program's lock (#88).
+TemplateStore::Result write(Library &library, QSqlQuery &q, int *rowsAffected = nullptr)
+{
+    const Library::WriteNow w = Library::writeNow(library.database(), q);
+    if (rowsAffected)
+        *rowsAffected = w.rowsAffected;
+    if (w.busy())
+        return {false, QStringLiteral("the library is in use by another program"), true};
+    return {w.ok(), w.error};
+}
+
 } // namespace
 
 TemplateStore::TemplateStore(Library &library)
@@ -49,7 +60,7 @@ TemplateStore::TemplateStore(Library &library)
 {
 }
 
-TemplateStore::Result TemplateStore::save(Template &tmpl)
+TemplateStore::Result TemplateStore::save(Template &tmpl, Lock lock)
 {
     if (isBuiltInTemplate(tmpl.id))
         return {false, QStringLiteral("\"%1\" is built in and can't be changed; duplicate it instead.").arg(tmpl.name)};
@@ -85,8 +96,9 @@ TemplateStore::Result TemplateStore::save(Template &tmpl)
     q.addBindValue(QString::fromUtf8(body));
     q.addBindValue(t.created.toString(Qt::ISODateWithMs));
     q.addBindValue(t.updated.toString(Qt::ISODateWithMs));
-    if (!q.exec())
-        return {false, QStringLiteral("Couldn't save \"%1\": %2").arg(t.name, q.lastError().text())};
+    const Result r = lock == Lock::Wait ? Result{q.exec(), q.lastError().text()} : write(m_library, q);
+    if (!r.ok)
+        return {false, QStringLiteral("Couldn't save \"%1\": %2").arg(t.name, r.error), r.busy};
     tmpl = t;
     return {};
 }
@@ -112,14 +124,19 @@ std::optional<Template> TemplateStore::load(const QUuid &id, QStringList *warnin
     return r.tmpl;
 }
 
-bool TemplateStore::remove(const QUuid &id)
+TemplateStore::Result TemplateStore::remove(const QUuid &id)
 {
     if (isBuiltInTemplate(id))
-        return false;
+        return {false, QStringLiteral("A built-in template can't be deleted.")};
     QSqlQuery q(m_library.database());
     q.prepare("DELETE FROM template WHERE id = ?");
     q.addBindValue(key(id));
-    return q.exec() && q.numRowsAffected() > 0;
+    int rows = 0;
+    if (const Result r = write(m_library, q, &rows); !r.ok)
+        return {false, QStringLiteral("Couldn't delete the template: %1").arg(r.error), r.busy};
+    if (rows == 0)
+        return {false, QStringLiteral("That template is no longer in the library.")};
+    return {};
 }
 
 QList<TemplateSummary> TemplateStore::list() const
