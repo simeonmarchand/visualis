@@ -7,6 +7,8 @@
 #include <QLoggingCategory>
 #include <QQmlEngine>
 
+#include <algorithm>
+
 using namespace visualis;
 
 Q_LOGGING_CATEGORY(lcTemplates, "visualis.templates")
@@ -25,6 +27,20 @@ TemplateLibrary *TemplateLibrary::create(QQmlEngine *qml, QJSEngine *)
     TemplateLibrary *templates = qml->singletonInstance<SongLibrary *>("Visualis.Ui", "SongLibrary")->templateLibrary();
     QJSEngine::setObjectOwnership(templates, QJSEngine::CppOwnership);   // SongLibrary's child
     return templates;
+}
+
+QList<Template> TemplateLibrary::list() const
+{
+    QList<Template> stored;
+    for (const Template &t : m_templates) {
+        if (!isBuiltInTemplate(t.id))
+            stored << t;
+    }
+    std::sort(stored.begin(), stored.end(), [](const Template &a, const Template &b) {
+        const int byName = a.name.compare(b.name, Qt::CaseInsensitive);
+        return byName != 0 ? byName < 0 : a.id < b.id;
+    });
+    return builtInTemplates() + stored;
 }
 
 bool TemplateLibrary::save(Template &tmpl, QString *error)

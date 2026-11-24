@@ -24,9 +24,10 @@ Window {
     // test, row 8). While typing in a text field the keys type instead, and while a dialog
     // is open even Esc belongs to the dialog.
     readonly property bool editingText: activeFocusItem instanceof TextInput || activeFocusItem instanceof TextEdit
-    // The song editor is its own window: while it's in front, keys edit the song. `visible`
-    // too, because `active` isn't always cleared when the window closes.
-    readonly property bool editorInFront: songEditor.visible && songEditor.active
+    // The song and template editors are their own windows: while one is in front, keys edit
+    // in it. `visible` too, because `active` isn't always cleared when the window closes.
+    readonly property bool editorInFront: (songEditor.visible && songEditor.active)
+                                          || (templateEditor.visible && templateEditor.active)
     readonly property bool dialogOpen: songList.dialogOpen || mediaPane.dialogOpen || servicePane.dialogOpen
     readonly property bool keysEnabled: !editingText && !dialogOpen && !editorInFront
 
@@ -95,6 +96,11 @@ Window {
     OutputWindow { id: audienceOutput; role: "audience" }
     OutputWindow { id: stageOutput; role: "stage" }
     SongEditorWindow { id: songEditor }
+    TemplateEditorWindow {
+        id: templateEditor
+        // The audience's shape once it's on a display; until then the usual 16:9.
+        aspect: audienceOutput.visible && audienceOutput.height > 0 ? audienceOutput.width / audienceOutput.height : 16 / 9
+    }
 
     Component.onCompleted: {
         OutputController.setOperatorWindow(root)
@@ -236,6 +242,7 @@ Window {
 
         OutputSettings {
             Layout.fillWidth: true
+            onTemplatesRequested: templateEditor.open()
         }
     }
 }

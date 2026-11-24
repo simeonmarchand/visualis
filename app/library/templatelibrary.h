@@ -29,6 +29,8 @@ public:
     // Every readable stored template, and the built-ins. A stored template that can't be read
     // is left out (and logged), so items using it fall back to the built-in.
     const visualis::TemplateSet &templates() const { return m_templates; }
+    // The same, in the order editors list them: built-ins first, then by name.
+    QList<visualis::Template> list() const;
 
     // As TemplateStore::save, and the snapshot is re-read. False, with `error`, when the
     // library isn't open or the save is refused.

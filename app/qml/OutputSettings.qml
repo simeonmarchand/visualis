@@ -7,7 +7,10 @@ import Visualis.Ui
 // Output displays and the background video: a stopgap bar until a settings window and the
 // media library exist.
 ColumnLayout {
+    id: settings
     spacing: 8
+
+    signal templatesRequested()
 
     FileDialog {
         id: backgroundDialog
@@ -82,6 +85,12 @@ ColumnLayout {
             objectName: "backgroundStatus"
             text: VideoEngine.status
             color: "#8b8f96"
+        }
+        Button {
+            objectName: "templatesButton"
+            text: "Templates…"
+            focusPolicy: Qt.NoFocus
+            onClicked: settings.templatesRequested()
         }
     }
 

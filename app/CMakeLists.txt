@@ -24,6 +24,7 @@ qt_add_qml_module(visualis_ui
         qml/SlideGrid.qml
         qml/SlideTile.qml
         qml/SongEditorWindow.qml
+        qml/TemplateEditorWindow.qml
     SOURCES
         output/outputcontroller.h output/outputcontroller.cpp
         output/platformdisplay.h
@@ -41,6 +42,8 @@ qt_add_qml_module(visualis_ui
         library/songlibrary.h library/songlibrary.cpp
         library/songeditor.h library/songeditor.cpp
         library/servicelist.h library/servicelist.cpp
+        library/templateeditor.cpp
+        library/templateeditor.h
         library/templatelibrary.cpp
         library/templatelibrary.h
         media/mediaprobe.cpp

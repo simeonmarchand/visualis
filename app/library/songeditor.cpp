@@ -1,6 +1,7 @@
 #include "library/songeditor.h"
 
 #include "library/songlibrary.h"
+#include "library/templatelibrary.h"
 #include "live/liveitem.h"
 #include "song/lyricspaste.h"
 #include "song/slidelist.h"
@@ -187,6 +188,34 @@ QVariantList SongEditor::previewSlides() const
     // Through the song's template, as it will show (#93).
     SongLibrary *songs = library();
     return slideMaps(liveSong(m_song, m_arrangement, songs ? songs->templates() : templateSet({})).slides);
+}
+
+QString SongEditor::templateId() const
+{
+    return idText(m_song.defaultTemplate);
+}
+
+void SongEditor::setTemplateId(const QString &id)
+{
+    // The built-in is stored as none, so the song follows whatever the built-in is.
+    QUuid uuid = QUuid::fromString(id);
+    if (isBuiltInTemplate(uuid))
+        uuid = QUuid();
+    if (!loaded() || uuid == m_song.defaultTemplate)
+        return;
+    m_song.defaultTemplate = uuid;
+    save();
+}
+
+QVariantList SongEditor::templates() const
+{
+    SongLibrary *songs = library();
+    QVariantList list;
+    for (const Template &t : songs ? songs->templateLibrary()->list() : builtInTemplates()) {
+        if (t.kind == TemplateKind::Lyrics)
+            list.append(QVariantMap{{"id", isBuiltInTemplate(t.id) ? QString() : idText(t.id)}, {"name", t.name}});
+    }
+    return list;
 }
 
 QString SongEditor::addArrangement(const QString &name)

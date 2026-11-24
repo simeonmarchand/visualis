@@ -272,6 +272,32 @@ private slots:
         QVERIFY(changed.count() >= 2);
     }
 
+    // #94: a template made in the template editor gets onto the screen through the song.
+    void pickingATemplateSavesItAndThePreviewUsesIt()
+    {
+        auto *templates = m_engine->singletonInstance<TemplateLibrary *>("Visualis.Ui", "TemplateLibrary");
+        QCOMPARE(m_editor->templateId(), QString());   // the built-in, by default
+        QCOMPARE(strings(m_editor->templates(), "name"), QStringList{"Lyrics"});
+        Template t = builtInLyricsTemplate();
+        t.id = QUuid();
+        t.name = "Christmas";
+        t.regions[0].style.color = "#ff0000";
+        QVERIFY(templates->save(t));
+        QCOMPARE(strings(m_editor->templates(), "name"), (QStringList{"Lyrics", "Christmas"}));
+
+        m_editor->setTemplateId(idText(t.id));
+        QCOMPARE(m_editor->templateId(), idText(t.id));
+        QCOMPARE(m_songs->loadSong(QUuid::fromString(m_editor->songId()))->defaultTemplate, t.id);
+        QCOMPARE(m_editor->previewSlides().value(1).toMap()["content"].value<Content>().regions.value("main").style.color,
+                 QStringLiteral("#ff0000"));
+        QVERIFY(m_songs->goLive(1));
+        QCOMPARE(m_live->content().regions.value("main").style.color, QStringLiteral("#ff0000"));
+
+        m_editor->setTemplateId(idText(builtInLyricsTemplateId()));   // back to the built-in
+        QVERIFY(m_songs->loadSong(QUuid::fromString(m_editor->songId()))->defaultTemplate.isNull());
+        QCOMPARE(m_editor->templateId(), QString());
+    }
+
 private:
     QTemporaryDir m_dir;
     int m_n = 0;
