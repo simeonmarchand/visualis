@@ -94,7 +94,7 @@ int main(int argc, char *argv[])
     auto *video = engine.singletonInstance<VideoEngine *>("Visualis.Ui", "VideoEngine");
     if (auto *recovery = engine.singletonInstance<Recovery *>("Visualis.Ui", "Recovery"); recovery && live) {
         const QString journal = parser.isSet(journalOpt) ? parser.value(journalOpt) : Recovery::defaultJournalPath();
-        if (recovery->start(journal, live, video)) {
+        if (recovery->start(journal, live)) {
             // The operator sees its slides: the service item it was, else the library's song.
             if (!live->serviceIdString().isEmpty() && services && services->openId() != live->serviceIdString())
                 services->openService(live->serviceIdString());

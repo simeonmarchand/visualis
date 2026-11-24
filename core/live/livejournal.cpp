@@ -22,14 +22,16 @@ QByteArray snapshotToJson(const LiveSnapshot &s)
         {"version", kVersion},
         {"slideIndex", s.slideIndex},
         {"textCleared", s.textCleared},
-        {"backgroundCleared", s.backgroundCleared},
-        {"background", s.background},
+        {"backgroundCleared", s.background.cleared},
+        {"backgroundTransition", transitionToJson(s.background.transition)},
         {"savedAt", s.savedAt.toUTC().toString(Qt::ISODateWithMs)},
     };
     if (s.song) {
         o["song"] = QJsonDocument::fromJson(songToJson(*s.song)).object();
         o["arrangement"] = s.arrangement.toString(QUuid::WithoutBraces);
     }
+    if (!s.background.asset.isNull())
+        o["backgroundAsset"] = s.background.assetId();
     if (!s.service.isNull())
         o["service"] = s.service.toString(QUuid::WithoutBraces);
     if (!s.item.isNull())
@@ -63,8 +65,12 @@ SnapshotResult snapshotFromJson(const QByteArray &json)
     }
     s.slideIndex = o.value("slideIndex").toInt(-1);
     s.textCleared = o.value("textCleared").toBool();
-    s.backgroundCleared = o.value("backgroundCleared").toBool();
-    s.background = o.value("background").toString();
+    s.background.asset = QUuid::fromString(o.value("backgroundAsset").toString());
+    s.background.cleared = o.value("backgroundCleared").toBool();
+    if (o.contains("backgroundTransition"))
+        s.background.transition = applyTransition(s.background.transition, o.value("backgroundTransition").toObject(),
+                                                  QStringLiteral("backgroundTransition"), nullptr);
+    s.skippedBackgroundUrl = s.background.asset.isNull() && !o.value("background").toString().isEmpty();
     s.service = QUuid::fromString(o.value("service").toString());
     s.item = QUuid::fromString(o.value("item").toString());
     if (o.contains("serviceItem"))

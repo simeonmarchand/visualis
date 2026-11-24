@@ -9,24 +9,6 @@
 
 namespace visualis {
 
-// The live background (GLOSSARY.md "Background layer"): a media asset, whether it's
-// cleared, and the transition it arrived with, which clearing and showing it use too (#98).
-struct BackgroundLayer {
-    Q_GADGET
-    Q_PROPERTY(QString assetId READ assetId)   // without braces; empty for none
-    Q_PROPERTY(bool cleared MEMBER cleared)
-    Q_PROPERTY(visualis::Transition transition MEMBER transition)
-
-public:
-    QUuid asset;   // null: no background
-    bool cleared = false;
-    Transition transition = Transitions{}.background;
-
-    bool operator==(const BackgroundLayer &) const = default;
-
-    QString assetId() const { return asset.isNull() ? QString() : asset.toString(QUuid::WithoutBraces); }
-};
-
 // What is live right now: the one state every output renders (plan 5.2). The operator
 // window changes it through the commands below; audience and stage windows only read it,
 // so a reopened output window re-renders from here and loses nothing.

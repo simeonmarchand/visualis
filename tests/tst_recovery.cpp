@@ -3,7 +3,6 @@
 #include "library/songlibrary.h"
 #include "template/templatejson.h"
 #include "live/recovery.h"
-#include "video/videoengine.h"
 
 #include <QDir>
 #include <QProcess>
@@ -71,7 +70,7 @@ int crashLiveChild(char **argv)
     const std::optional<Song> song = songs.loadSong(QUuid::fromString(songs.selectedId()));
     LiveState live;
     Recovery recovery;
-    recovery.start(QString::fromLocal8Bit(argv[3]), &live, nullptr);
+    recovery.start(QString::fromLocal8Bit(argv[3]), &live);
     if (!song || !live.show(libraryItem(*song), 1))
         return 1;
     return childprocess::readyUntilParentGoes("live", songs.selectedId().toUtf8());
@@ -91,7 +90,7 @@ private slots:
     {
         LiveState live;
         Recovery recovery;
-        QVERIFY(!recovery.start(m_path, &live, nullptr));
+        QVERIFY(!recovery.start(m_path, &live));
         QVERIFY(recovery.message().isEmpty());
         QVERIFY(!QFile::exists(m_path));   // nothing live yet
     }
@@ -100,7 +99,7 @@ private slots:
     {
         LiveState live;
         Recovery recovery;
-        recovery.start(m_path, &live, nullptr);
+        recovery.start(m_path, &live);
         live.show(libraryItem(sample()), 0);
         QCOMPARE(readJournal(m_path).snapshot->slideIndex, 0);
         live.next();
@@ -114,7 +113,7 @@ private slots:
         {
             LiveState live;
             Recovery recovery;
-            recovery.start(m_path, &live, nullptr);
+            recovery.start(m_path, &live);
             live.show(libraryItem(sample()), 0);
             live.next();
             live.next();
@@ -123,7 +122,7 @@ private slots:
 
         LiveState live;
         Recovery recovery;
-        QVERIFY(recovery.start(m_path, &live, nullptr));
+        QVERIFY(recovery.start(m_path, &live));
         QCOMPARE(live.songTitle(), QStringLiteral("Joy to the World"));
         QCOMPARE(live.slideIndex(), 2);
         QCOMPARE(live.currentText(), QStringLiteral("And heaven and nature sing"));
@@ -146,14 +145,14 @@ private slots:
         {
             LiveState live;
             Recovery recovery;
-            recovery.start(m_path, &live, nullptr);
+            recovery.start(m_path, &live);
             live.setService(service, items);
             QVERIFY(live.goToItem(0, 1));
         }   // no finish(): the process died
 
         LiveState live;
         Recovery recovery;
-        QVERIFY(recovery.start(m_path, &live, nullptr));
+        QVERIFY(recovery.start(m_path, &live));
         QCOMPARE(live.serviceId(), service);
         QCOMPARE(live.itemId(), a.id);
         QCOMPARE(live.slideIndex(), 1);
@@ -183,7 +182,7 @@ private slots:
         QVERIFY2(songs.openLibrary(folder), qPrintable(songs.error()));
         LiveState restored;
         Recovery recovery;
-        QVERIFY(recovery.start(m_path, &restored, nullptr));
+        QVERIFY(recovery.start(m_path, &restored));
         QCOMPARE(restored.songId(), songId);
         songs.select(restored.songId());
         QCOMPARE(songs.selectedId(), songId);
@@ -206,14 +205,14 @@ private slots:
         {
             LiveState live;
             Recovery recovery;
-            recovery.start(m_path, &live, nullptr);
+            recovery.start(m_path, &live);
             live.setService(service, {shown});
             QVERIFY(live.goToItem(0, 2));
         }   // no finish(): the process died
 
         LiveState live;
         Recovery recovery;
-        QVERIFY(recovery.start(m_path, &live, nullptr));
+        QVERIFY(recovery.start(m_path, &live));
         QCOMPARE(live.item(), shown);
         QCOMPARE(live.slideIndex(), 2);
         QCOMPARE(live.serviceId(), service);
@@ -229,32 +228,99 @@ private slots:
         {
             LiveState live;
             Recovery recovery;
-            recovery.start(m_path, &live, nullptr);
+            recovery.start(m_path, &live);
             live.show(shown, 1);
         }
         LiveState live;
         Recovery recovery;
-        QVERIFY(recovery.start(m_path, &live, nullptr));
+        QVERIFY(recovery.start(m_path, &live));
         QCOMPARE(live.item(), shown);
         QCOMPARE(live.content().regions["main"].style.fontFamily, QStringLiteral("Avenir"));
     }
 
+    // #98: the background layer is an asset id in LiveState, so it comes back with the rest.
     void theBackgroundComesBackToo()
     {
-        const QUrl clip = QUrl::fromLocalFile(m_dir.filePath("motion.mp4"));
+        const QUuid still = QUuid::createUuid();
+        const Transition fade{TransitionKind::Fade, 700};
         {
             LiveState live;
-            VideoEngine video;
             Recovery recovery;
-            recovery.start(m_path, &live, &video);
-            video.setSource(clip);   // a background with no song live
+            recovery.start(m_path, &live);
+            live.setBackground(still, fade);   // a background with no song live
+            live.clearBackground();
         }
         LiveState live;
-        VideoEngine video;
         Recovery recovery;
-        QVERIFY(recovery.start(m_path, &live, &video));
-        QCOMPARE(video.source(), clip);
+        QVERIFY(recovery.start(m_path, &live));
+        QCOMPARE(live.background(), (BackgroundLayer{still, true, fade}));
         QVERIFY(!live.hasSlide());
+        QVERIFY(recovery.message().contains("the background"));
+    }
+
+    void aSongAndItsBackgroundComeBackTogether()
+    {
+        const QUuid still = QUuid::createUuid();
+        {
+            LiveState live;
+            Recovery recovery;
+            recovery.start(m_path, &live);
+            live.show(libraryItem(sample()), 1);
+            live.setBackground(still, {});
+            live.next();
+        }
+        LiveState live;
+        Recovery recovery;
+        QVERIFY(recovery.start(m_path, &live));
+        QCOMPARE(live.slideIndex(), 2);
+        QCOMPARE(live.background().asset, still);
+    }
+
+    // A journal from before #98 held the video's file URL. Its background isn't restored; the
+    // rest is.
+    void aJournalWithABackgroundUrlRestoresTheRest()
+    {
+        LiveSnapshot old;
+        old.song = sample();
+        old.slideIndex = 1;
+        old.background.cleared = true;
+        old.savedAt = QDateTime::currentDateTimeUtc();
+        QByteArray json = snapshotToJson(old);
+        json.replace("\"backgroundCleared\"", "\"background\":\"file:///Users/op/blue.mp4\",\"backgroundCleared\"");
+        QVERIFY(snapshotFromJson(json).snapshot->skippedBackgroundUrl);
+        QFile f(m_path);
+        QVERIFY(f.open(QIODevice::WriteOnly) && f.write(json) == json.size());
+        f.close();
+
+        LiveState live;
+        Recovery recovery;
+        QVERIFY(recovery.start(m_path, &live));
+        QCOMPARE(live.slideIndex(), 1);
+        QCOMPARE(live.background().asset, QUuid());
+    }
+
+    // A restored background whose file has gone since is left out, with the alert, so the
+    // output shows black only because nothing was ever there to show.
+    void aRestoredBackgroundWhoseFileIsGoneRaisesTheAlert()
+    {
+        const QUuid gone = QUuid::createUuid();
+        {
+            LiveState live;
+            Recovery recovery;
+            recovery.start(m_path, &live);
+            live.setBackground(gone, {});
+        }
+        LiveState live;
+        live.setMediaCheck([](const QUuid &) {
+            MediaCheck c;
+            c.status = MediaStatus::Missing;
+            c.message = "\"Sunrise.jpg\" is missing from the media folder.";
+            return c;
+        });
+        Recovery recovery;
+        QVERIFY(recovery.start(m_path, &live));
+        QCOMPARE(live.background().asset, QUuid());
+        QVERIFY(live.backgroundAlert().contains("Sunrise.jpg"));
     }
 
     void aCleanQuitLeavesNothingToRestore()
@@ -262,7 +328,7 @@ private slots:
         {
             LiveState live;
             Recovery recovery;
-            recovery.start(m_path, &live, nullptr);
+            recovery.start(m_path, &live);
             live.show(libraryItem(sample()), 1);
             recovery.finish();
             live.next();   // after finish: no longer journaled
@@ -270,7 +336,7 @@ private slots:
         QVERIFY(!QFile::exists(m_path));
         LiveState live;
         Recovery recovery;
-        QVERIFY(!recovery.start(m_path, &live, nullptr));
+        QVERIFY(!recovery.start(m_path, &live));
         QVERIFY(!live.hasSlide());
     }
 
@@ -295,7 +361,7 @@ private slots:
         for (int crash = 0; crash < 2; ++crash) {
             LiveState live;
             Recovery recovery;
-            QVERIFY(recovery.start(m_path, &live, nullptr));
+            QVERIFY(recovery.start(m_path, &live));
             QCOMPARE(live.slides(), shown.slides);
             QCOMPARE(live.slideIndex(), 3);
             QCOMPARE(live.itemId(), item.id);
@@ -312,7 +378,7 @@ private slots:
 
         LiveState live;
         Recovery recovery;
-        QVERIFY(!recovery.start(m_path, &live, nullptr));
+        QVERIFY(!recovery.start(m_path, &live));
         QVERIFY(!live.hasSlide());
     }
 
@@ -327,7 +393,7 @@ private slots:
 
         LiveState live;
         Recovery recovery;
-        recovery.start(m_path, &live, nullptr);
+        recovery.start(m_path, &live);
         QVERIFY(!live.hasSlide());
         QVERIFY(live.songTitle().isEmpty());
         QVERIFY2(recovery.message().contains("wasn't restored") && recovery.message().contains("too many slides"),
@@ -343,7 +409,7 @@ private slots:
 
         LiveState live;
         Recovery recovery;
-        QVERIFY(!recovery.start(m_path, &live, nullptr));
+        QVERIFY(!recovery.start(m_path, &live));
         live.show(libraryItem(sample()), 0);
         QVERIFY(readJournal(m_path).snapshot);
     }
@@ -352,7 +418,7 @@ private slots:
     {
         LiveState live;
         Recovery recovery;
-        QVERIFY(!recovery.start("/dev/null/cannot/live-journal.json", &live, nullptr));
+        QVERIFY(!recovery.start("/dev/null/cannot/live-journal.json", &live));
         QVERIFY(live.show(libraryItem(sample()), 0));
         QVERIFY(live.next());
     }
@@ -361,7 +427,7 @@ private slots:
     {
         LiveState live;
         Recovery recovery;
-        recovery.start(m_path, &live, nullptr);
+        recovery.start(m_path, &live);
         live.show(libraryItem(sample()), 0);
         QVERIFY(QFile::exists(m_path));
         live.restore(LiveItem{}, -1, false);

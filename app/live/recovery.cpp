@@ -2,7 +2,6 @@
 
 #include "live/livejournal.h"
 #include "live/livestate.h"
-#include "video/videoengine.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -20,11 +19,10 @@ QString Recovery::defaultJournalPath()
     return QDir(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)).filePath("live-journal.json");
 }
 
-bool Recovery::start(const QString &journalPath, LiveState *live, VideoEngine *video)
+bool Recovery::start(const QString &journalPath, LiveState *live)
 {
     m_path = journalPath;
     m_live = live;
-    m_video = video;
     QDir().mkpath(QFileInfo(m_path).absolutePath());
 
     bool restored = false;
@@ -47,13 +45,13 @@ bool Recovery::start(const QString &journalPath, LiveState *live, VideoEngine *v
                                               : liveSong(*s.song, s.arrangement, templates);
                 if (!s.serviceItem && !s.item.isNull())   // a journal from before #93
                     item.source = ServiceItem{.id = s.item, .kind = ServiceItem::Kind::Song, .arrangement = s.arrangement};
-                live->restore(item, s.slideIndex, s.textCleared, BackgroundLayer{.cleared = s.backgroundCleared}, s.service);
+                live->restore(item, s.slideIndex, s.textCleared, s.background, s.service);
+            } else {
+                live->restore(LiveItem{}, -1, false, s.background, s.service);
             }
-            else if (s.backgroundCleared)
-                live->clearBackground();
             disconnect(onRefused);
-            if (video && !s.background.isEmpty())
-                video->setSource(QUrl(s.background));
+            if (s.skippedBackgroundUrl)
+                qCInfo(lcRecovery) << "the journal's background is a file URL from before #98; not restored";
             restored = true;
             if (!refusal.isEmpty()) {
                 m_message = QStringLiteral("Visualis didn't quit normally last time, and what was live wasn't restored: %1")
@@ -72,8 +70,6 @@ bool Recovery::start(const QString &journalPath, LiveState *live, VideoEngine *v
     }
 
     connect(live, &LiveState::changed, this, &Recovery::write);
-    if (video)
-        connect(video, &VideoEngine::sourceChanged, this, &Recovery::write);
     connect(qApp, &QCoreApplication::aboutToQuit, this, &Recovery::finish);
     write();
     return restored;
@@ -89,8 +85,7 @@ void Recovery::write()
     s.arrangement = m_live->arrangementId();
     s.slideIndex = m_live->slideIndex();
     s.textCleared = m_live->textCleared();
-    s.backgroundCleared = m_live->backgroundCleared();
-    s.background = m_video ? m_video->source().toString() : QString();
+    s.background = m_live->background();
     s.service = m_live->serviceId();
     s.item = m_live->itemId();
     s.serviceItem = m_live->item().source;
@@ -98,7 +93,7 @@ void Recovery::write()
         s.tmpl = m_live->item().tmpl;
     s.savedAt = QDateTime::currentDateTimeUtc();
 
-    if (s.isEmpty() && !s.backgroundCleared) {
+    if (s.isEmpty() && !s.background.cleared) {
         QFile::remove(m_path);   // nothing live: nothing to come back to
         return;
     }
@@ -114,8 +109,6 @@ void Recovery::finish()
 {
     if (m_live)
         disconnect(m_live, nullptr, this, nullptr);
-    if (m_video)
-        disconnect(m_video, nullptr, this, nullptr);
     if (!m_path.isEmpty())
         QFile::remove(m_path);
 }
