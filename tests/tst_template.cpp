@@ -639,6 +639,36 @@ private slots:
         QVERIFY(other.warnings.isEmpty());
     }
 
+    // #94: dragging a frame in the editor keeps it on the output and no smaller than the minimum.
+    void draggingAFrameStaysOnTheOutput_data()
+    {
+        QTest::addColumn<int>("edges");
+        QTest::addColumn<QPointF>("delta");
+        QTest::addColumn<QRectF>("expected");
+        const int all = Qt::LeftEdge | Qt::TopEdge | Qt::RightEdge | Qt::BottomEdge;
+        // From (0.1, 0.2, 0.5, 0.4): right edge 0.6, bottom 0.6.
+        QTest::newRow("move") << all << QPointF(0.1, -0.1) << QRectF(0.2, 0.1, 0.5, 0.4);
+        QTest::newRow("move past the right and bottom stops at the edge") << all << QPointF(0.9, 0.9) << QRectF(0.5, 0.6, 0.5, 0.4);
+        QTest::newRow("move past the left and top stops at the edge") << all << QPointF(-1, -1) << QRectF(0, 0, 0.5, 0.4);
+        QTest::newRow("right edge grows") << int(Qt::RightEdge) << QPointF(0.2, 0.5) << QRectF(0.1, 0.2, 0.7, 0.4);
+        QTest::newRow("right edge stops at the output") << int(Qt::RightEdge) << QPointF(2, 0) << QRectF(0.1, 0.2, 0.9, 0.4);
+        QTest::newRow("left edge past 0 shrinks nothing on the right") << int(Qt::LeftEdge) << QPointF(-0.5, 0) << QRectF(0, 0.2, 0.6, 0.4);
+        QTest::newRow("left edge stops at the minimum width") << int(Qt::LeftEdge) << QPointF(0.9, 0) << QRectF(0.6 - kMinFrameSize, 0.2, kMinFrameSize, 0.4);
+        QTest::newRow("top-left corner") << int(Qt::LeftEdge | Qt::TopEdge) << QPointF(-0.05, -0.1) << QRectF(0.05, 0.1, 0.55, 0.5);
+        QTest::newRow("bottom edge stops at the minimum height") << int(Qt::BottomEdge) << QPointF(0, -1) << QRectF(0.1, 0.2, 0.5, kMinFrameSize);
+    }
+
+    void draggingAFrameStaysOnTheOutput()
+    {
+        QFETCH(int, edges);
+        QFETCH(QPointF, delta);
+        QFETCH(QRectF, expected);
+        const QRectF r = draggedFrame(QRectF(0.1, 0.2, 0.5, 0.4), Qt::Edges(edges), delta);
+        QVERIFY2(qAbs(r.x() - expected.x()) < 1e-9 && qAbs(r.y() - expected.y()) < 1e-9
+                     && qAbs(r.width() - expected.width()) < 1e-9 && qAbs(r.height() - expected.height()) < 1e-9,
+                 qPrintable(QStringLiteral("got %1 %2 %3 %4").arg(r.x()).arg(r.y()).arg(r.width()).arg(r.height())));
+    }
+
 private:
     std::optional<QTemporaryDir> m_dir;
     std::unique_ptr<Library> m_library;

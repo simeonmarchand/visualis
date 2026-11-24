@@ -1,6 +1,8 @@
 #include "template.h"
 #include "templatejson.h"
 
+#include <algorithm>
+
 namespace visualis {
 
 namespace {
@@ -26,6 +28,27 @@ const TextRegion *Template::region(const QString &id) const
             return &r;
     }
     return nullptr;
+}
+
+QRectF draggedFrame(const QRectF &start, Qt::Edges edges, QPointF delta)
+{
+    constexpr Qt::Edges kAll = Qt::LeftEdge | Qt::TopEdge | Qt::RightEdge | Qt::BottomEdge;
+    if (edges == kAll) {
+        const double w = std::clamp(start.width(), kMinFrameSize, 1.0);
+        const double h = std::clamp(start.height(), kMinFrameSize, 1.0);
+        return QRectF(std::clamp(start.x() + delta.x(), 0.0, 1 - w), std::clamp(start.y() + delta.y(), 0.0, 1 - h), w, h);
+    }
+    // Each dragged edge moves on its own, stopping at the output and at the minimum size.
+    double left = start.left(), top = start.top(), right = start.right(), bottom = start.bottom();
+    if (edges & Qt::LeftEdge)
+        left = std::clamp(left + delta.x(), 0.0, std::max(0.0, right - kMinFrameSize));
+    if (edges & Qt::RightEdge)
+        right = std::clamp(right + delta.x(), std::min(1.0, left + kMinFrameSize), 1.0);
+    if (edges & Qt::TopEdge)
+        top = std::clamp(top + delta.y(), 0.0, std::max(0.0, bottom - kMinFrameSize));
+    if (edges & Qt::BottomEdge)
+        bottom = std::clamp(bottom + delta.y(), std::min(1.0, top + kMinFrameSize), 1.0);
+    return QRectF(QPointF(left, top), QPointF(right, bottom));
 }
 
 QString templateKindName(TemplateKind kind)
