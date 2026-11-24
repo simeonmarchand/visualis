@@ -85,7 +85,7 @@ Template builtInLyricsTemplate()
     t.safeAreaX = 0.06;
     t.safeAreaY = 0.08;
     t.transitions.content = {TransitionKind::Cut, 300};
-    t.transitions.background = {TransitionKind::Fade, 600};
+    t.transitions.background = {TransitionKind::Cut, 600};
     t.revision = 1;
 
     RegionStyle s;

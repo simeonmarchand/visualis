@@ -276,14 +276,14 @@ Window {
                     label: "Text"
                     maxMs: editor.maxTransitionMs
                     transition: editor.transitions.content
-                    onEdited: (kind, ms) => editor.setTransition("content", kind, ms)
+                    onEdited: change => editor.setTransition("content", change)
                 }
                 TransitionControls {
                     objectName: "backgroundTransition"
                     label: "Background"
                     maxMs: editor.maxTransitionMs
                     transition: editor.transitions.background
-                    onEdited: (kind, ms) => editor.setTransition("background", kind, ms)
+                    onEdited: change => editor.setTransition("background", change)
                 }
                 Label {
                     Layout.fillWidth: true

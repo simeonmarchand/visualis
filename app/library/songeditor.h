@@ -135,9 +135,10 @@ public:
     // would break a rule between properties.
     Q_INVOKABLE void resetSlideProperty(const QString &path);
     Q_INVOKABLE void resetSlides();
-    // Overrides the text transition on every selected slide, `kind` "cut" or "fade"; refused
-    // like a property. Reset goes back to the template's.
-    Q_INVOKABLE void setSlideTransition(const QString &kind, int ms);
+    // Overrides the text transition on every selected slide by `change`, {kind} or {ms} (as in
+    // slideTransition). Only what it names changes, so across a mixed selection a new length
+    // leaves each slide's kind. Refused like a property. Reset goes back to the template's.
+    Q_INVOKABLE void setSlideTransition(const QVariantMap &change);
     Q_INVOKABLE void resetSlideTransition();
     // Saves a style edit that's waiting to. False if it couldn't be saved: a busy library keeps
     // the edit and is tried again; any other failure goes back to what's stored. After a

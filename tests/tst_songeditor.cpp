@@ -393,7 +393,7 @@ private slots:
         m_editor->selectSlide(slideKey(2), false);
         QCOMPARE(m_editor->slideTransition(), (QVariantMap{{"kind", "fade"}, {"ms", 400}}));
         QVERIFY(!m_editor->slideTransitionOverridden());
-        m_editor->setSlideTransition("cut", 400);
+        m_editor->setSlideTransition({{"kind", "cut"}});
         QVERIFY(m_editor->warnings().isEmpty());
         QCOMPARE(m_editor->slideTransition()["kind"].toString(), QStringLiteral("cut"));
         QVERIFY(m_editor->slideTransitionOverridden());
@@ -401,16 +401,22 @@ private slots:
         QCOMPARE(previewSlide(1)["content"].value<Content>().transition.kind, TransitionKind::Fade);
         QCOMPARE(previewSlide(2)["overrides"].toInt(), 1);
         QVERIFY(m_editor->flush());
-        QCOMPARE(storedOverride(2), (QJsonObject{{"transition", QJsonObject{{"kind", "cut"}, {"ms", 400}}}}));
+        QCOMPARE(storedOverride(2), (QJsonObject{{"transition", QJsonObject{{"kind", "cut"}}}}));
 
         m_editor->selectSlide(slideKey(1), true);
         QVERIFY(m_editor->slideTransitionMixed());
-        m_editor->setSlideTransition("fade", 60'000);   // too long: refused for both
+        // A new length across a mixed selection changes only the length: each keeps its kind.
+        m_editor->setSlideTransition({{"ms", 800}});
+        QCOMPARE(previewSlide(2)["content"].value<Content>().transition, (Transition{TransitionKind::Cut, 800}));
+        QCOMPARE(previewSlide(1)["content"].value<Content>().transition, (Transition{TransitionKind::Fade, 800}));
+        m_editor->setSlideTransition({{"ms", 60'000}});   // too long: refused for both
+        QVERIFY(!m_editor->warnings().isEmpty());
         QVERIFY(!m_editor->warnings().isEmpty());
         m_editor->resetSlideTransition();
         QVERIFY(!m_editor->slideTransitionOverridden());
         QVERIFY(m_editor->flush());
         QCOMPARE(storedOverride(2), QJsonObject());
+        QCOMPARE(storedOverride(1), QJsonObject());
     }
 
     void severalSlidesAreStyledTogetherAndMixedValuesShow()
@@ -617,7 +623,8 @@ private slots:
         // The transition control edits the slide's override, and its reset puts it back.
         QQuickItem *transition = item(controls, "slideTransition");
         QVERIFY(transition);
-        QMetaObject::invokeMethod(transition, "edited", Q_ARG(QString, "fade"), Q_ARG(int, 500));
+        const QVariant fadeKind = QVariantMap{{"kind", "fade"}};
+        QMetaObject::invokeMethod(transition, "edited", Q_ARG(QVariant, fadeKind));
         QCOMPARE(windowEditor->slideTransition()["kind"].toString(), QStringLiteral("fade"));
         QTRY_VERIFY(item(transition, "resetTransition") && item(transition, "resetTransition")->isVisible());
         QTest::mouseClick(editorWindow, Qt::LeftButton, {}, centre(item(transition, "resetTransition")));

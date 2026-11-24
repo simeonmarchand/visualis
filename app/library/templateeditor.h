@@ -91,10 +91,11 @@ public:
     // `warnings` says why.
     Q_INVOKABLE void setStyle(const QVariantMap &properties);
     Q_INVOKABLE void setSafeArea(double x, double y);
-    // `layer` is "content" or "background" (anything else is a programming error, logged).
-    // `kind` is "cut" or "fade"; another kind or a length out of range is refused, with
+    // Changes `layer`'s transition ("content" or "background"; anything else is a programming
+    // error, logged) by `change`, keyed as in `transitions`: {kind} or {ms} alone changes only
+    // that. A kind other than "cut" or "fade", or a length out of range, is refused, with
     // `warnings` saying why.
-    Q_INVOKABLE void setTransition(const QString &layer, const QString &kind, int ms);
+    Q_INVOKABLE void setTransition(const QString &layer, const QVariantMap &change);
     // The region's frame after dragging `edges` (Qt.LeftEdge | ..., all four to move it) by
     // (dx, dy) from `start`, the frame when the drag began: see draggedFrame.
     Q_INVOKABLE void dragFrame(const QRectF &start, int edges, double dx, double dy);

@@ -229,8 +229,10 @@ private slots:
     {
         m_editor->create("Ours");
         QCOMPARE(m_editor->transitions()["content"].toMap()["kind"].toString(), QStringLiteral("cut"));
-        m_editor->setTransition("content", "fade", 450);
-        m_editor->setTransition("background", "cut", 600);
+        QCOMPARE(m_editor->transitions()["background"].toMap()["kind"].toString(), QStringLiteral("cut"));
+        m_editor->setTransition("content", {{"kind", "fade"}});
+        m_editor->setTransition("content", {{"ms", 450}});   // keeps the kind
+        m_editor->setTransition("background", {{"ms", 600}});
         QVERIFY(m_editor->warnings().isEmpty());
         QCOMPARE(m_editor->transitions()["content"].toMap(), (QVariantMap{{"kind", "fade"}, {"ms", 450}}));
         QCOMPARE(m_editor->preview().transition, (Transition{TransitionKind::Fade, 450}));
@@ -244,9 +246,9 @@ private slots:
         m_editor->create("Ours");
         const Transitions before = stored().transitions;
         QSignalSpy changed(m_editor.get(), &TemplateEditor::templateChanged);
-        m_editor->setTransition("content", "fade", 20'000);
+        m_editor->setTransition("content", {{"kind", "fade"}, {"ms", 20'000}});
         QVERIFY(m_editor->warnings().first().contains("ms"));
-        m_editor->setTransition("content", "wipe", 300);   // not a kind this version has
+        m_editor->setTransition("content", {{"kind", "wipe"}});   // not a kind this version has
         QCOMPARE(m_editor->warnings().size(), 1);
         QCOMPARE(changed.count(), 2);                       // each snaps its control back
         m_editor->flush();
@@ -522,8 +524,9 @@ private slots:
 
         auto *background = window->findChild<QQuickItem *>("backgroundTransition");
         QVERIFY(background);
-        QMetaObject::invokeMethod(background, "edited", Q_ARG(QString, "cut"), Q_ARG(int, 0));
-        QCOMPARE(editor->transitions()["background"].toMap()["kind"].toString(), QStringLiteral("cut"));
+        const QVariant fadeKind = QVariantMap{{"kind", "fade"}};
+        QMetaObject::invokeMethod(background, "edited", Q_ARG(QVariant, fadeKind));
+        QCOMPARE(editor->transitions()["background"].toMap()["kind"].toString(), QStringLiteral("fade"));
 
         if (const QString dir = qEnvironmentVariable("VISUALIS_SNAPSHOT_DIR"); !dir.isEmpty()) {
             QTest::qWait(300);

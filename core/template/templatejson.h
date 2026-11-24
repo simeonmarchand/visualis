@@ -18,7 +18,7 @@ namespace visualis {
 //   "id": "…", "name": "Lyrics", "kind": "lyrics",   // lyrics|scripture|title|lower_third|stage
 //   "revision": 1,
 //   "safeArea": {"x": 0.06, "y": 0.08},
-//   "transitions": {"content": {"kind": "cut", "ms": 300}, "background": {"kind": "fade", "ms": 600}},
+//   "transitions": {"content": {"kind": "cut", "ms": 300}, "background": {"kind": "cut", "ms": 600}},
 //   "regions": [{
 //     "id": "main", "name": "Lyrics",
 //     "frame": {"x": 0.06, "y": 0.08, "w": 0.88, "h": 0.84},

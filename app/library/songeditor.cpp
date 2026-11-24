@@ -481,9 +481,10 @@ void SongEditor::resetSlides()
     });
 }
 
-void SongEditor::setSlideTransition(const QString &kind, int ms)
+void SongEditor::setSlideTransition(const QVariantMap &change)
 {
-    editSelected([&](QJsonObject &o) { return overrides::setTransition(o, {{"kind", kind}, {"ms", ms}}); });
+    const QJsonObject json = QJsonObject::fromVariantMap(change);
+    editSelected([&](QJsonObject &o) { return overrides::setTransition(o, json); });
 }
 
 void SongEditor::resetSlideTransition()

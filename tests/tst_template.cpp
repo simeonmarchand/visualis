@@ -88,6 +88,21 @@ private slots:
         m_dir.reset();
     }
 
+    // Simeon's rule (plan 5.4): cuts by default, on both layers; fades are an option.
+    void bothLayersCutByDefault()
+    {
+        for (const Transitions &t : {Transitions(), builtInLyricsTemplate().transitions, Template().transitions}) {
+            QCOMPARE(t.content.kind, TransitionKind::Cut);
+            QCOMPARE(t.background.kind, TransitionKind::Cut);
+        }
+        // A template file without transitions reads as cuts too.
+        const QByteArray json = R"({"format": "visualis-template", "version": 1, "name": "Bare", "kind": "lyrics",
+                                    "regions": [{"id": "main", "name": "Lyrics"}]})";
+        const TemplateJsonResult r = templateFromJson(json);
+        QVERIFY2(r.tmpl, qPrintable(r.error));
+        QCOMPARE(r.tmpl->transitions.background.kind, TransitionKind::Cut);
+    }
+
     void jsonRoundTrips()
     {
         Template t = sample();

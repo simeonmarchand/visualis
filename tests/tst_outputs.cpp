@@ -187,8 +187,8 @@ private slots:
     void aFadeInterruptedByNextEndsOnTheNewSlide()
     {
         QQuickWindow *w = output("audience");
-        m_live->show(throughTemplate(sample(), [](Template &t) { t.transitions.content = {TransitionKind::Fade, 400}; }), 1);
-        QTRY_COMPARE(visibleLyrics(w)->opacity(), 1.0);
+        m_live->show(throughTemplate(sample(), [](Template &t) { t.transitions.content = {TransitionKind::Fade, kLongFadeMs}; }), 1);
+        QTRY_COMPARE_WITH_TIMEOUT(visibleLyrics(w)->opacity(), 1.0, 3 * kLongFadeMs);
         m_live->next();
         QTest::qWait(150);
         QQuickItem *second = visibleLyrics(w);
@@ -199,20 +199,20 @@ private slots:
         QCOMPARE(third->property("text").toString(), QStringLiteral("And heaven and nature sing"));
         QCOMPARE(third->opacity(), 0.0);   // fades in from nothing, not from where the first slide was
         QCOMPARE(second->opacity(), secondAt);   // fades out from where it was
-        QTRY_COMPARE(third->opacity(), 1.0);
-        QTRY_COMPARE(second->opacity(), 0.0);
+        QTRY_COMPARE_WITH_TIMEOUT(third->opacity(), 1.0, 3 * kLongFadeMs);
+        QTRY_COMPARE_WITH_TIMEOUT(second->opacity(), 0.0, 3 * kLongFadeMs);
         QCOMPARE(shownLyrics(w), QStringLiteral("And heaven and nature sing"));
     }
 
     void clearingDuringAFadeEndsCleared()
     {
         QQuickWindow *w = output("audience");
-        m_live->show(throughTemplate(sample(), [](Template &t) { t.transitions.content = {TransitionKind::Fade, 400}; }), 1);
-        QTRY_COMPARE(visibleLyrics(w)->opacity(), 1.0);
+        m_live->show(throughTemplate(sample(), [](Template &t) { t.transitions.content = {TransitionKind::Fade, kLongFadeMs}; }), 1);
+        QTRY_COMPARE_WITH_TIMEOUT(visibleLyrics(w)->opacity(), 1.0, 3 * kLongFadeMs);
         m_live->next();
         QTest::qWait(150);
         m_live->clearText();
-        QTRY_VERIFY(!fade(w)->property("running").toBool());
+        QTRY_VERIFY_WITH_TIMEOUT(!fade(w)->property("running").toBool(), 3 * kLongFadeMs);
         QCOMPARE(shownLyrics(w), QString());
         QCOMPARE(hiddenLyrics(w)->opacity(), 0.0);
     }
@@ -221,13 +221,13 @@ private slots:
     void clearingTheTextFadesWithTheSlidesTransition()
     {
         QQuickWindow *w = output("audience");
-        m_live->show(throughTemplate(sample(), [](Template &t) { t.transitions.content = {TransitionKind::Fade, 300}; }), 1);
-        QTRY_COMPARE(visibleLyrics(w)->opacity(), 1.0);
+        m_live->show(throughTemplate(sample(), [](Template &t) { t.transitions.content = {TransitionKind::Fade, kLongFadeMs}; }), 1);
+        QTRY_COMPARE_WITH_TIMEOUT(visibleLyrics(w)->opacity(), 1.0, 3 * kLongFadeMs);
         QQuickItem *shown = visibleLyrics(w);
         m_live->clearText();
         QTest::qWait(50);
         QVERIFY(shown->opacity() > 0 && shown->opacity() < 1);   // fading out
-        QTRY_COMPARE(shown->opacity(), 0.0);
+        QTRY_COMPARE_WITH_TIMEOUT(shown->opacity(), 0.0, 3 * kLongFadeMs);
     }
 
     // During a fade each slide keeps its own look: the outgoing one isn't restyled as the new one.
@@ -482,6 +482,8 @@ private:
     }
 
     static constexpr int LyricsFadeWaitMs = 700;
+    // Long enough that a stalled CI runner can't overshoot a fade the test checks midway (#108).
+    static constexpr int kLongFadeMs = 2000;
     std::unique_ptr<QQmlApplicationEngine> m_engine;
     LiveState *m_live = nullptr;
     std::vector<std::unique_ptr<QObject>> m_windows;

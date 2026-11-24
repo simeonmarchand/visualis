@@ -16,7 +16,8 @@ RowLayout {
     property bool mixed: false
     required property int maxMs
 
-    signal edited(string kind, int ms)
+    // Only the field that changed, {kind} or {ms}, so a mixed selection keeps the rest.
+    signal edited(var change)
     signal resetRequested()
 
     Label {
@@ -32,7 +33,7 @@ RowLayout {
         textRole: "text"
         valueRole: "value"
         currentIndex: indexOfValue(controls.transition.kind ?? "cut")
-        onActivated: controls.edited(currentValue, length.value)
+        onActivated: controls.edited({kind: currentValue})
     }
     SpinBox {
         id: length
@@ -45,7 +46,7 @@ RowLayout {
         value: controls.transition.ms ?? 300
         textFromValue: v => v + " ms"
         valueFromText: t => parseInt(t)
-        onValueModified: controls.edited(kind.currentValue, value)
+        onValueModified: controls.edited({ms: value})
     }
     ToolButton {
         objectName: "resetTransition"

@@ -116,7 +116,7 @@ public:
 
 struct Transitions {
     Transition content;                                  // the text, slide to slide
-    Transition background{TransitionKind::Fade, 600};    // the video or image behind it
+    Transition background{TransitionKind::Cut, 600};     // the video or image behind it
 
     bool operator==(const Transitions &) const = default;
 };

@@ -235,7 +235,7 @@ void TemplateEditor::setSafeArea(double x, double y)
     edited();
 }
 
-void TemplateEditor::setTransition(const QString &layer, const QString &kind, int ms)
+void TemplateEditor::setTransition(const QString &layer, const QVariantMap &change)
 {
     if (!requireEditable())
         return;
@@ -247,7 +247,7 @@ void TemplateEditor::setTransition(const QString &layer, const QString &kind, in
         return;
     }
     QStringList warnings;
-    const Transition next = applyTransition(*t, {{"kind", kind}, {"ms", ms}}, layer, &warnings);
+    const Transition next = applyTransition(*t, QJsonObject::fromVariantMap(change), layer, &warnings);
     if (!warnings.isEmpty()) {
         setProblems(warnings, {});
         emit templateChanged();   // a control showing the refused value goes back

@@ -339,7 +339,7 @@ Window {
                             transition: editor.slideTransition
                             overridden: editor.slideTransitionOverridden
                             mixed: editor.slideTransitionMixed
-                            onEdited: (kind, ms) => editor.setSlideTransition(kind, ms)
+                            onEdited: change => editor.setSlideTransition(change)
                             onResetRequested: editor.resetSlideTransition()
                         }
                         RegionStyleControls {
