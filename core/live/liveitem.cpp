@@ -125,8 +125,10 @@ LiveItem liveItem(const ServiceItem &item, const std::optional<Song> &song, cons
             return live;
         }
         live.song = *song;
-        // Recovery passes the song this made last time; its order for the day is rebuilt.
-        live.song.arrangements.removeIf([&](const Arrangement &a) { return a.id == item.id; });
+        // Recovery passes the song this made last time. Its order for the day is rebuilt from
+        // the custom sequence; without one (a journal from before #93) the one it has stays.
+        if (!item.customSequence.isEmpty())
+            live.song.arrangements.removeIf([&](const Arrangement &a) { return a.id == item.id; });
         live.arrangement = item.arrangement;
         if (const QList<QUuid> custom = customSteps(live.song, item.id, item.customSequence); !custom.isEmpty()) {
             // The item's id names it: unique, and the same each time the service loads.

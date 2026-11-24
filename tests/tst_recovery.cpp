@@ -274,6 +274,34 @@ private slots:
         QVERIFY(!live.hasSlide());
     }
 
+    // #93 review: a journal from before #93 holds the rendered song and its "This service"
+    // order, but no service item. It restores, and a second crash before the service is
+    // opened again brings back the same order and slide.
+    void aJournalFromBefore93SurvivesTwoCrashesInARow()
+    {
+        ServiceItem item{QUuid::createUuid(), ServiceItem::Kind::Song, "Joy", {}, {}, {}, {}, {}, {}, {}, {}};
+        item.customSequence = {"Intro", "Chorus", "Verse 1", "Chorus"};
+        const LiveItem shown = liveItem(item, sample(), templateSet({}));
+        QCOMPARE(shown.arrangement, item.id);
+        LiveSnapshot old;
+        old.song = shown.song;
+        old.arrangement = shown.arrangement;
+        old.item = item.id;
+        old.service = QUuid::createUuid();
+        old.slideIndex = 3;
+        old.savedAt = QDateTime::currentDateTimeUtc();
+        QVERIFY(writeJournal(m_path, old));
+
+        for (int crash = 0; crash < 2; ++crash) {
+            LiveState live;
+            Recovery recovery;
+            QVERIFY(recovery.start(m_path, &live, nullptr));
+            QCOMPARE(live.slides(), shown.slides);
+            QCOMPARE(live.slideIndex(), 3);
+            QCOMPARE(live.itemId(), item.id);
+        }   // no finish(), twice
+    }
+
     void aJournalFromAnotherDayIsNotRestored()
     {
         LiveSnapshot old;
