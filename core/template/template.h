@@ -116,7 +116,7 @@ public:
 
 struct Transitions {
     Transition content;                                  // the text, slide to slide
-    Transition background{TransitionKind::Fade, 600};    // the video or image behind it
+    Transition background{TransitionKind::Cut, 600};     // the video or image behind it
 
     bool operator==(const Transitions &) const = default;
 };
@@ -182,5 +182,10 @@ std::optional<RegionStyle> effectiveStyle(const Template &tmpl, const QString &r
                                           const QList<QJsonObject> &layers, QStringList *warnings = nullptr);
 std::optional<RegionStyle> effectiveStyle(const Template &tmpl, const QString &regionId,
                                           const QJsonObject &overrides, QStringList *warnings = nullptr);
+
+// The text's transition (#96): `content` (the template's) with each layer's "transition"
+// applied in order, later winning. Invalid values are ignored and reported, as above.
+Transition effectiveTransition(const Transition &content, const QList<QJsonObject> &layers,
+                               QStringList *warnings = nullptr);
 
 } // namespace visualis

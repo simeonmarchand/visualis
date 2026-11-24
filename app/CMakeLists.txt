@@ -27,6 +27,7 @@ qt_add_qml_module(visualis_ui
         qml/SlideTile.qml
         qml/SongEditorWindow.qml
         qml/TemplateEditorWindow.qml
+        qml/TransitionControls.qml
     SOURCES
         output/outputcontroller.h output/outputcontroller.cpp
         output/platformdisplay.h

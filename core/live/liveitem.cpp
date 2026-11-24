@@ -39,7 +39,7 @@ QList<QUuid> customSteps(Song &song, const QUuid &itemId, const QStringList &lab
 }
 
 // The slides with their content layer, in template `wanted` (null: the built-in), with the
-// item's overrides and then each slide's applied.
+// item's overrides and then each slide's applied, to the style and the transition alike.
 void render(LiveItem &live, const TemplateSet &templates, const QUuid &wanted, const QJsonObject &itemOverrides)
 {
     const TemplateChoice choice = chooseTemplate(templates, wanted);
@@ -52,7 +52,6 @@ void render(LiveItem &live, const TemplateSet &templates, const QUuid &wanted, c
     live.tmpl = t;
     for (const SongSlide &s : songSlides(live.song, live.arrangement, &live.error)) {
         Content content;
-        content.transition = t.transitions.content;
         const Group *group = live.song.group(s.groupId);
         QJsonObject slideOverride = group ? group->slideOverride(s.indexInGroup) : QJsonObject();
         // A journal or file from before the limits (#95): the slide shows with the template's.
@@ -61,6 +60,7 @@ void render(LiveItem &live, const TemplateSet &templates, const QUuid &wanted, c
             slideOverride = {};
         }
         const QList<QJsonObject> layers{itemOverrides, slideOverride};
+        content.transition = effectiveTransition(t.transitions.content, layers, &warnings);
         for (const TextRegion &region : t.regions) {
             content.regions.insert(region.id, {region.id == QStringLiteral("main") ? s.text : QString(),
                                                effectiveStyle(t, region.id, layers, &warnings).value_or(region.style)});

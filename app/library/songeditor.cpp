@@ -12,6 +12,8 @@
 #include <QLoggingCategory>
 #include <QQmlEngine>
 
+#include <algorithm>
+
 using namespace visualis;
 
 Q_LOGGING_CATEGORY(lcSongEditor, "visualis.songs.editor")
@@ -384,6 +386,34 @@ QStringList SongEditor::mixedProperties() const
     return out;
 }
 
+QVariantMap SongEditor::slideTransition() const
+{
+    const QList<QJsonObject> selected = selectedOverrides();
+    if (selected.isEmpty())
+        return {};
+    return transitionToJson(effectiveTransition(songTemplate().transitions.content, {selected.first()})).toVariantMap();
+}
+
+bool SongEditor::slideTransitionOverridden() const
+{
+    const QList<QJsonObject> selected = selectedOverrides();
+    return std::any_of(selected.cbegin(), selected.cend(), overrides::overridesTransition);
+}
+
+bool SongEditor::slideTransitionMixed() const
+{
+    const QList<QJsonObject> selected = selectedOverrides();
+    const Transition content = songTemplate().transitions.content;
+    return std::any_of(selected.cbegin(), selected.cend(), [&](const QJsonObject &o) {
+        return effectiveTransition(content, {o}) != effectiveTransition(content, {selected.first()});
+    });
+}
+
+int SongEditor::maxTransitionMs()
+{
+    return templatelimits::kMaxTransitionMs;
+}
+
 void SongEditor::editSelected(const std::function<QString(QJsonObject &)> &edit)
 {
     if (!loaded())
@@ -447,6 +477,20 @@ void SongEditor::resetSlides()
 {
     editSelected([](QJsonObject &o) {
         overrides::resetAll(o);
+        return QString();
+    });
+}
+
+void SongEditor::setSlideTransition(const QVariantMap &change)
+{
+    const QJsonObject json = QJsonObject::fromVariantMap(change);
+    editSelected([&](QJsonObject &o) { return overrides::setTransition(o, json); });
+}
+
+void SongEditor::resetSlideTransition()
+{
+    editSelected([](QJsonObject &o) {
+        overrides::resetTransition(o);
         return QString();
     });
 }

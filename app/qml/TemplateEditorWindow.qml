@@ -269,6 +269,28 @@ Window {
                     Label { text: "Top, bottom"; color: "#d0d3d8" }
                     PercentField { to: Math.round(editor.maxSafeArea * 1000); fraction: editor.safeAreaY; onFractionEdited: f => editor.setSafeArea(editor.safeAreaX, f) }
                 }
+
+                Label { text: "Transitions"; color: "#d0d3d8"; font.bold: true; Layout.topMargin: 8 }
+                TransitionControls {
+                    objectName: "contentTransition"
+                    label: "Text"
+                    maxMs: editor.maxTransitionMs
+                    transition: editor.transitions.content
+                    onEdited: change => editor.setTransition("content", change)
+                }
+                TransitionControls {
+                    objectName: "backgroundTransition"
+                    label: "Background"
+                    maxMs: editor.maxTransitionMs
+                    transition: editor.transitions.background
+                    onEdited: change => editor.setTransition("background", change)
+                }
+                Label {
+                    Layout.fillWidth: true
+                    text: "Saved with the template. The outputs don't use the background transition yet: clearing the background still fades."
+                    wrapMode: Text.WordWrap
+                    color: "#8b8f96"
+                }
             }
         }
     }

@@ -38,6 +38,10 @@ class TemplateEditor : public QObject, public QQmlParserStatus
     Q_PROPERTY(double safeAreaX READ safeAreaX NOTIFY templateChanged)
     Q_PROPERTY(double safeAreaY READ safeAreaY NOTIFY templateChanged)
     Q_PROPERTY(double maxSafeArea READ maxSafeArea CONSTANT)
+    // Each layer's transition (#96), as in the template JSON:
+    // {content: {kind: "cut", ms: 300}, background: {kind: "fade", ms: 600}}.
+    Q_PROPERTY(QVariantMap transitions READ transitions NOTIFY templateChanged)
+    Q_PROPERTY(int maxTransitionMs READ maxTransitionMs CONSTANT)
     Q_PROPERTY(QString sampleText READ sampleText WRITE setSampleText NOTIFY sampleTextChanged)
     // The sample text through the template as edited, saved or not, as the output draws it.
     Q_PROPERTY(visualis::Content preview READ preview NOTIFY previewChanged)
@@ -65,6 +69,8 @@ public:
     double safeAreaX() const { return m_tmpl.safeAreaX; }
     double safeAreaY() const { return m_tmpl.safeAreaY; }
     static double maxSafeArea();
+    QVariantMap transitions() const;
+    static int maxTransitionMs();
     QString sampleText() const { return m_sampleText; }
     void setSampleText(const QString &text);
     visualis::Content preview() const;
@@ -85,6 +91,11 @@ public:
     // `warnings` says why.
     Q_INVOKABLE void setStyle(const QVariantMap &properties);
     Q_INVOKABLE void setSafeArea(double x, double y);
+    // Changes `layer`'s transition ("content" or "background"; anything else is a programming
+    // error, logged) by `change`, keyed as in `transitions`: {kind} or {ms} alone changes only
+    // that. A kind other than "cut" or "fade", or a length out of range, is refused, with
+    // `warnings` saying why.
+    Q_INVOKABLE void setTransition(const QString &layer, const QVariantMap &change);
     // The region's frame after dragging `edges` (Qt.LeftEdge | ..., all four to move it) by
     // (dx, dy) from `start`, the frame when the drag began: see draggedFrame.
     Q_INVOKABLE void dragFrame(const QRectF &start, int edges, double dx, double dy);

@@ -87,7 +87,7 @@ int propertyCount(const QJsonObject &overrides)
     const QJsonObject regions = overrides.value("regions").toObject();
     for (auto it = regions.begin(); it != regions.end(); ++it)
         n += overriddenProperties(overrides, it.key()).size();
-    return n;
+    return n + (overridesTransition(overrides) ? 1 : 0);
 }
 
 QString setProperty(QJsonObject &overrides, const QString &regionId, const QString &path, const QJsonValue &value)
@@ -115,6 +115,7 @@ void resetAll(QJsonObject &overrides)
 {
     overrides.remove("regions");
     overrides.remove("template");
+    resetTransition(overrides);
 }
 
 void setTemplate(QJsonObject &overrides, const QUuid &templateId)
@@ -123,6 +124,29 @@ void setTemplate(QJsonObject &overrides, const QUuid &templateId)
         overrides.remove("template");
     else
         overrides["template"] = templateId.toString(QUuid::WithoutBraces);
+}
+
+QString setTransition(QJsonObject &overrides, const QJsonObject &transition)
+{
+    QStringList warnings;
+    applyTransition(Transition{}, transition, QStringLiteral("transition"), &warnings);
+    if (!warnings.isEmpty())
+        return warnings.first();
+    QJsonObject t = overrides.value("transition").toObject();
+    for (auto it = transition.begin(); it != transition.end(); ++it)
+        t[it.key()] = *it;
+    overrides["transition"] = t;
+    return {};
+}
+
+void resetTransition(QJsonObject &overrides)
+{
+    overrides.remove("transition");
+}
+
+bool overridesTransition(const QJsonObject &overrides)
+{
+    return overrides.contains("transition");
 }
 
 } // namespace visualis::overrides

@@ -1,18 +1,22 @@
 #include "live/livestate.h"
 #include "output/latencyprobe.h"
+#include "video/videoengine.h"
 
+#include <QElapsedTimer>
 #include <QFont>
 #include <QJSValue>
 #include <QQmlApplicationEngine>
 #include <QQmlComponent>
 #include <QQuickItem>
 #include <QQuickWindow>
+#include <QScreen>
 #include <QtQml/qqmlextensionplugin.h>
 #include <QtTest>
 
 #include "testkeychain.h"
 
 #include <memory>
+#include <mutex>
 
 Q_IMPORT_QML_PLUGIN(Visualis_UiPlugin)
 
@@ -126,10 +130,17 @@ private slots:
         QQuickWindow *w = output("audience");
         m_live->show(libraryItem(sample()), 1);
         QTRY_COMPARE(shownLyrics(w), QStringLiteral("Joy to the world\nThe Lord is come"));
+        QSignalSpy aChanged(w->findChild<QObject *>("lyricsA"), SIGNAL(opacityChanged()));
+        QSignalSpy bChanged(w->findChild<QObject *>("lyricsB"), SIGNAL(opacityChanged()));
         m_live->next();
         // No waiting: the new slide is fully shown and the old one gone at once.
         QCOMPARE(visibleLyrics(w)->opacity(), 1.0);
         QCOMPARE(hiddenLyrics(w)->opacity(), 0.0);
+        // #96: a cut has no animation frames: each Text's opacity changed once, straight to its end.
+        QVERIFY(!fade(w)->property("running").toBool());
+        QTest::qWait(100);
+        QCOMPARE(aChanged.count(), 1);
+        QCOMPARE(bChanged.count(), 1);
     }
 
     // #93: the audience text renders from the live slide's template: font, size, alignment
@@ -169,6 +180,69 @@ private slots:
         QVERIFY(visibleLyrics(w)->opacity() < 1.0);   // still fading in
         QTRY_COMPARE(visibleLyrics(w)->opacity(), 1.0);
         QTRY_COMPARE(hiddenLyrics(w)->opacity(), 0.0);
+    }
+
+    // #96: Next mid-fade ends on the newest slide. The slide that was fading out goes at
+    // once, so no more than two slides ever show and none changes its text while visible.
+    void aFadeInterruptedByNextEndsOnTheNewSlide()
+    {
+        QQuickWindow *w = output("audience");
+        m_live->show(throughTemplate(sample(), [](Template &t) { t.transitions.content = {TransitionKind::Fade, kLongFadeMs}; }), 1);
+        QTRY_COMPARE_WITH_TIMEOUT(visibleLyrics(w)->opacity(), 1.0, 3 * kLongFadeMs);
+        m_live->next();
+        QTest::qWait(150);
+        QQuickItem *second = visibleLyrics(w);
+        const double secondAt = second->opacity();
+        QVERIFY(secondAt > 0 && secondAt < 1);
+        m_live->next();
+        QQuickItem *third = visibleLyrics(w);
+        QCOMPARE(third->property("text").toString(), QStringLiteral("And heaven and nature sing"));
+        QCOMPARE(third->opacity(), 0.0);   // fades in from nothing, not from where the first slide was
+        QCOMPARE(second->opacity(), secondAt);   // fades out from where it was
+        QTRY_COMPARE_WITH_TIMEOUT(third->opacity(), 1.0, 3 * kLongFadeMs);
+        QTRY_COMPARE_WITH_TIMEOUT(second->opacity(), 0.0, 3 * kLongFadeMs);
+        QCOMPARE(shownLyrics(w), QStringLiteral("And heaven and nature sing"));
+    }
+
+    void clearingDuringAFadeEndsCleared()
+    {
+        QQuickWindow *w = output("audience");
+        m_live->show(throughTemplate(sample(), [](Template &t) { t.transitions.content = {TransitionKind::Fade, kLongFadeMs}; }), 1);
+        QTRY_COMPARE_WITH_TIMEOUT(visibleLyrics(w)->opacity(), 1.0, 3 * kLongFadeMs);
+        m_live->next();
+        QTest::qWait(150);
+        m_live->clearText();
+        QTRY_VERIFY_WITH_TIMEOUT(!fade(w)->property("running").toBool(), 3 * kLongFadeMs);
+        QCOMPARE(shownLyrics(w), QString());
+        QCOMPARE(hiddenLyrics(w)->opacity(), 0.0);
+    }
+
+    // Clearing uses the layer's transition: the live slide's.
+    void clearingTheTextFadesWithTheSlidesTransition()
+    {
+        QQuickWindow *w = output("audience");
+        m_live->show(throughTemplate(sample(), [](Template &t) { t.transitions.content = {TransitionKind::Fade, kLongFadeMs}; }), 1);
+        QTRY_COMPARE_WITH_TIMEOUT(visibleLyrics(w)->opacity(), 1.0, 3 * kLongFadeMs);
+        QQuickItem *shown = visibleLyrics(w);
+        m_live->clearText();
+        QTest::qWait(50);
+        QVERIFY(shown->opacity() > 0 && shown->opacity() < 1);   // fading out
+        QTRY_COMPARE_WITH_TIMEOUT(shown->opacity(), 0.0, 3 * kLongFadeMs);
+    }
+
+    // During a fade each slide keeps its own look: the outgoing one isn't restyled as the new one.
+    void eachSlideFadesWithItsOwnStyle()
+    {
+        Song song = sample();
+        song.groups[2].slideOverrides = {{{"regions", QJsonObject{{"main", QJsonObject{{"color", "#ffcc00"}}}}}}};
+        QQuickWindow *w = output("audience");
+        m_live->show(throughTemplate(song, [](Template &t) { t.transitions.content = {TransitionKind::Fade, 300}; }), 2);
+        QTRY_COMPARE(visibleLyrics(w)->opacity(), 1.0);
+        QQuickItem *verse = visibleLyrics(w);
+        m_live->next();
+        QCOMPARE(visibleLyrics(w)->property("color").value<QColor>(), QColor("#ffcc00"));
+        QCOMPARE(verse->property("color").value<QColor>(), QColor("#ffffff"));
+        QCOMPARE(verse->property("text").toString(), QStringLiteral("Let earth receive her King"));
     }
 
     void clearedTextLeavesTheAudienceAndStaysOnStage()
@@ -267,6 +341,75 @@ private slots:
             QVERIFY2(ms < 50, qPrintable(QString::number(ms)));
     }
 
+    // #96, plan 5.5: a fade drops no frames. The P1 benchmarks' check: a frame interval over
+    // 1.5 refresh periods is late. Needs a real display, so it runs only when asked:
+    //   VISUALIS_FRAME_BENCH=1 QT_QPA_PLATFORM=cocoa tst_outputs fadesDropNoFrames
+    // with VISUALIS_BENCH_VIDEO=<clip> to fade over a playing background. Results are in
+    // docs/benchmarks/2026-11-24-fade-frame-timing.md.
+    void fadesDropNoFrames()
+    {
+        if (qEnvironmentVariableIsEmpty("VISUALIS_FRAME_BENCH") || QGuiApplication::platformName() == "offscreen")
+            QSKIP("a benchmark; run with VISUALIS_FRAME_BENCH=1 and QT_QPA_PLATFORM=cocoa");
+        QQuickWindow *w = output("audience");
+        if (const QString clip = qEnvironmentVariable("VISUALIS_BENCH_VIDEO"); !clip.isEmpty()) {
+            auto *video = m_engine->singletonInstance<VideoEngine *>("Visualis.Ui", "VideoEngine");
+            video->setSource(QUrl::fromLocalFile(clip));
+            QTRY_COMPARE_WITH_TIMEOUT(video->status(), QStringLiteral("Playing"), 10000);
+        }
+        const double periodMs = 1000.0 / w->screen()->refreshRate();
+
+        QElapsedTimer clock;
+        clock.start();
+        std::mutex lock;
+        QList<qint64> swaps;   // ns on `clock`, from the render thread
+        connect(w, &QQuickWindow::frameSwapped, w, [&] {
+            const std::lock_guard<std::mutex> guard(lock);
+            swaps << clock.nsecsElapsed();
+        }, Qt::DirectConnection);
+
+        struct Fade { qint64 from, to; };
+        auto run = [&](int ms, int times, const std::function<void(int)> &step) {
+            QList<Fade> fades;
+            for (int i = 0; i < times; ++i) {
+                const qint64 from = clock.nsecsElapsed();
+                step(i);
+                fades << Fade{from, from + qint64(ms) * 1'000'000};
+                spin(ms + 250);
+            }
+            return fades;
+        };
+        auto report = [&](const char *what, const QList<Fade> &fades) {
+            const std::lock_guard<std::mutex> guard(lock);
+            int frames = 0, late = 0, fewest = INT_MAX;
+            double longest = 0;
+            for (const Fade &f : fades) {
+                int inFade = 0;
+                for (qsizetype i = 1; i < swaps.size(); ++i) {
+                    if (swaps[i - 1] < f.from || swaps[i] > f.to)
+                        continue;   // the first frame of a fade includes the command's latency
+                    const double ms = (swaps[i] - swaps[i - 1]) / 1e6;
+                    ++inFade;
+                    late += ms > 1.5 * periodMs;
+                    longest = std::max(longest, ms);
+                }
+                frames += inFade;
+                fewest = std::min(fewest, inFade);
+            }
+            qInfo("%s: %lld fades, %d frame intervals (fewest in one fade %d), %d late, longest %.2f ms, refresh %.2f Hz",
+                  what, qlonglong(fades.size()), frames, fewest, late, longest, 1000 / periodMs);
+            return late;
+        };
+
+        m_live->show(throughTemplate(sample(), [](Template &t) { t.transitions.content = {TransitionKind::Fade, 500}; }), 1);
+        spin(1000);
+        const int textLate = report("text fade 500 ms", run(500, 20, [&](int i) { i % 2 ? m_live->previous() : m_live->next(); }));
+        const int backgroundLate = report("background fade 600 ms", run(600, 10, [&](int i) {
+            i % 2 ? m_live->showBackground() : m_live->clearBackground();
+        }));
+        QCOMPARE(textLate, 0);
+        QCOMPARE(backgroundLate, 0);
+    }
+
     // Plan 5.2: an output owns no state, so a reopened window shows what's live.
     void aNewOutputWindowShowsWhatIsLive()
     {
@@ -300,6 +443,17 @@ private:
         return w->findChild<QQuickItem *>(layer->property("showingA").toBool() ? "lyricsA" : "lyricsB");
     }
 
+    // Runs the event loop for `ms`. QTest::qWait sleeps between batches of events, which
+    // starves animations on the GUI thread and reads as dropped frames.
+    static void spin(int ms)
+    {
+        QEventLoop loop;
+        QTimer::singleShot(ms, &loop, &QEventLoop::quit);
+        loop.exec();
+    }
+
+    static QObject *fade(QQuickWindow *w) { return w->findChild<QObject *>("lyricsFade"); }
+
     static QQuickItem *hiddenLyrics(QQuickWindow *w)
     {
         auto *layer = w->findChild<QObject *>("audienceLyrics");
@@ -328,6 +482,8 @@ private:
     }
 
     static constexpr int LyricsFadeWaitMs = 700;
+    // Long enough that a stalled CI runner can't overshoot a fade the test checks midway (#108).
+    static constexpr int kLongFadeMs = 2000;
     std::unique_ptr<QQmlApplicationEngine> m_engine;
     LiveState *m_live = nullptr;
     std::vector<std::unique_ptr<QObject>> m_windows;

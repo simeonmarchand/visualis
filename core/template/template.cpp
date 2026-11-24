@@ -85,7 +85,7 @@ Template builtInLyricsTemplate()
     t.safeAreaX = 0.06;
     t.safeAreaY = 0.08;
     t.transitions.content = {TransitionKind::Cut, 300};
-    t.transitions.background = {TransitionKind::Fade, 600};
+    t.transitions.background = {TransitionKind::Cut, 600};
     t.revision = 1;
 
     RegionStyle s;
@@ -173,6 +173,23 @@ std::optional<RegionStyle> effectiveStyle(const Template &tmpl, const QString &r
                                           const QJsonObject &overrides, QStringList *warnings)
 {
     return effectiveStyle(tmpl, regionId, QList<QJsonObject>{overrides}, warnings);
+}
+
+Transition effectiveTransition(const Transition &content, const QList<QJsonObject> &layers, QStringList *warnings)
+{
+    Transition t = content;
+    for (const QJsonObject &layer : layers) {
+        const QJsonValue mine = layer.value("transition");
+        if (mine.isUndefined())
+            continue;
+        if (!mine.isObject()) {
+            if (warnings)
+                *warnings << QStringLiteral("an override's \"transition\" isn't an object; ignored");
+            continue;
+        }
+        t = applyTransition(t, mine.toObject(), QStringLiteral("override's transition"), warnings);
+    }
+    return t;
 }
 
 } // namespace visualis

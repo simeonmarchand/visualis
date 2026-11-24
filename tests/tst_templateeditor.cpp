@@ -224,6 +224,37 @@ private slots:
         QCOMPARE(m_editor->safeAreaX(), 0.1);
     }
 
+    // #96: each layer's transition, set apart, cut by default.
+    void eachLayersTransitionPersists()
+    {
+        m_editor->create("Ours");
+        QCOMPARE(m_editor->transitions()["content"].toMap()["kind"].toString(), QStringLiteral("cut"));
+        QCOMPARE(m_editor->transitions()["background"].toMap()["kind"].toString(), QStringLiteral("cut"));
+        m_editor->setTransition("content", {{"kind", "fade"}});
+        m_editor->setTransition("content", {{"ms", 450}});   // keeps the kind
+        m_editor->setTransition("background", {{"ms", 600}});
+        QVERIFY(m_editor->warnings().isEmpty());
+        QCOMPARE(m_editor->transitions()["content"].toMap(), (QVariantMap{{"kind", "fade"}, {"ms", 450}}));
+        QCOMPARE(m_editor->preview().transition, (Transition{TransitionKind::Fade, 450}));
+        m_editor->flush();
+        QCOMPARE(stored().transitions.content, (Transition{TransitionKind::Fade, 450}));
+        QCOMPARE(stored().transitions.background, (Transition{TransitionKind::Cut, 600}));
+    }
+
+    void anInvalidTransitionIsRefused()
+    {
+        m_editor->create("Ours");
+        const Transitions before = stored().transitions;
+        QSignalSpy changed(m_editor.get(), &TemplateEditor::templateChanged);
+        m_editor->setTransition("content", {{"kind", "fade"}, {"ms", 20'000}});
+        QVERIFY(m_editor->warnings().first().contains("ms"));
+        m_editor->setTransition("content", {{"kind", "wipe"}});   // not a kind this version has
+        QCOMPARE(m_editor->warnings().size(), 1);
+        QCOMPARE(changed.count(), 2);                       // each snaps its control back
+        m_editor->flush();
+        QCOMPARE(stored().transitions, before);
+    }
+
     void draggingTheFrameUpdatesFractionsClampedToTheScreen()
     {
         m_editor->create("Ours");
@@ -490,6 +521,12 @@ private slots:
         const QRectF f = m_templates->templates().value(QUuid::fromString(editor->templateId())).regions[0].style.frame;
         QVERIFY(qAbs(f.right() - 1) < 1e-6);
         QCOMPARE(f.y(), builtInLyricsTemplate().regions[0].style.frame.y());   // a level drag
+
+        auto *background = window->findChild<QQuickItem *>("backgroundTransition");
+        QVERIFY(background);
+        const QVariant fadeKind = QVariantMap{{"kind", "fade"}};
+        QMetaObject::invokeMethod(background, "edited", Q_ARG(QVariant, fadeKind));
+        QCOMPARE(editor->transitions()["background"].toMap()["kind"].toString(), QStringLiteral("fade"));
 
         if (const QString dir = qEnvironmentVariable("VISUALIS_SNAPSHOT_DIR"); !dir.isEmpty()) {
             QTest::qWait(300);

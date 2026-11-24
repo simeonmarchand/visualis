@@ -314,7 +314,7 @@ Window {
                     Button {
                         objectName: "resetSlides"
                         text: "Reset all"
-                        enabled: editor.overriddenProperties.length > 0
+                        enabled: editor.overriddenProperties.length > 0 || editor.slideTransitionOverridden
                         onClicked: editor.resetSlides()
                     }
                     Button { text: "Done"; onClicked: editor.clearSelection() }
@@ -329,16 +329,30 @@ Window {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     contentWidth: availableWidth
-                    RegionStyleControls {
+                    ColumnLayout {
                         width: parent.width
-                        style: editor.slideStyle
-                        regions: editor.regions
-                        regionId: editor.regionId
-                        overridden: editor.overriddenProperties
-                        mixed: editor.mixedProperties
-                        onRegionChosen: id => editor.regionId = id
-                        onEdited: (path, value) => editor.setSlideProperty(path, value)
-                        onResetRequested: path => editor.resetSlideProperty(path)
+                        spacing: 8
+                        TransitionControls {
+                            objectName: "slideTransition"
+                            label: "Transition"
+                            maxMs: editor.maxTransitionMs
+                            transition: editor.slideTransition
+                            overridden: editor.slideTransitionOverridden
+                            mixed: editor.slideTransitionMixed
+                            onEdited: change => editor.setSlideTransition(change)
+                            onResetRequested: editor.resetSlideTransition()
+                        }
+                        RegionStyleControls {
+                            Layout.fillWidth: true
+                            style: editor.slideStyle
+                            regions: editor.regions
+                            regionId: editor.regionId
+                            overridden: editor.overriddenProperties
+                            mixed: editor.mixedProperties
+                            onRegionChosen: id => editor.regionId = id
+                            onEdited: (path, value) => editor.setSlideProperty(path, value)
+                            onResetRequested: path => editor.resetSlideProperty(path)
+                        }
                     }
                 }
             }

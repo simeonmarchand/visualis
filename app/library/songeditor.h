@@ -56,6 +56,12 @@ class SongEditor : public QObject
     // value differs between the selected slides.
     Q_PROPERTY(QStringList overriddenProperties READ overriddenProperties NOTIFY selectionChanged)
     Q_PROPERTY(QStringList mixedProperties READ mixedProperties NOTIFY selectionChanged)
+    // The first selected slide's text transition (#96) as it shows, {kind, ms}; whether any
+    // selected slide overrides it, and whether they differ.
+    Q_PROPERTY(QVariantMap slideTransition READ slideTransition NOTIFY selectionChanged)
+    Q_PROPERTY(bool slideTransitionOverridden READ slideTransitionOverridden NOTIFY selectionChanged)
+    Q_PROPERTY(bool slideTransitionMixed READ slideTransitionMixed NOTIFY selectionChanged)
+    Q_PROPERTY(int maxTransitionMs READ maxTransitionMs CONSTANT)
     // The template it shows with (#94); the built-in's id when it has none of its own.
     Q_PROPERTY(QString templateId READ templateId WRITE setTemplateId NOTIFY changed)
     Q_PROPERTY(QStringList warnings READ warnings NOTIFY changed)
@@ -90,6 +96,10 @@ public:
     QVariantMap slideStyle() const;
     QStringList overriddenProperties() const;
     QStringList mixedProperties() const;
+    QVariantMap slideTransition() const;
+    bool slideTransitionOverridden() const;
+    bool slideTransitionMixed() const;
+    static int maxTransitionMs();
     QStringList warnings() const { return m_warnings; }
     QString error() const { return m_error; }
 
@@ -125,6 +135,11 @@ public:
     // would break a rule between properties.
     Q_INVOKABLE void resetSlideProperty(const QString &path);
     Q_INVOKABLE void resetSlides();
+    // Overrides the text transition on every selected slide by `change`, {kind} or {ms} (as in
+    // slideTransition). Only what it names changes, so across a mixed selection a new length
+    // leaves each slide's kind. Refused like a property. Reset goes back to the template's.
+    Q_INVOKABLE void setSlideTransition(const QVariantMap &change);
+    Q_INVOKABLE void resetSlideTransition();
     // Saves a style edit that's waiting to. False if it couldn't be saved: a busy library keeps
     // the edit and is tried again; any other failure goes back to what's stored. After a
     // lyrics or other edit that didn't save, it waits for the next save that works.

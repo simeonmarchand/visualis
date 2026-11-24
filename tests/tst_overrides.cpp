@@ -80,8 +80,13 @@ private slots:
         overrides::setTemplate(o, QUuid::createUuid());
         overrides::setTemplate(o, QUuid());
         QCOMPARE(o, parse("{'later': 1, 'regions': {'main': {'glow': true, 'shadow': {'spread': 2}}, 'other': {'x': 1}}}"));
+        overrides::setTransition(o, parse("{'kind': 'fade', 'ms': 400}"));
         overrides::resetAll(o);
         QCOMPARE(o, parse("{'later': 1}"));
+
+        QJsonObject t = parse("{'transition': {'kind': 'cut', 'ms': 0, 'easing': 'outCubic'}}");
+        QCOMPARE(overrides::setTransition(t, parse("{'kind': 'fade', 'ms': 500}")), QString());
+        QCOMPARE(t, parse("{'transition': {'kind': 'fade', 'ms': 500, 'easing': 'outCubic'}}"));
     }
 
     void overriddenPropertiesListsExactlyWhatWasSet()
@@ -95,6 +100,8 @@ private slots:
         QCOMPARE(overrides::overriddenProperties(o, "main"), (QStringList{"color", "frame.x", "shadow.opacity"}));
         QCOMPARE(overrides::overriddenProperties(o, "other"), QStringList{"weight"});
         QCOMPARE(overrides::propertyCount(o), 4);   // in every region
+        overrides::setTransition(o, parse("{'kind': 'cut'}"));
+        QCOMPARE(overrides::propertyCount(o), 5);   // and the transition
         // Unknown keys stored alongside aren't properties.
         o = parse("{'regions': {'main': {'glow': true, 'shadow': {'spread': 2, 'blur': 0.1}}}}");
         QCOMPARE(overrides::overriddenProperties(o, "main"), QStringList{"shadow.blur"});
@@ -108,6 +115,68 @@ private slots:
         QCOMPARE(overrideTemplateId(o), id);
         overrides::setTemplate(o, QUuid());   // none: back to the default
         QCOMPARE(o, parse("{'regions': {'main': {'color': '#ffcc00'}}}"));
+    }
+
+    void aTransitionIsSetAndResetOnItsOwn()
+    {
+        const QJsonObject original = parse("{'regions': {'main': {'color': '#ffcc00'}}}");
+        QJsonObject o = original;
+        QVERIFY(!overrides::overridesTransition(o));
+        QCOMPARE(overrides::setTransition(o, parse("{'kind': 'fade', 'ms': 450}")), QString());
+        QVERIFY(overrides::overridesTransition(o));
+        QCOMPARE(o, parse("{'regions': {'main': {'color': '#ffcc00'}}, 'transition': {'kind': 'fade', 'ms': 450}}"));
+        overrides::resetTransition(o);
+        QCOMPARE(o, original);
+    }
+
+    void anInvalidTransitionIsRefused()
+    {
+        QJsonObject o;
+        QVERIFY(!overrides::setTransition(o, parse("{'kind': 'fade', 'ms': -1}")).isEmpty());
+        QVERIFY(!overrides::setTransition(o, parse("{'kind': 'wipe'}")).isEmpty());   // not a kind this version has
+        const QString why = overrides::setTransition(o, parse("{'ms': 60000}"));
+        QVERIFY2(why.contains("ms"), qPrintable(why));
+        QCOMPARE(o, QJsonObject());
+    }
+
+    // #96: a slide's text transition is the template's unless the slide overrides it.
+    void theSlidesTransitionOverridesTheTemplates()
+    {
+        Template t = builtInLyricsTemplate();
+        t.id = QUuid::createUuid();
+        t.name = "Ours";
+        t.transitions.content = {TransitionKind::Fade, 400};
+        Song song = oneSlideSong(t.id);
+        song.groups[0].fitSlideOverrides();
+        QCOMPARE(overrides::setTransition(song.groups[0].slideOverrides[1], parse("{'kind': 'cut', 'ms': 300}")), QString());
+
+        auto transition = [&](int slide) { return liveSong(song, {}, templateSet({t})).slides[slide].content.transition; };
+        QCOMPARE(transition(0), (Transition{TransitionKind::Fade, 400}));
+        QCOMPARE(transition(1), (Transition{TransitionKind::Cut, 300}));
+
+        t.transitions.content = {TransitionKind::Fade, 800};
+        QCOMPARE(transition(0), (Transition{TransitionKind::Fade, 800}));   // follows
+        QCOMPARE(transition(1), (Transition{TransitionKind::Cut, 300}));    // sticks
+
+        overrides::resetTransition(song.groups[0].slideOverrides[1]);
+        QCOMPARE(transition(1), (Transition{TransitionKind::Fade, 800}));
+    }
+
+    void aBadTransitionOverrideIsReportedAndTheRestApplies()
+    {
+        const Transition fade{TransitionKind::Fade, 400};
+        QStringList warnings;
+        // A length alone keeps the kind; a bad length keeps the one below it.
+        QCOMPARE(effectiveTransition(fade, {parse("{'transition': {'ms': 250}}")}, &warnings), (Transition{TransitionKind::Fade, 250}));
+        QVERIFY(warnings.isEmpty());
+        QCOMPARE(effectiveTransition(fade, {parse("{'transition': {'kind': 'cut', 'ms': -5}}")}, &warnings),
+                 (Transition{TransitionKind::Cut, 400}));
+        QCOMPARE(warnings.size(), 1);
+        // A kind this version doesn't know cuts, as in a template.
+        QCOMPARE(effectiveTransition(fade, {parse("{'transition': {'kind': 'dissolve'}}")}, &warnings).kind, TransitionKind::Cut);
+        QCOMPARE(warnings.size(), 2);
+        QCOMPARE(effectiveTransition(fade, {parse("{'transition': 3}")}, &warnings), fade);
+        QCOMPARE(warnings.size(), 3);
     }
 
     // The renderer reads what the module writes; everything not overridden follows the template.
