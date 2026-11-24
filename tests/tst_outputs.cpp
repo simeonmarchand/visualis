@@ -126,10 +126,17 @@ private slots:
         QQuickWindow *w = output("audience");
         m_live->show(libraryItem(sample()), 1);
         QTRY_COMPARE(shownLyrics(w), QStringLiteral("Joy to the world\nThe Lord is come"));
+        QSignalSpy aChanged(w->findChild<QObject *>("lyricsA"), SIGNAL(opacityChanged()));
+        QSignalSpy bChanged(w->findChild<QObject *>("lyricsB"), SIGNAL(opacityChanged()));
         m_live->next();
         // No waiting: the new slide is fully shown and the old one gone at once.
         QCOMPARE(visibleLyrics(w)->opacity(), 1.0);
         QCOMPARE(hiddenLyrics(w)->opacity(), 0.0);
+        // #96: a cut has no animation frames: each Text's opacity changed once, straight to its end.
+        QVERIFY(!fade(w)->property("running").toBool());
+        QTest::qWait(100);
+        QCOMPARE(aChanged.count(), 1);
+        QCOMPARE(bChanged.count(), 1);
     }
 
     // #93: the audience text renders from the live slide's template: font, size, alignment
@@ -169,6 +176,69 @@ private slots:
         QVERIFY(visibleLyrics(w)->opacity() < 1.0);   // still fading in
         QTRY_COMPARE(visibleLyrics(w)->opacity(), 1.0);
         QTRY_COMPARE(hiddenLyrics(w)->opacity(), 0.0);
+    }
+
+    // #96: Next mid-fade ends on the newest slide. The slide that was fading out goes at
+    // once, so no more than two slides ever show and none changes its text while visible.
+    void aFadeInterruptedByNextEndsOnTheNewSlide()
+    {
+        QQuickWindow *w = output("audience");
+        m_live->show(throughTemplate(sample(), [](Template &t) { t.transitions.content = {TransitionKind::Fade, 400}; }), 1);
+        QTRY_COMPARE(visibleLyrics(w)->opacity(), 1.0);
+        m_live->next();
+        QTest::qWait(150);
+        QQuickItem *second = visibleLyrics(w);
+        const double secondAt = second->opacity();
+        QVERIFY(secondAt > 0 && secondAt < 1);
+        m_live->next();
+        QQuickItem *third = visibleLyrics(w);
+        QCOMPARE(third->property("text").toString(), QStringLiteral("And heaven and nature sing"));
+        QCOMPARE(third->opacity(), 0.0);   // fades in from nothing, not from where the first slide was
+        QCOMPARE(second->opacity(), secondAt);   // fades out from where it was
+        QTRY_COMPARE(third->opacity(), 1.0);
+        QTRY_COMPARE(second->opacity(), 0.0);
+        QCOMPARE(shownLyrics(w), QStringLiteral("And heaven and nature sing"));
+    }
+
+    void clearingDuringAFadeEndsCleared()
+    {
+        QQuickWindow *w = output("audience");
+        m_live->show(throughTemplate(sample(), [](Template &t) { t.transitions.content = {TransitionKind::Fade, 400}; }), 1);
+        QTRY_COMPARE(visibleLyrics(w)->opacity(), 1.0);
+        m_live->next();
+        QTest::qWait(150);
+        m_live->clearText();
+        QTRY_VERIFY(!fade(w)->property("running").toBool());
+        QCOMPARE(shownLyrics(w), QString());
+        QCOMPARE(hiddenLyrics(w)->opacity(), 0.0);
+    }
+
+    // Clearing uses the layer's transition: the live slide's.
+    void clearingTheTextFadesWithTheSlidesTransition()
+    {
+        QQuickWindow *w = output("audience");
+        m_live->show(throughTemplate(sample(), [](Template &t) { t.transitions.content = {TransitionKind::Fade, 300}; }), 1);
+        QTRY_COMPARE(visibleLyrics(w)->opacity(), 1.0);
+        QQuickItem *shown = visibleLyrics(w);
+        m_live->clearText();
+        QTest::qWait(50);
+        QVERIFY(shown->opacity() > 0 && shown->opacity() < 1);   // fading out
+        QTRY_COMPARE(shown->opacity(), 0.0);
+    }
+
+    // During a fade each slide keeps its own look: the outgoing one isn't restyled as the new one.
+    void eachSlideFadesWithItsOwnStyle()
+    {
+        Song song = sample();
+        song.groups[2].slideOverrides = {{{"regions", QJsonObject{{"main", QJsonObject{{"color", "#ffcc00"}}}}}}};
+        QQuickWindow *w = output("audience");
+        m_live->show(throughTemplate(song, [](Template &t) { t.transitions.content = {TransitionKind::Fade, 300}; }), 2);
+        QTRY_COMPARE(visibleLyrics(w)->opacity(), 1.0);
+        QQuickItem *verse = visibleLyrics(w);
+        m_live->next();
+        QCOMPARE(visibleLyrics(w)->property("color").value<QColor>(), QColor("#ffcc00"));
+        QCOMPARE(verse->property("color").value<QColor>(), QColor("#ffffff"));
+        QCOMPARE(verse->property("text").toString(), QStringLiteral("Let earth receive her King"));
     }
 
     void clearedTextLeavesTheAudienceAndStaysOnStage()
@@ -299,6 +369,8 @@ private:
             return nullptr;
         return w->findChild<QQuickItem *>(layer->property("showingA").toBool() ? "lyricsA" : "lyricsB");
     }
+
+    static QObject *fade(QQuickWindow *w) { return w->findChild<QObject *>("lyricsFade"); }
 
     static QQuickItem *hiddenLyrics(QQuickWindow *w)
     {
