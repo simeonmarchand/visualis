@@ -1,12 +1,31 @@
 #pragma once
 
 #include "live/liveitem.h"
+#include "media/mediaresolve.h"
 
 #include <QObject>
 
 #include <optional>
 
 namespace visualis {
+
+// The live background (GLOSSARY.md "Background layer"): a media asset, whether it's
+// cleared, and the transition it arrived with, which clearing and showing it use too (#98).
+struct BackgroundLayer {
+    Q_GADGET
+    Q_PROPERTY(QString assetId READ assetId)   // without braces; empty for none
+    Q_PROPERTY(bool cleared MEMBER cleared)
+    Q_PROPERTY(visualis::Transition transition MEMBER transition)
+
+public:
+    QUuid asset;   // null: no background
+    bool cleared = false;
+    Transition transition = Transitions{}.background;
+
+    bool operator==(const BackgroundLayer &) const = default;
+
+    QString assetId() const { return asset.isNull() ? QString() : asset.toString(QUuid::WithoutBraces); }
+};
 
 // What is live right now: the one state every output renders (plan 5.2). The operator
 // window changes it through the commands below; audience and stage windows only read it,
@@ -30,6 +49,11 @@ class LiveState : public QObject
     Q_PROPERTY(QString groupColor READ groupColor NOTIFY changed)
     Q_PROPERTY(bool textCleared READ textCleared NOTIFY changed)
     Q_PROPERTY(bool backgroundCleared READ backgroundCleared NOTIFY changed)
+    // The background layer's asset id without braces, empty for none.
+    Q_PROPERTY(QString backgroundId READ backgroundId NOTIFY changed)
+    // Why the last background asked for isn't showing (its file is missing), for the
+    // operator; empty once a background shows.
+    Q_PROPERTY(QString backgroundAlert READ backgroundAlert NOTIFY changed)
     // The live service and, when what's live came from it, the item (#51). Ids without
     // braces, empty when none; itemIndex is -1 when the live item isn't in the service.
     Q_PROPERTY(QString serviceId READ serviceIdString NOTIFY changed)
@@ -56,7 +80,10 @@ public:
     // item live with no slide, as show() does. setService() with the same service afterwards
     // picks the service back up at that item. An item with an error is refused as in show(),
     // leaving everything as it was; returns false then.
-    bool restore(const LiveItem &item, int index, bool textCleared, bool backgroundCleared, const QUuid &service = {});
+    // The background comes back through the media check, as setBackground(): one whose file
+    // is missing leaves the layer as it was, and says so in backgroundAlert().
+    bool restore(const LiveItem &item, int index, bool textCleared, const BackgroundLayer &background = {},
+                 const QUuid &service = {});
 
     // Swaps in a new rendering of the live item (after its song or template changed), keeping
     // the slide index, clamped to the slides it has now. The live item is the one with the
@@ -101,6 +128,23 @@ public:
     // Brings a cleared background back (plan 5.8 show_background).
     Q_INVOKABLE void showBackground();
 
+    // The background layer (#98). Slides never touch it: a slide changes only the layers it
+    // carries (plan 5.2). Setting the asset that's already live changes nothing, not even the
+    // transition, except to bring it back if it was cleared. Another asset is checked first
+    // (setMediaCheck): when its file isn't there the layer stays as it was, backgroundAlert()
+    // says why, and it returns false. A null asset empties the layer.
+    bool setBackground(const QUuid &asset, const Transition &transition);
+    // The operator picked `assetId` (empty for none) from the media library: it changes with
+    // the live item's template's background transition.
+    Q_INVOKABLE bool pickBackground(const QString &assetId);
+    const BackgroundLayer &background() const { return m_background; }
+
+    // How assets are checked before they go live: checkMedia over the media library's
+    // snapshot in the app. It runs on this thread, so it must be quick (one stat). Without
+    // one, every asset is accepted, with no path.
+    void setMediaCheck(MediaCheckFn check) { m_check = std::move(check); }
+    MediaCheck checkMedia(const QUuid &asset) const;
+
     const LiveItem &item() const { return m_live; }   // what's live, whole
     const Song &song() const { return m_live.song; }
     QUuid arrangementId() const { return m_live.arrangement; }   // null for the default
@@ -120,7 +164,9 @@ public:
     QString groupLabel() const;
     QString groupColor() const;
     bool textCleared() const { return m_textCleared; }
-    bool backgroundCleared() const { return m_backgroundCleared; }
+    bool backgroundCleared() const { return m_background.cleared; }
+    QString backgroundId() const { return m_background.assetId(); }
+    QString backgroundAlert() const { return m_backgroundAlert; }
     QUuid serviceId() const { return m_serviceId; }
     QUuid itemId() const { return m_live.id(); }
     QString serviceIdString() const { return braceless(m_serviceId); }
@@ -140,12 +186,17 @@ private:
     // Swaps in `item` as the live one, clamping the slide index to its slides.
     void replaceLive(const LiveItem &item);
     void showItem(int n, int slide);
+    // Applies `layer` if its asset passes the check; otherwise leaves the layer and sets the
+    // alert. Doesn't emit changed().
+    bool applyBackground(const BackgroundLayer &layer);
     static QString braceless(const QUuid &id) { return id.isNull() ? QString() : id.toString(QUuid::WithoutBraces); }
 
     LiveItem m_live;   // its id is the service item's, null for a library song
     int m_index = -1;
     bool m_textCleared = false;
-    bool m_backgroundCleared = false;
+    BackgroundLayer m_background;
+    QString m_backgroundAlert;
+    MediaCheckFn m_check;
     QString m_heldBack;
     QUuid m_serviceId;
     QList<LiveItem> m_items;

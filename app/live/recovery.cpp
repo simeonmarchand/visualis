@@ -47,7 +47,7 @@ bool Recovery::start(const QString &journalPath, LiveState *live, VideoEngine *v
                                               : liveSong(*s.song, s.arrangement, templates);
                 if (!s.serviceItem && !s.item.isNull())   // a journal from before #93
                     item.source = ServiceItem{.id = s.item, .kind = ServiceItem::Kind::Song, .arrangement = s.arrangement};
-                live->restore(item, s.slideIndex, s.textCleared, s.backgroundCleared, s.service);
+                live->restore(item, s.slideIndex, s.textCleared, BackgroundLayer{.cleared = s.backgroundCleared}, s.service);
             }
             else if (s.backgroundCleared)
                 live->clearBackground();

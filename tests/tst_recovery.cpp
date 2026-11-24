@@ -364,7 +364,7 @@ private slots:
         recovery.start(m_path, &live, nullptr);
         live.show(libraryItem(sample()), 0);
         QVERIFY(QFile::exists(m_path));
-        live.restore(LiveItem{}, -1, false, false);
+        live.restore(LiveItem{}, -1, false);
         QVERIFY(!QFile::exists(m_path));
     }
 

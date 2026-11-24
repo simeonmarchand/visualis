@@ -2,6 +2,7 @@
 #include "live/liveitem.h"
 #include "live/livestate.h"
 
+#include <QSet>
 #include <QSignalSpy>
 #include <QtTest>
 
@@ -92,6 +93,25 @@ Song repeated(int slides, int steps)
     s.arrangements = {Arrangement{QUuid::createUuid(), "Default", QList<QUuid>(steps, s.groups[0].id), {}}};
     return s;
 }
+
+// A media check that knows the given assets, the rest missing, and counts its calls.
+struct FakeMedia {
+    QSet<QUuid> present;
+    std::shared_ptr<int> calls = std::make_shared<int>(0);
+    MediaCheckFn fn() const
+    {
+        return [present = present, calls = calls](const QUuid &id) {
+            ++*calls;
+            MediaCheck c;
+            c.status = present.contains(id) ? MediaStatus::Ok : MediaStatus::Missing;
+            c.path = present.contains(id) ? QStringLiteral("/media/still.jpg") : QString();
+            c.message = present.contains(id) ? QString() : QStringLiteral("\"Sunrise.jpg\" is missing from the media folder.");
+            return c;
+        };
+    }
+};
+
+const Transition kFade{TransitionKind::Fade, 800};
 
 } // namespace
 
@@ -610,7 +630,7 @@ private slots:
         const QList<LiveItem> items = service();
         const QUuid id = QUuid::createUuid();
         LiveState live;
-        live.restore(items[3], 6, true, false, id);
+        live.restore(items[3], 6, true, {}, id);
         QCOMPARE(live.itemIndex(), -1);   // the service isn't loaded yet
         QCOMPARE(live.itemIdString(), items[3].id().toString(QUuid::WithoutBraces));
         QVERIFY(!live.next());
@@ -712,6 +732,152 @@ private slots:
         QCOMPARE(live.property("backgroundCleared").toBool(), true);
     }
 
+    // #98: the background layer. A slide changes only the layers it carries (plan 5.2).
+    void theSameBackgroundAgainChangesNothing()
+    {
+        const QUuid still = QUuid::createUuid();
+        LiveState live;
+        live.setMediaCheck(FakeMedia{{still}}.fn());
+        QVERIFY(live.setBackground(still, kFade));
+        QSignalSpy changed(&live, &LiveState::changed);
+        QVERIFY(live.setBackground(still, Transition{}));
+        QCOMPARE(changed.count(), 0);
+        QCOMPARE(live.background().transition, kFade);   // still the one it arrived with
+    }
+
+    void aCarriedBackgroundBringsAClearedOneBack()
+    {
+        const QUuid a = QUuid::createUuid(), b = QUuid::createUuid();
+        LiveState live;
+        live.setMediaCheck(FakeMedia{{a, b}}.fn());
+        live.setBackground(a, kFade);
+        live.clearBackground();
+        QVERIFY(live.setBackground(a, Transition{}));
+        QVERIFY(!live.backgroundCleared());
+        QCOMPARE(live.background().transition, kFade);
+
+        live.clearBackground();
+        QVERIFY(live.setBackground(b, Transition{}));
+        QCOMPARE(live.background(), (BackgroundLayer{b, false, Transition{}}));
+    }
+
+    void aMissingBackgroundKeepsTheOldOneAndSaysSo()
+    {
+        const QUuid shown = QUuid::createUuid(), gone = QUuid::createUuid();
+        LiveState live;
+        live.setMediaCheck(FakeMedia{{shown}}.fn());
+        live.show(libraryItem(sample()), 1);
+        live.setBackground(shown, kFade);
+        live.clearBackground();
+
+        QVERIFY(!live.setBackground(gone, Transition{}));
+        QCOMPARE(live.background(), (BackgroundLayer{shown, true, kFade}));
+        QVERIFY2(live.backgroundAlert().contains("Sunrise.jpg"), qPrintable(live.backgroundAlert()));
+        QVERIFY(live.next());   // the text still changes
+        QCOMPARE(live.currentText(), QStringLiteral("Let earth receive her King"));
+
+        live.showBackground();
+        QVERIFY(live.setBackground(shown, Transition{}));
+        QVERIFY(live.backgroundAlert().isEmpty());   // a background that shows ends the alert
+    }
+
+    void clearingAndShowingKeepTheTransition()
+    {
+        const QUuid still = QUuid::createUuid();
+        LiveState live;
+        live.setMediaCheck(FakeMedia{{still}}.fn());
+        live.setBackground(still, kFade);
+        live.clearBackground();
+        QCOMPARE(live.background(), (BackgroundLayer{still, true, kFade}));
+        live.showBackground();
+        QCOMPARE(live.background(), (BackgroundLayer{still, false, kFade}));
+        live.clearAll();
+        QCOMPARE(live.background().transition, kFade);
+    }
+
+    void aStillSurvivesEverySlideChange()
+    {
+        const QUuid still = QUuid::createUuid();
+        const QList<LiveItem> items = service();
+        LiveState live;
+        live.setMediaCheck(FakeMedia{{still}}.fn());
+        live.setBackground(still, kFade);
+        const BackgroundLayer layer = live.background();
+        live.setService(QUuid::createUuid(), items);
+        QVERIFY(live.next());
+        while (live.next()) {   // through every slide and item
+            QCOMPARE(live.background(), layer);
+        }
+        QVERIFY(live.previous());
+        QVERIFY(live.goToItem(1, 2));
+        QVERIFY(live.goToSlide(0));
+        QVERIFY(live.goToGroupStartingWith("c"));
+        live.clearText();
+        Song song = arranged();
+        song.id = QUuid::createUuid();
+        QVERIFY(live.show(libraryItem(song), 3));
+        QVERIFY(live.update(libraryItem(song)));
+        live.setService(QUuid::createUuid(), items);
+        QCOMPARE(live.background(), layer);
+    }
+
+    void noBackgroundIsAnEmptyLayer()
+    {
+        const QUuid still = QUuid::createUuid();
+        FakeMedia media{{still}};
+        LiveState live;
+        live.setMediaCheck(media.fn());
+        live.setBackground(still, kFade);
+        const int checks = *media.calls;
+        QVERIFY(live.setBackground({}, Transition{}));
+        QCOMPARE(live.background().asset, QUuid());
+        QCOMPARE(live.property("backgroundId").toString(), QString());
+        QCOMPARE(*media.calls, checks);   // nothing to check
+    }
+
+    // The media library's picker: the live item's template says how the background changes.
+    void pickingABackgroundUsesTheLiveTemplatesTransition()
+    {
+        const QUuid still = QUuid::createUuid();
+        Template t = builtInLyricsTemplate();
+        t.id = QUuid::createUuid();
+        t.transitions.background = kFade;
+        Song song = sample();
+        song.defaultTemplate = t.id;
+        LiveState live;
+        live.setMediaCheck(FakeMedia{{still}}.fn());
+        QVERIFY(live.pickBackground(still.toString(QUuid::WithoutBraces)));
+        QCOMPARE(live.background().transition, Transitions{}.background);   // nothing live: the default
+        live.show(liveSong(song, {}, templateSet({t})), 0);
+        QVERIFY(live.pickBackground(""));
+        QVERIFY(live.pickBackground(still.toString(QUuid::WithoutBraces)));
+        QCOMPARE(live.background(), (BackgroundLayer{still, false, kFade}));
+        QCOMPARE(live.property("backgroundId").toString(), still.toString(QUuid::WithoutBraces));
+    }
+
+    void restoringAMissingBackgroundLeavesNoneAndSaysSo()
+    {
+        const QUuid gone = QUuid::createUuid();
+        LiveState live;
+        live.setMediaCheck(FakeMedia{}.fn());
+        QSignalSpy changed(&live, &LiveState::changed);
+        QVERIFY(live.restore(libraryItem(sample()), 1, false, BackgroundLayer{gone, true, kFade}));
+        QCOMPARE(changed.count(), 1);
+        QCOMPARE(live.slideIndex(), 1);   // the text comes back regardless
+        QCOMPARE(live.background().asset, QUuid());
+        QVERIFY(!live.backgroundAlert().isEmpty());
+    }
+
+    // Without a library there's nothing to check against: every asset is taken as given.
+    void withoutAMediaCheckEveryAssetIsAccepted()
+    {
+        LiveState live;
+        const QUuid id = QUuid::createUuid();
+        QVERIFY(live.setBackground(id, kFade));
+        QCOMPARE(live.background().asset, id);
+        QVERIFY(live.checkMedia(id).ok());
+    }
+
     // #83: a song too big to expand leaves what's live alone and says why.
     void anOversizedSongIsRefusedAndLiveStaysPut()
     {
@@ -735,7 +901,7 @@ private slots:
         QVERIFY(live.show(libraryItem(sample()), 2));
         QSignalSpy changed(&live, &LiveState::changed);
         QSignalSpy refused(&live, &LiveState::refused);
-        QVERIFY(!live.restore(libraryItem(repeated(10'000, 10'000)), 0, true, true, QUuid::createUuid()));
+        QVERIFY(!live.restore(libraryItem(repeated(10'000, 10'000)), 0, true, BackgroundLayer{.cleared = true}, QUuid::createUuid()));
         QCOMPARE(refused.count(), 1);
         QCOMPARE(changed.count(), 0);
         QCOMPARE(live.songTitle(), sample().title);
