@@ -17,6 +17,7 @@
 #include <io.h>
 #else
 #include <fcntl.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #endif
 
@@ -99,6 +100,18 @@ QString newPartialPath(const QString &mediaFolder, const QString &suffix)
 PartialCopy copyToPartial(const QString &source, const QString &mediaFolder, qint64 maxBytes, const std::atomic_bool *stop)
 {
     PartialCopy out;
+    // Refused before opening: opening a FIFO blocks until something writes to it, and reading
+    // an iCloud file that isn't downloaded waits on the network. Neither can be stopped (#115).
+    if (const QFileInfo info(source); info.exists() && !info.isFile()) {
+        out.error = QStringLiteral("not a regular file");
+        return out;
+    }
+#ifdef SF_DATALESS
+    if (struct stat st; ::stat(QFile::encodeName(source).constData(), &st) == 0 && (st.st_flags & SF_DATALESS)) {
+        out.error = QStringLiteral("it's in iCloud and not downloaded to this Mac; download it in Finder first");
+        return out;
+    }
+#endif
     QFile in(source);
     if (!in.open(QIODevice::ReadOnly)) {
         out.error = in.errorString();

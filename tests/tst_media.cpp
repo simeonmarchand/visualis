@@ -14,6 +14,10 @@
 #include <QTemporaryDir>
 #include <QtTest>
 
+#ifndef Q_OS_WIN
+#include <sys/stat.h>
+#endif
+
 using namespace visualis;
 using namespace std::chrono_literals;
 
@@ -165,6 +169,20 @@ private slots:
         const PartialCopy r = copyToPartial(media.filePath("missing.png"), media.path(), medialimits::kImageBytes);
         QVERIFY(!r.error.isEmpty());
     }
+
+#ifndef Q_OS_WIN
+    // #115: opening a FIFO blocks until something writes to it, so Stop would never get a look
+    // in. Anything that isn't a regular file is refused before it's opened.
+    void aFifoIsRefusedWithoutOpeningIt()
+    {
+        QTemporaryDir in, media;
+        const QString fifo = in.filePath("loop.mov");
+        QCOMPARE(::mkfifo(QFile::encodeName(fifo).constData(), 0600), 0);
+        const PartialCopy r = copyToPartial(fifo, media.path(), medialimits::kVideoBytes);
+        QVERIFY2(r.error.contains("not a regular file"), qPrintable(r.error));
+        QVERIFY(filesUnder(media.path()).isEmpty());
+    }
+#endif
 
     // #97 review (M6): a partial copy that's still being written may be another Visualis's;
     // only ones a crash left long ago are swept.

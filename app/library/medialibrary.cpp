@@ -161,6 +161,7 @@ struct MediaLibrary::ImportState {
     std::atomic_int total = -1;   // until the folders are listed
     QMutex mutex;
     QList<MediaImportFile> finished;   // guarded by mutex
+    bool abandoned = false;            // guarded by mutex; nothing will take what it finishes
 };
 
 struct MediaLibrary::ImportRun {
@@ -196,6 +197,8 @@ MediaLibrary::~MediaLibrary()
     for (const MediaImportFile &f : std::as_const(m_import->pending))
         removeUnsaved(f, m_import->mediaFolder);
     m_import->state->stop = true;
+    if (!m_import->thread)   // already left behind (#115)
+        return;
     disconnect(m_import->thread, nullptr, this, nullptr);
     if (m_import->thread->wait(3000))
         delete m_import->thread;
@@ -216,6 +219,7 @@ void MediaLibrary::libraryChanged()
         // review, #114).
         m_import->state->stop = true;
         m_import->discard = true;
+        abandonIfStuck();
         emit importProgressChanged();
     }
     m_store.reset();
@@ -248,7 +252,7 @@ bool MediaLibrary::importFiles(const QList<QUrl> &urls)
 
     auto state = std::make_shared<ImportState>();
     const QString mediaFolder = m_songs->library()->mediaPath();
-    QThread *thread = QThread::create([state, paths, mediaFolder] {
+    QThread *thread = QThread::create([state, paths, mediaFolder, pause = m_workerPause] {
         const QStringList files = expand(paths);
         state->total = int(files.size());
         for (const QString &path : files) {
@@ -258,13 +262,20 @@ bool MediaLibrary::importFiles(const QList<QUrl> &urls)
             MediaImportFile f = readOne(path, mediaFolder, state->stop, &cancelled);
             if (cancelled)
                 break;
+            if (pause)
+                pause();
             {
                 QMutexLocker lock(&state->mutex);
+                if (state->abandoned) {   // the import finished without this worker (#115)
+                    removePartials(f);
+                    break;
+                }
                 state->finished << std::move(f);
             }
             ++state->done;
         }
     });
+    ++m_importGeneration;
     m_import = std::make_unique<ImportRun>();
     m_import->thread = thread;
     m_import->state = state;
@@ -286,12 +297,51 @@ void MediaLibrary::stopImport()
     if (!m_import)
         return;
     m_import->state->stop = true;
+    abandonIfStuck();
     emit importProgressChanged();
+}
+
+void MediaLibrary::abandonIfStuck()
+{
+    QTimer::singleShot(m_abandonAfterMs, this, [this, generation = m_importGeneration] {
+        if (m_import && m_importGeneration == generation && !m_import->threadDone)
+            abandonWorker();
+    });
+}
+
+void MediaLibrary::abandonWorker()
+{
+    // The worker is stuck in a read that won't return (#115). Finish without it, so the
+    // operator can import again. If the read ever returns, the worker sees `abandoned`,
+    // removes its copy, and stops; the thread then deletes itself.
+    {
+        QMutexLocker lock(&m_import->state->mutex);
+        m_import->state->abandoned = true;
+    }
+    QThread *thread = std::exchange(m_import->thread, nullptr);
+    disconnect(thread, nullptr, this, nullptr);
+    connect(thread, &QThread::finished, thread, &QObject::deleteLater);
+    if (thread->isFinished())   // it finished before the connection was made
+        thread->deleteLater();  // safe to call twice
+    qCWarning(lcMedia) << "media import worker didn't stop; left behind";
+    m_import->threadDone = true;
+    m_import->summary.warnings << QStringLiteral("A file being read didn't respond, so the import stopped without it.");
+    saveFinishedFiles();
 }
 
 void MediaLibrary::setLockWaitLimit(int ms)
 {
     m_lockWaitLimitMs = ms;
+}
+
+void MediaLibrary::setAbandonAfter(int ms)
+{
+    m_abandonAfterMs = ms;
+}
+
+void MediaLibrary::setWorkerPause(std::function<void()> pause)
+{
+    m_workerPause = std::move(pause);
 }
 
 bool MediaLibrary::saveOne(MediaImportFile &f)
@@ -424,8 +474,10 @@ void MediaLibrary::finishImport()
 {
     m_importPoll.stop();
     std::unique_ptr<ImportRun> run = std::move(m_import);
-    run->thread->wait();   // already finished: returns at once
-    delete run->thread;
+    if (run->thread) {   // null if it was left behind
+        run->thread->wait();   // already finished: returns at once
+        delete run->thread;
+    }
     if (!run->discard) {
         SongLibrary::ImportSummary &summary = run->summary;
         summary.filesDone = run->state->done;
