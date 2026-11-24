@@ -572,7 +572,7 @@ private slots:
     }
 
     // claude-3 on #102 (a): an editor save keeps the overrides of slides it didn't change.
-    void editingLyricsKeepsOverridesOfUnchangedGroups()
+    void editingLyricsKeepsSlideOverrides()
     {
         const QJsonObject gold{{"regions", QJsonObject{{"main", QJsonObject{{"color", "#ffcc00"}}}}}};
         Song s;
@@ -587,12 +587,11 @@ private slots:
         QCOMPARE(same.song.groups[1].slideOverrides, s.groups[1].slideOverrides);
         QVERIFY(same.warnings.isEmpty());
 
-        // Editing the chorus keeps the verse's and says the chorus's were dropped.
+        // Editing the chorus's one slide keeps both groups' (#95: it follows by position).
         const LyricsEdit edited = applyLyricsText(s, "[Verse 1]\none\n\ntwo\n\n[Chorus]\nsing it");
         QCOMPARE(edited.song.groups[0].slideOverrides, s.groups[0].slideOverrides);
-        QVERIFY(edited.song.groups[1].slideOverride(0).isEmpty());
-        QCOMPARE(edited.warnings.size(), 1);
-        QVERIFY(edited.warnings[0].contains("Chorus"));
+        QCOMPARE(edited.song.groups[1].slideOverrides, s.groups[1].slideOverrides);
+        QVERIFY(edited.warnings.isEmpty());
     }
 
     // Codex's second pass on #102 (2): the caller gets the template as it loads back.

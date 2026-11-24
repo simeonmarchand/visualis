@@ -15,8 +15,9 @@ struct Group {
     QString label;        // "Verse 1", "Chorus"; may be empty
     QString color;        // "#rrggbb", or empty for no color
     QStringList slides;   // one entry per slide; an empty string is a blank slide (Intro, Interlude)
-    // Per-slide template overrides (template.h), parallel to `slides`; {} for none. SongStore
-    // and songjson fit it to exactly as long as `slides`. Editing the text must remap it (#95).
+    // Per-slide template overrides (template/overrides.h), parallel to `slides`; {} for none.
+    // SongStore and songjson fit it to exactly as long as `slides`, and applyLyricsText remaps
+    // it when the text changes. Why it isn't a slide struct: docs/adr/0002.
     QList<QJsonObject> slideOverrides;
 
     // Overrides compare as fitted to the slides: a missing entry is the same as {}.
