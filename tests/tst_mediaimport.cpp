@@ -9,6 +9,7 @@
 #include <QElapsedTimer>
 #include <QFile>
 #include <QImage>
+#include <QSemaphore>
 #include <QSignalSpy>
 #include <QSqlDatabase>
 #include <QSqlQuery>
@@ -485,6 +486,47 @@ private slots:
         QVERIFY(!QFile::exists(orphanThumb));
         QCOMPARE(filesUnder(media, ""), kept);
         QCOMPARE(m_media->assets().size(), 1);
+    }
+
+    // #115: a worker stuck in a read that won't return (a stalled iCloud download, a dead
+    // share) is left behind after Stop, so the operator can import again. When the read
+    // finally returns, the worker removes what it copied.
+    void aWorkerThatWontStopIsLeftBehind()
+    {
+        QTemporaryDir in;
+        QImage image(8, 8, QImage::Format_RGB32);
+        image.fill(Qt::darkGreen);
+        QVERIFY(image.save(in.filePath("Stuck.png")));
+        image.fill(Qt::darkRed);
+        QVERIFY(image.save(in.filePath("Next.png")));
+        QSemaphore release;
+        std::atomic_int paused = 0;
+        std::atomic_bool resumed = false;
+        m_media->setAbandonAfter(200);
+        m_media->setWorkerPause([&] {
+            if (paused++ == 0) {   // only the first file of the first import
+                release.acquire();
+                resumed = true;
+            }
+        });
+        const QString media = m_songs->library()->mediaPath();
+
+        QSignalSpy finished(m_media.get(), &MediaLibrary::importFinished);
+        QVERIFY(m_media->importFiles({QUrl::fromLocalFile(in.filePath("Stuck.png"))}));
+        QTRY_VERIFY_WITH_TIMEOUT(paused == 1, 5'000);
+        m_media->stopImport();
+        QVERIFY(finished.wait(5'000));
+        QVERIFY(!m_media->importing());
+        QVERIFY2(m_media->report().contains("didn't respond"), qPrintable(m_media->report()));
+
+        QVERIFY(importAndWait({QUrl::fromLocalFile(in.filePath("Next.png"))}));
+        QVERIFY2(m_media->report().startsWith("Imported 1 files."), qPrintable(m_media->report()));
+
+        release.release();
+        QTRY_VERIFY_WITH_TIMEOUT(resumed, 5'000);
+        QTRY_VERIFY_WITH_TIMEOUT(filesUnder(media, ".partial").isEmpty(), 5'000);
+        QCOMPARE(m_media->assets().size(), 1);
+        QTest::qWait(50);   // the abandoned thread deletes itself
     }
 };
 

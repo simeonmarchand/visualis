@@ -9,6 +9,7 @@
 #include <QVariantList>
 #include <QtQml/qqmlregistration.h>
 
+#include <functional>
 #include <memory>
 
 struct MediaImportFile;
@@ -64,6 +65,12 @@ public:
     // How long a finished file waits for another program to let go of the library before
     // it's reported failed (#88's pattern). For tests.
     void setLockWaitLimit(int ms);
+    // How long after Stop (or a library switch) a worker that hasn't stopped is left behind,
+    // so another import can start (#115). For tests.
+    void setAbandonAfter(int ms);
+    // For tests: runs on the worker after each file is read, before it's handed over. It
+    // stands in for a read that won't return.
+    void setWorkerPause(std::function<void()> pause);
 
     QString search() const { return m_search; }
     void setSearch(const QString &search);
@@ -88,6 +95,9 @@ private:
     // Publishes and saves one file; false if the library is busy and it should be retried.
     bool saveOne(MediaImportFile &file);
     void finishImport();
+    // After a stop: leaves the worker behind if it hasn't finished in m_abandonAfterMs.
+    void abandonIfStuck();
+    void abandonWorker();
     void setReport(const QString &report);
 
     QPointer<SongLibrary> m_songs;
@@ -98,4 +108,7 @@ private:
     std::unique_ptr<ImportRun> m_import;
     QTimer m_importPoll;   // saves what the worker has finished and updates the progress
     int m_lockWaitLimitMs = 10'000;
+    int m_abandonAfterMs = 2'000;   // a working copy sees Stop within one 1 MB read
+    quint64 m_importGeneration = 0;   // tells a late abandon timer its import has ended
+    std::function<void()> m_workerPause;
 };
