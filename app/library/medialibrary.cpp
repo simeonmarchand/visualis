@@ -497,6 +497,12 @@ bool MediaLibrary::removeAsset(const QString &id)
 {
     if (!m_store)
         return false;
+    // Deleting the file the outputs are playing would freeze them at the next loop or restart.
+    if (const QString why = m_inUse ? m_inUse(QUuid::fromString(id)) : QString(); !why.isEmpty()) {
+        const std::optional<MediaAsset> asset = m_store->load(QUuid::fromString(id));
+        setReport(QStringLiteral("Couldn't delete \"%1\": %2").arg(asset ? asset->originalName : QStringLiteral("it"), why));
+        return false;
+    }
     // On the GUI thread, like every import's publish and save, so a delete can't interleave
     // with them: a pending import of the same content publishes its own copy afterwards.
     if (const MediaStore::Result r = m_store->remove(QUuid::fromString(id)); !r.ok) {

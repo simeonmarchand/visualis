@@ -253,6 +253,76 @@ private slots:
         QVERIFY(m_live->backgroundAlert().isEmpty());
     }
 
+    // #126 review: picking another background while one is cleared mustn't bring the cleared
+    // one back while the new one loads.
+    void aNewBackgroundOverAClearedOneDoesNotShowTheOldOne()
+    {
+        const QUuid a = add(false, "/media/a"), b = add(true, "/media/b");
+        show(a, kCut);
+        m_live->clearBackground();
+        QCOMPARE(m_player->opacity(), 0.0);
+        QVERIFY(m_live->setBackground(b, kCut));
+        QVERIFY(front().opacity == 0 || m_player->opacity() == 0);   // nothing of A shows
+        sourceFor("/media/b")->becomeReady();
+        QCOMPARE(m_player->showing(), b);
+        QCOMPARE(front().opacity, 1.0);
+        QCOMPARE(m_player->opacity(), 1.0);
+    }
+
+    void aFailedPickOverAClearedOneGoesBackToShowingTheOldOne()
+    {
+        const QUuid a = add(false, "/media/a"), b = add(false, "/media/b");
+        show(a, kCut);
+        m_live->clearBackground();
+        QVERIFY(m_live->setBackground(b, kCut));
+        sourceFor("/media/b")->fail("damaged");
+        // The layer says A, not cleared (picking B un-cleared it), so A is what shows.
+        QCOMPARE(m_live->background().asset, a);
+        QVERIFY(!m_live->backgroundCleared());
+        QCOMPARE(front().opacity, 1.0);
+    }
+
+    // #126 review: a background that never gets a first picture (a video that won't play)
+    // gives up, so the layer, the status, and the decoders don't wait on it forever.
+    void aBackgroundThatNeverLoadsGivesUp()
+    {
+        m_player->setLoadTimeout(200);
+        const QUuid a = add(true, "/media/a"), b = add(true, "/media/b");
+        show(a, Transition{TransitionKind::Fade, 300});
+        QVERIFY(m_live->setBackground(b, kCut));
+        QCOMPARE(m_player->status(), QStringLiteral("Loading"));
+        QTRY_COMPARE(m_live->background().asset, a);
+        QCOMPARE(running(), QStringList{"/media/a"});   // one decoder again
+        QVERIFY2(m_live->backgroundAlert().contains("didn't start"), qPrintable(m_live->backgroundAlert()));
+        QVERIFY(m_player->status() != QStringLiteral("Loading"));
+        // The rollback keeps the transition A arrived with.
+        QCOMPARE(m_live->background().transition, (Transition{TransitionKind::Fade, 300}));
+    }
+
+    void aBackgroundThatLoadsInTimeIsNotGivenUp()
+    {
+        m_player->setLoadTimeout(200);
+        const QUuid a = add(true, "/media/a");
+        QVERIFY(m_live->setBackground(a, kCut));
+        QTest::qWait(100);
+        sourceFor("/media/a")->becomeReady();
+        QTest::qWait(250);
+        QCOMPARE(m_live->background().asset, a);
+        QVERIFY(m_live->backgroundAlert().isEmpty());
+    }
+
+    // #126 review: the library won't delete the file behind what's live or what's loading.
+    void theLiveAndLoadingBackgroundsAreInUse()
+    {
+        const QUuid a = add(false, "/media/a"), b = add(false, "/media/b"), c = add(false, "/media/c");
+        show(a, kCut);
+        QVERIFY(m_player->inUse(a));
+        QVERIFY(!m_player->inUse(b));
+        QVERIFY(m_live->setBackground(b, kCut));
+        QVERIFY(m_player->inUse(a) && m_player->inUse(b));   // A is still up while B loads
+        QVERIFY(!m_player->inUse(c));
+    }
+
     // The layer checked it, but the file can still vanish before the player opens it.
     void aBackgroundWithNoFileKeepsTheOldOne()
     {
@@ -324,6 +394,18 @@ private slots:
         const StillImage still = decodeStill(path, QSize(1920, 1080));
         QVERIFY2(still.error.isEmpty(), qPrintable(still.error));
         QCOMPARE(still.image.size(), QSize(1920, 1280));   // covers 1920 x 1080 at 3:2
+    }
+
+    // A panorama covering the output would be enormous; it's capped at twice the output.
+    void aPanoramaIsCappedAtTwiceTheOutput()
+    {
+        QTemporaryDir dir;
+        QImage wide(12000, 1000, QImage::Format_Grayscale8);
+        wide.fill(90);
+        const QString path = write(dir.filePath("wide.jpg"), jpeg(wide));
+        const QSize size = decodeStill(path, QSize(1920, 1080)).image.size();
+        QVERIFY2(size.width() <= 3840 && size.height() <= 2160, qPrintable(QStringLiteral("%1x%2").arg(size.width()).arg(size.height())));
+        QCOMPARE(size, QSize(3840, 320));
     }
 
     void aSmallImageIsNotEnlarged()

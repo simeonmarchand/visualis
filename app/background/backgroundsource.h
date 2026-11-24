@@ -7,6 +7,9 @@
 #include <QSize>
 #include <QString>
 
+#include <atomic>
+#include <memory>
+
 class QVideoSink;
 
 // What plays one slot of the background player (GLOSSARY.md "Background player"): a looping
@@ -67,9 +70,9 @@ struct StillImage {
 };
 
 // Decodes `path` just large enough to cover `bound` (the output, in pixels), never larger than
-// the image, and turned as its EXIF orientation says. A JPEG decodes at that size directly, so
-// a 50-megapixel photo never sits in memory whole; formats that can't scale while decoding are
-// read whole, up to medialimits::kImageAllocationMb, then scaled. Safe on any thread.
+// the image or than twice `bound` either way, and turned as its EXIF orientation says. A JPEG
+// decodes at that size directly, so a 50-megapixel photo never sits in memory whole; formats
+// that can't scale while decoding are read whole, up to 512 MB, then scaled. Any thread.
 StillImage decodeStill(const QString &path, const QSize &bound);
 
 // A still image, decoded on the thread pool so a large photo never holds up the outputs.
@@ -91,5 +94,6 @@ public:
 
 private:
     QImage m_image;
-    quint64 m_generation = 0;   // a newer load or a stop makes an older decode's result stale
+    // A newer load or a stop makes an older decode stale; shared with the decoding thread.
+    std::shared_ptr<std::atomic<quint64>> m_generation = std::make_shared<std::atomic<quint64>>(0);
 };

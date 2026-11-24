@@ -63,6 +63,10 @@ public:
     Q_INVOKABLE QStringList usedBy(const QString &id) const;
     Q_INVOKABLE bool removeAsset(const QString &id);
 
+    // Why an asset can't be deleted now (empty: it can), asked before every delete. The
+    // background player says when it's showing or loading it (#126 review).
+    void setInUse(std::function<QString(const QUuid &)> why) { m_inUse = std::move(why); }
+
     // How long a finished file waits for another program to let go of the library before
     // it's reported failed (#88's pattern). For tests.
     void setLockWaitLimit(int ms);
@@ -119,4 +123,5 @@ private:
     int m_abandonAfterMs = 2'000;   // a working copy sees Stop within one 1 MB read
     quint64 m_importGeneration = 0;   // tells a late abandon timer its import has ended
     std::function<void()> m_workerPause;
+    std::function<QString(const QUuid &)> m_inUse;
 };

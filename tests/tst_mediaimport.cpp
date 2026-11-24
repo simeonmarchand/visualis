@@ -430,6 +430,25 @@ private slots:
         QCOMPARE(checkMedia(m_media->snapshot(), id).status, MediaStatus::UnknownId);
     }
 
+    // #126 review: the live background's file isn't deleted from under the outputs.
+    void anAssetInUseIsNotDeleted()
+    {
+        QTemporaryDir in;
+        QImage image(8, 8, QImage::Format_RGB32);
+        image.fill(Qt::blue);
+        QVERIFY(image.save(in.filePath("Cross.png")));
+        QVERIFY(importAndWait({QUrl::fromLocalFile(in.filePath("Cross.png"))}));
+        const QString id = asset("Cross.png").value("id").toString();
+        m_media->setInUse([id](const QUuid &asset) {
+            return asset == QUuid::fromString(id) ? QStringLiteral("it's the live background") : QString();
+        });
+        QVERIFY(!m_media->removeAsset(id));
+        QVERIFY2(m_media->report().contains("live background"), qPrintable(m_media->report()));
+        QVERIFY(checkMedia(m_media->snapshot(), QUuid::fromString(id)).ok());
+        m_media->setInUse({});
+        QVERIFY(m_media->removeAsset(id));
+    }
+
     // Opening another library mid-import drops what's left for the old one.
     void switchingLibrariesStopsTheImport()
     {

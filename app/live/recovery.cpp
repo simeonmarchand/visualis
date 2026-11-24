@@ -29,7 +29,11 @@ bool Recovery::start(const QString &journalPath, LiveState *live)
     const SnapshotResult found = readJournal(m_path);
     if (!found.error.isEmpty()) {
         qCWarning(lcRecovery).noquote() << "journal not used:" << found.error;
-    } else if (found.snapshot && !found.snapshot->isEmpty()) {
+    } else if (found.snapshot && found.snapshot->skippedBackgroundUrl) {
+        // Logged here: a journal holding only that background counts as empty below.
+        qCInfo(lcRecovery) << "the journal's background is a file URL from before #98; not restored";
+    }
+    if (found.snapshot && !found.snapshot->isEmpty()) {
         const LiveSnapshot &s = *found.snapshot;
         const qint64 ageSecs = s.savedAt.isValid() ? s.savedAt.secsTo(QDateTime::currentDateTimeUtc()) : -1;
         if (ageSecs < 0 || ageSecs > kMaxAgeHours * 3600) {
@@ -52,8 +56,6 @@ bool Recovery::start(const QString &journalPath, LiveState *live)
             disconnect(onRefused);
             if (!refusal.isEmpty())   // the song stays out; its background needn't
                 live->restoreBackground(s.background);
-            if (s.skippedBackgroundUrl)
-                qCInfo(lcRecovery) << "the journal's background is a file URL from before #98; not restored";
             restored = true;
             if (!refusal.isEmpty()) {
                 m_message = QStringLiteral("Visualis didn't quit normally last time, and what was live wasn't restored: %1")

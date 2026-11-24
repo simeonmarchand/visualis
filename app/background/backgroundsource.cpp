@@ -38,10 +38,17 @@ void VideoSource::stop()
     m_engine.setSource({});
 }
 
+namespace {
+// Lower than an import's limit: a format that can't scale while decoding (PNG, TIFF, HEIC) is
+// read whole first, and a background shouldn't cost the outputs that much memory mid-service.
+// About 11k x 11k RGBA; a JPEG of any size decodes scaled and never comes near it.
+constexpr int kStillAllocationMb = 512;
+}
+
 StillImage decodeStill(const QString &path, const QSize &bound)
 {
     QImageReader reader(path);
-    reader.setAllocationLimit(medialimits::kImageAllocationMb);
+    reader.setAllocationLimit(kStillAllocationMb);
     reader.setAutoTransform(true);
     const QSize stored = reader.size();
     if (!stored.isValid())
@@ -49,9 +56,13 @@ StillImage decodeStill(const QString &path, const QSize &bound)
     // The reader scales before it turns the image, so the scaled size is in stored orientation.
     const bool turned = reader.transformation() & QImageIOHandler::TransformationRotate90;
     const QSize shown = turned ? stored.transposed() : stored;
-    const QSize covering = shown.scaled(bound, Qt::KeepAspectRatioByExpanding);
-    if (covering.width() < shown.width())
-        reader.setScaledSize(turned ? covering.transposed() : covering);
+    QSize target = shown.scaled(bound, Qt::KeepAspectRatioByExpanding);
+    // A panorama covering the output would be far wider than it and than a GPU texture can be;
+    // past twice the output it's fitted within that instead, and fill crops the rest.
+    if (const QSize cap = bound * 2; target.width() > cap.width() || target.height() > cap.height())
+        target = shown.scaled(cap, Qt::KeepAspectRatio);
+    if (target.width() < shown.width())
+        reader.setScaledSize(turned ? target.transposed() : target);
     QImage image = reader.read();
     if (image.isNull())
         return {{}, QStringLiteral("the image is damaged or unsupported (%1)").arg(reader.errorString())};
@@ -76,12 +87,12 @@ QSize StillSource::outputSize()
 
 void StillSource::load(const QString &path)
 {
-    const quint64 generation = ++m_generation;
+    const quint64 generation = ++*m_generation;
     auto promise = std::make_shared<QPromise<StillImage>>();
     QFuture<StillImage> decoded = promise->future();
     // Continued on this thread, and dropped if this source is gone first.
     decoded.then(this, [this, generation](const StillImage &still) {
-        if (generation != m_generation)
+        if (generation != *m_generation)
             return;
         if (still.image.isNull()) {
             emit failed(still.error);
@@ -90,15 +101,17 @@ void StillSource::load(const QString &path)
         m_image = still.image;
         emit ready();
     });
-    QThreadPool::globalInstance()->start([promise, path, bound = outputSize()] {
+    QThreadPool::globalInstance()->start([promise, path, bound = outputSize(), generation, current = m_generation] {
         promise->start();
-        promise->addResult(decodeStill(path, bound));
+        // A pick overtaken while it waited for a thread isn't decoded at all, so quick picks
+        // don't stack up full-size decodes.
+        promise->addResult(generation == *current ? decodeStill(path, bound) : StillImage{});
         promise->finish();
     });
 }
 
 void StillSource::stop()
 {
-    ++m_generation;
+    ++*m_generation;
     m_image = QImage();
 }

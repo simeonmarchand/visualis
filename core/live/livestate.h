@@ -121,10 +121,11 @@ public:
     Q_INVOKABLE bool pickBackground(const QString &assetId);
     const BackgroundLayer &background() const { return m_background; }
     // The player couldn't show `asset` after all (its file went, or it won't decode) and is
-    // still showing `showing`: the layer goes back to that, so it says what the outputs show,
+    // still showing `showing`, which arrived with `showingTransition`: the layer goes back to
+    // that, so it says what the outputs show,
     // and backgroundAlert() says why. Asking for `asset` again tries again. Nothing changes
     // when the layer has moved on from `asset` already.
-    void backgroundFailed(const QUuid &asset, const QUuid &showing, const QString &why);
+    void backgroundFailed(const QUuid &asset, const QUuid &showing, const Transition &showingTransition, const QString &why);
     // Puts back a journal's background on its own, checked as setBackground() does: for when
     // the journal's item was refused but its background can still show.
     void restoreBackground(const BackgroundLayer &layer);

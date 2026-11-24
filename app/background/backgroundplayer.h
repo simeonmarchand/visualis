@@ -5,6 +5,7 @@
 
 #include <QObject>
 #include <QPointer>
+#include <QTimer>
 #include <QUrl>
 #include <QUuid>
 #include <QVariantAnimation>
@@ -87,6 +88,11 @@ public:
     QString status() const;
     QString alert() const;
 
+    // Whether the asset's file is showing or loading, so the library won't delete it.
+    bool inUse(const QUuid &asset) const;
+    // How long a background may take to get its first picture before it's given up. For tests.
+    void setLoadTimeout(int ms);
+
     // For the image provider: slot n's still.
     QImage image(int n) const;
     // For tests.
@@ -112,6 +118,10 @@ private:
     // Slot n's source became ready or failed; ignored unless it's the one loading.
     void sourceReady(int n, BackgroundSource *source);
     void sourceFailed(int n, BackgroundSource *source, const QString &why);
+    // Hands `asset` back to LiveState as one that can't show.
+    void refuse(const QUuid &asset, const QString &why);
+    // The loading background failed: drop it and refuse it.
+    void giveUp(const QString &why);
     void swapIn();
     // A fade in progress ends at once; endFade() is its natural end.
     void finishFade();
@@ -128,6 +138,7 @@ private:
     QUuid m_wanted;   // the layer's asset last seen
     bool m_cleared = false;
     std::optional<Pending> m_pending;   // loading in the back slot
+    QTimer m_loadTimer;
     QVariantAnimation m_fade;           // the front slot fading in
     QVariantAnimation m_clearFade;      // the layer's opacity
     double m_opacity = 1;
