@@ -13,6 +13,13 @@
 #include <cerrno>
 #include <cstdio>
 
+#ifdef Q_OS_WIN
+#include <io.h>
+#else
+#include <fcntl.h>
+#include <unistd.h>
+#endif
+
 namespace visualis {
 
 namespace {
@@ -33,6 +40,22 @@ bool renameWithoutCopying(const QString &from, const QString &to, int *error)
 #endif
     *error = ok ? 0 : errno;
     return ok;
+}
+
+// Waits until the file's data is on the disk, not just in the OS's cache. Its row is committed
+// right after it's published, so without this a power loss can leave a row whose file came
+// back empty (#113). On macOS only F_FULLFSYNC flushes the drive's own cache too.
+bool syncToDisk(QFile &file)
+{
+#ifdef Q_OS_WIN
+    return _commit(file.handle()) == 0;
+#else
+#ifdef F_FULLFSYNC
+    if (::fcntl(file.handle(), F_FULLFSYNC) == 0)
+        return true;   // otherwise the filesystem doesn't support it: fall back to fsync
+#endif
+    return ::fsync(file.handle()) == 0;
+#endif
 }
 
 QString extensionOf(const QString &fileName)
@@ -125,6 +148,8 @@ PartialCopy copyToPartial(const QString &source, const QString &mediaFolder, qin
     }
     if (!partial.flush())
         return abandon(partial.errorString());
+    if (!syncToDisk(partial))
+        return abandon(QStringLiteral("couldn't write the copy to disk"));
     partial.close();
     out.hash = QString::fromLatin1(hash.result().toHex());
     return out;
