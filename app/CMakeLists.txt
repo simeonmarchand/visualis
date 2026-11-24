@@ -9,6 +9,7 @@ qt_add_qml_module(visualis_ui
         qml/Main.qml
         qml/OutputWindow.qml
         qml/AudienceLyrics.qml
+        qml/BackgroundPicker.qml
         qml/BackgroundView.qml
         qml/StageDisplay.qml
         qml/OutputSettings.qml

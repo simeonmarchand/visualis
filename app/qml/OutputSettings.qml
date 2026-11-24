@@ -3,14 +3,15 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import Visualis.Ui
 
-// Output displays and the background video: a stopgap bar until a settings window and the
-// media library exist.
+// Output displays and the background: a stopgap bar until a settings window exists. The
+// background is picked from the media library (#98).
 ColumnLayout {
     id: settings
     spacing: 8
 
     signal templatesRequested()
 
+    BackgroundPicker { id: backgroundPicker }
     PlanningCenterDialog { id: pcoDialog }
     PlanPickerDialog { id: planPicker }
 
@@ -43,7 +44,7 @@ ColumnLayout {
         }
     }
 
-    // Background video: a stopgap until the media library and service items.
+    // The live background, until service items and song defaults set it (#99).
     RowLayout {
         spacing: 12
 
@@ -51,6 +52,13 @@ ColumnLayout {
             text: "Background"
             color: "#d0d3d8"
             Layout.preferredWidth: 80
+        }
+        Button {
+            objectName: "chooseBackground"
+            text: "Choose…"
+            focusPolicy: Qt.NoFocus
+            enabled: SongLibrary.error === ""
+            onClicked: backgroundPicker.open()
         }
         Button {
             text: "None"
@@ -64,6 +72,20 @@ ColumnLayout {
             focusPolicy: Qt.NoFocus
             visible: LiveState.backgroundCleared
             onClicked: Commands.run("show_background")
+        }
+        ComboBox {
+            objectName: "backgroundFillMode"
+            focusPolicy: Qt.NoFocus   // arrow keys belong to the slides
+            model: [{ text: "Fill", value: "fill" }, { text: "Fit", value: "fit" }]
+            textRole: "text"
+            valueRole: "value"
+            currentIndex: indexOfValue(BackgroundPlayer.fillMode)
+            onActivated: {
+                BackgroundPlayer.fillMode = currentValue
+                currentIndex = Qt.binding(() => indexOfValue(BackgroundPlayer.fillMode))
+            }
+            ToolTip.visible: hovered
+            ToolTip.text: "Stills: fill the output, cropping the edges, or fit inside it with bars"
         }
         Label {
             objectName: "backgroundStatus"
