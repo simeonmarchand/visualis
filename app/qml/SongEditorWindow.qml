@@ -84,7 +84,7 @@ Window {
                 id: templateChoice
                 objectName: "songTemplate"
                 Layout.preferredWidth: 200
-                model: editor.templates
+                model: TemplateLibrary.entries.filter(t => t.kind === "lyrics")
                 textRole: "name"
                 valueRole: "id"
                 currentIndex: indexOfValue(editor.templateId)

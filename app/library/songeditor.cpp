@@ -1,7 +1,6 @@
 #include "library/songeditor.h"
 
 #include "library/songlibrary.h"
-#include "library/templatelibrary.h"
 #include "live/liveitem.h"
 #include "song/lyricspaste.h"
 #include "song/slidelist.h"
@@ -192,7 +191,7 @@ QVariantList SongEditor::previewSlides() const
 
 QString SongEditor::templateId() const
 {
-    return idText(m_song.defaultTemplate);
+    return idText(m_song.defaultTemplate.isNull() ? builtInLyricsTemplateId() : m_song.defaultTemplate);
 }
 
 void SongEditor::setTemplateId(const QString &id)
@@ -205,17 +204,6 @@ void SongEditor::setTemplateId(const QString &id)
         return;
     m_song.defaultTemplate = uuid;
     save();
-}
-
-QVariantList SongEditor::templates() const
-{
-    SongLibrary *songs = library();
-    QVariantList list;
-    for (const Template &t : songs ? songs->templateLibrary()->list() : builtInTemplates()) {
-        if (t.kind == TemplateKind::Lyrics)
-            list.append(QVariantMap{{"id", isBuiltInTemplate(t.id) ? QString() : idText(t.id)}, {"name", t.name}});
-    }
-    return list;
 }
 
 QString SongEditor::addArrangement(const QString &name)

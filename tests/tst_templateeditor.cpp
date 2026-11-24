@@ -68,7 +68,7 @@ private slots:
 
     void startsOnTheBuiltInWhichCanOnlyBeDuplicated()
     {
-        QCOMPARE(names(m_editor->templates()), QStringList{"Lyrics"});
+        QCOMPARE(names(m_templates->entries()), QStringList{"Lyrics"});
         QCOMPARE(m_editor->templateId(), idText(builtInLyricsTemplateId()));
         QVERIFY(m_editor->builtIn());
         QCOMPARE(m_editor->regionId(), QStringLiteral("main"));
@@ -89,13 +89,13 @@ private slots:
         const QString advent = m_editor->create("advent");
         QCOMPARE(m_editor->templateId(), advent);
         QVERIFY(!m_editor->builtIn());
-        QCOMPARE(names(m_editor->templates()), (QStringList{"Lyrics", "advent", "Zion"}));
+        QCOMPARE(names(m_templates->entries()), (QStringList{"Lyrics", "advent", "Zion"}));
         Template t = m_templates->templates().value(QUuid::fromString(zion));
         QCOMPARE(t.name, QStringLiteral("Zion"));
         QCOMPARE(t.regions.size(), 1);
         QCOMPARE(t.regions[0].style, builtInLyricsTemplate().regions[0].style);
         QVERIFY(m_editor->create("   ").isEmpty() == false);   // an empty name gets one
-        QVERIFY(names(m_editor->templates()).contains("New template"));
+        QVERIFY(names(m_templates->entries()).contains("New template"));
     }
 
     void duplicateRenameAndDelete()
@@ -116,7 +116,7 @@ private slots:
         QVERIFY(m_editor->remove());
         QVERIFY(!m_templates->templates().contains(QUuid::fromString(second)));
         QCOMPARE(m_editor->templateId(), idText(builtInLyricsTemplateId()));
-        QCOMPARE(names(m_editor->templates()), (QStringList{"Lyrics", "Lyrics copy"}));
+        QCOMPARE(names(m_templates->entries()), (QStringList{"Lyrics", "Lyrics copy"}));
     }
 
     void eachPropertyAppliesAndPersists_data()
@@ -256,7 +256,7 @@ private slots:
         m_editor->setStyle(map("{'color': '#ffcc00'}"));
         QVERIFY(m_songs->openLibrary(m_dir.filePath("other")));
         QCOMPARE(m_editor->templateId(), idText(builtInLyricsTemplateId()));
-        QCOMPARE(names(m_editor->templates()), QStringList{"Lyrics"});
+        QCOMPARE(names(m_templates->entries()), QStringList{"Lyrics"});
         QTest::qWait(300);
         m_editor->flush();
         QCOMPARE(m_templates->templates().size(), 1);

@@ -53,6 +53,11 @@ Window {
         onAccepted: editor.remove()
     }
 
+    component FieldLabel: Label {
+        color: "#d0d3d8"
+        Layout.preferredWidth: 90
+    }
+
     // A labelled slider for a fraction or a multiple; `factor` turns it into what's shown.
     component StyleSlider: RowLayout {
         id: row
@@ -65,7 +70,7 @@ Window {
         property int decimals: 1
         signal moved(real value)
         spacing: 6
-        Label { text: row.label; color: "#d0d3d8"; Layout.preferredWidth: 90 }
+        FieldLabel { text: row.label }
         Slider {
             Layout.fillWidth: true
             from: row.from
@@ -131,7 +136,7 @@ Window {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 clip: true
-                model: editor.templates
+                model: TemplateLibrary.entries
                 delegate: ItemDelegate {
                     required property var modelData
                     width: ListView.view.width
@@ -330,7 +335,7 @@ Window {
 
                 Label { text: "Text"; color: "#d0d3d8"; font.bold: true }
                 RowLayout {
-                    Label { text: "Font"; color: "#d0d3d8"; Layout.preferredWidth: 90 }
+                    FieldLabel { text: "Font" }
                     ComboBox {
                         objectName: "fontFamily"
                         Layout.fillWidth: true
@@ -341,7 +346,7 @@ Window {
                     }
                 }
                 RowLayout {
-                    Label { text: "Weight"; color: "#d0d3d8"; Layout.preferredWidth: 90 }
+                    FieldLabel { text: "Weight" }
                     ComboBox {
                         Layout.fillWidth: true
                         textRole: "text"
@@ -357,7 +362,7 @@ Window {
                     }
                 }
                 RowLayout {
-                    Label { text: "Color"; color: "#d0d3d8"; Layout.preferredWidth: 90 }
+                    FieldLabel { text: "Color" }
                     Swatch {
                         colorText: window.style.color ?? "#ffffff"
                         onChosen: c => editor.setStyle({color: c})
@@ -383,7 +388,7 @@ Window {
                     onMoved: v => editor.setStyle({lineHeight: v})
                 }
                 RowLayout {
-                    Label { text: "Align"; color: "#d0d3d8"; Layout.preferredWidth: 90 }
+                    FieldLabel { text: "Align" }
                     Repeater {
                         model: ["left", "center", "right"]
                         delegate: Button {
@@ -396,7 +401,7 @@ Window {
                     }
                 }
                 RowLayout {
-                    Label { text: ""; Layout.preferredWidth: 90 }
+                    FieldLabel { text: "" }
                     Repeater {
                         model: ["top", "center", "bottom"]
                         delegate: Button {
@@ -442,7 +447,7 @@ Window {
 
                 Label { text: "Outline"; color: "#d0d3d8"; font.bold: true; Layout.topMargin: 8 }
                 RowLayout {
-                    Label { text: "Color"; color: "#d0d3d8"; Layout.preferredWidth: 90 }
+                    FieldLabel { text: "Color" }
                     Swatch {
                         colorText: window.style.outline?.color ?? "#000000"
                         onChosen: c => editor.setStyle({outline: {color: c}})
@@ -474,9 +479,9 @@ Window {
                     columns: 4
                     columnSpacing: 6
                     Label { text: "Sides"; color: "#d0d3d8" }
-                    PercentField { to: 450; fraction: editor.safeAreaX; onEdited: f => editor.setSafeArea(f, editor.safeAreaY) }
+                    PercentField { to: Math.round(editor.maxSafeArea * 1000); fraction: editor.safeAreaX; onEdited: f => editor.setSafeArea(f, editor.safeAreaY) }
                     Label { text: "Top, bottom"; color: "#d0d3d8" }
-                    PercentField { to: 450; fraction: editor.safeAreaY; onEdited: f => editor.setSafeArea(editor.safeAreaX, f) }
+                    PercentField { to: Math.round(editor.maxSafeArea * 1000); fraction: editor.safeAreaY; onEdited: f => editor.setSafeArea(editor.safeAreaX, f) }
                 }
             }
         }

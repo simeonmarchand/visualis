@@ -137,6 +137,7 @@ struct Template {
     bool operator==(const Template &) const = default;
 
     const TextRegion *region(const QString &id) const;
+    TextRegion *region(const QString &id);
 };
 
 QString templateKindName(TemplateKind kind);                       // "lower_third"

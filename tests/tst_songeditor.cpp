@@ -276,14 +276,14 @@ private slots:
     void pickingATemplateSavesItAndThePreviewUsesIt()
     {
         auto *templates = m_engine->singletonInstance<TemplateLibrary *>("Visualis.Ui", "TemplateLibrary");
-        QCOMPARE(m_editor->templateId(), QString());   // the built-in, by default
-        QCOMPARE(strings(m_editor->templates(), "name"), QStringList{"Lyrics"});
+        QCOMPARE(m_editor->templateId(), idText(builtInLyricsTemplateId()));   // by default
+        QCOMPARE(strings(templates->entries(), "name"), QStringList{"Lyrics"});
         Template t = builtInLyricsTemplate();
         t.id = QUuid();
         t.name = "Christmas";
         t.regions[0].style.color = "#ff0000";
         QVERIFY(templates->save(t));
-        QCOMPARE(strings(m_editor->templates(), "name"), (QStringList{"Lyrics", "Christmas"}));
+        QCOMPARE(strings(templates->entries(), "name"), (QStringList{"Lyrics", "Christmas"}));
 
         m_editor->setTemplateId(idText(t.id));
         QCOMPARE(m_editor->templateId(), idText(t.id));
@@ -295,7 +295,7 @@ private slots:
 
         m_editor->setTemplateId(idText(builtInLyricsTemplateId()));   // back to the built-in
         QVERIFY(m_songs->loadSong(QUuid::fromString(m_editor->songId()))->defaultTemplate.isNull());
-        QCOMPARE(m_editor->templateId(), QString());
+        QCOMPARE(m_editor->templateId(), idText(builtInLyricsTemplateId()));
     }
 
 private:

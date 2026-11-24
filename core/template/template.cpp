@@ -51,6 +51,11 @@ QRectF draggedFrame(const QRectF &start, Qt::Edges edges, QPointF delta)
     return QRectF(QPointF(left, top), QPointF(right, bottom));
 }
 
+TextRegion *Template::region(const QString &id)
+{
+    return const_cast<TextRegion *>(std::as_const(*this).region(id));
+}
+
 QString templateKindName(TemplateKind kind)
 {
     return kKindNames.value(int(kind));

@@ -25,25 +25,25 @@ class TemplateEditor : public QObject, public QQmlParserStatus
     Q_OBJECT
     QML_ELEMENT
     Q_INTERFACES(QQmlParserStatus)
-    // {id, name, builtIn}: built-ins first, then by name.
-    Q_PROPERTY(QVariantList templates READ templates NOTIFY changed)
-    Q_PROPERTY(QString templateId READ templateId WRITE select NOTIFY changed)
-    Q_PROPERTY(QString name READ name NOTIFY changed)
-    Q_PROPERTY(bool builtIn READ builtIn NOTIFY changed)
+    // The list is TemplateLibrary.entries.
+    Q_PROPERTY(QString templateId READ templateId WRITE select NOTIFY templateChanged)
+    Q_PROPERTY(QString name READ name NOTIFY templateChanged)
+    Q_PROPERTY(bool builtIn READ builtIn NOTIFY templateChanged)
     // {id, name} per region of the template.
-    Q_PROPERTY(QVariantList regions READ regions NOTIFY changed)
-    Q_PROPERTY(QString regionId READ regionId WRITE selectRegion NOTIFY changed)
+    Q_PROPERTY(QVariantList regions READ regions NOTIFY templateChanged)
+    Q_PROPERTY(QString regionId READ regionId WRITE selectRegion NOTIFY templateChanged)
     // The selected region's style with the template JSON's keys (templatejson.h):
     // style.frame.x, style.shadow.opacity...
-    Q_PROPERTY(QVariantMap style READ style NOTIFY changed)
-    Q_PROPERTY(double safeAreaX READ safeAreaX NOTIFY changed)
-    Q_PROPERTY(double safeAreaY READ safeAreaY NOTIFY changed)
-    Q_PROPERTY(QString sampleText READ sampleText WRITE setSampleText NOTIFY changed)
+    Q_PROPERTY(QVariantMap style READ style NOTIFY templateChanged)
+    Q_PROPERTY(double safeAreaX READ safeAreaX NOTIFY templateChanged)
+    Q_PROPERTY(double safeAreaY READ safeAreaY NOTIFY templateChanged)
+    Q_PROPERTY(double maxSafeArea READ maxSafeArea CONSTANT)
+    Q_PROPERTY(QString sampleText READ sampleText WRITE setSampleText NOTIFY sampleTextChanged)
     // The sample text through the template as edited, saved or not, as the output draws it.
-    Q_PROPERTY(visualis::Content preview READ preview NOTIFY changed)
+    Q_PROPERTY(visualis::Content preview READ preview NOTIFY previewChanged)
     // Why the last change was refused, each property once.
-    Q_PROPERTY(QStringList warnings READ warnings NOTIFY changed)
-    Q_PROPERTY(QString error READ error NOTIFY changed)
+    Q_PROPERTY(QStringList warnings READ warnings NOTIFY problemsChanged)
+    Q_PROPERTY(QString error READ error NOTIFY problemsChanged)
 
 public:
     static constexpr int kSaveDelayMs = 150;
@@ -54,7 +54,6 @@ public:
     void classBegin() override {}
     void componentComplete() override;
 
-    QVariantList templates() const;
     QString templateId() const;
     void select(const QString &id);
     QString name() const { return m_tmpl.name; }
@@ -65,6 +64,7 @@ public:
     QVariantMap style() const;
     double safeAreaX() const { return m_tmpl.safeAreaX; }
     double safeAreaY() const { return m_tmpl.safeAreaY; }
+    static double maxSafeArea();
     QString sampleText() const { return m_sampleText; }
     void setSampleText(const QString &text);
     visualis::Content preview() const;
@@ -93,15 +93,20 @@ public:
     Q_INVOKABLE void flush();
 
 signals:
-    void changed();
+    void templateChanged();
+    void sampleTextChanged();
+    void previewChanged();
+    void problemsChanged();
 
 private:
     void follow();                 // the library's templates changed
     void load(const visualis::Template &tmpl);
-    bool editable();               // sets `error` when not
-    void edited();                 // an edit to save soon
-    bool saveNow(visualis::Template &tmpl);
-    visualis::TextRegion *region();
+    bool requireEditable();        // false, with `error` set, for a built-in
+    void edited();                 // the change saves soon
+    bool commit();                 // saves m_tmpl now; on failure goes back to what's stored
+    bool saveNew(visualis::Template &tmpl);
+    void discardPending();
+    void setProblems(const QStringList &warnings, const QString &error);
 
     QPointer<TemplateLibrary> m_library;
     visualis::Template m_tmpl;

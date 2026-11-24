@@ -29,7 +29,7 @@ TemplateLibrary *TemplateLibrary::create(QQmlEngine *qml, QJSEngine *)
     return templates;
 }
 
-QList<Template> TemplateLibrary::list() const
+QVariantList TemplateLibrary::entries() const
 {
     QList<Template> stored;
     for (const Template &t : m_templates) {
@@ -40,7 +40,12 @@ QList<Template> TemplateLibrary::list() const
         const int byName = a.name.compare(b.name, Qt::CaseInsensitive);
         return byName != 0 ? byName < 0 : a.id < b.id;
     });
-    return builtInTemplates() + stored;
+    QVariantList list;
+    for (const Template &t : builtInTemplates() + stored) {
+        list.append(QVariantMap{{"id", t.id.toString(QUuid::WithoutBraces)}, {"name", t.name},
+                                {"kind", templateKindName(t.kind)}, {"builtIn", isBuiltInTemplate(t.id)}});
+    }
+    return list;
 }
 
 bool TemplateLibrary::save(Template &tmpl, QString *error)
