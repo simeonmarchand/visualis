@@ -521,6 +521,29 @@ private slots:
         QCOMPARE(m_live->currentText(), shown);
     }
 
+    // #93 review: deleting the song that's live in a service never blanks the output. The
+    // copy on screen stays and the operator is told.
+    void deletingTheLiveSongKeepsItOnScreen()
+    {
+        const QStringList ids = makeSongs({"Amazing Grace", "Holy Spirit"});
+        QVERIFY(m_services->createService("Sunday"));
+        QVERIFY(m_services->addSong(ids[0]));
+        QVERIFY(m_services->addSong(ids[1]));
+        QQuickWindow *window = loadOperatorWindow();
+        QVERIFY(m_live->goToItem(0, 1));
+        const QString shown = m_live->currentText();
+
+        QVERIFY(m_songs->removeSong(ids[0]));
+        QCOMPARE(m_live->currentText(), shown);
+        QCOMPARE(m_live->slideIndex(), 1);
+        QQuickItem *banner = findItem(window->contentItem(), "liveHeldBack");
+        QVERIFY(banner);
+        QTRY_VERIFY(banner->isVisible());
+
+        QVERIFY(m_live->goToItem(1, 0));
+        QTRY_VERIFY(!banner->isVisible());
+    }
+
     // #93: a stored template that can't be read is left out and logged; what uses it shows
     // in the built-in, never blank.
     void anUnreadableTemplateFallsBackToTheBuiltIn()

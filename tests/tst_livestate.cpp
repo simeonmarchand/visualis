@@ -571,6 +571,40 @@ private slots:
         QCOMPARE(live.content().regions["main"].text, QStringLiteral("edited"));
     }
 
+    // #93 review: never a blank output. A live song deleted (its item now has no slides) or
+    // grown past the limits keeps showing as it was, flagged, until the operator moves on.
+    void aLiveItemThatCantShowAnyMoreStaysUpFlagged()
+    {
+        QList<LiveItem> items = service();
+        const QUuid id = QUuid::createUuid();
+        LiveState live;
+        live.setService(id, items);
+        QVERIFY(live.goToItem(3, 1));
+        const QString shown = live.currentText();
+        const Content content = live.content();
+        QVERIFY(live.heldBack().isEmpty());
+
+        LiveItem gone = liveItem(*items[3].source, std::nullopt, templateSet({}));   // song deleted
+        items[3] = gone;
+        live.setService(id, items);
+        QCOMPARE(live.currentText(), shown);
+        QCOMPARE(live.content(), content);
+        QCOMPARE(live.itemIndex(), 3);
+        QCOMPARE(live.slideIndex(), 1);
+        QVERIFY(!live.heldBack().isEmpty());
+
+        LiveItem tooBig = items[3];
+        tooBig.error = "too many slides";
+        QVERIFY(live.update(tooBig));   // the live one, but it can't show
+        QCOMPARE(live.currentText(), shown);
+        QVERIFY(!live.heldBack().isEmpty());
+
+        QVERIFY(live.next());   // still the copy that was on screen
+        QVERIFY(!live.heldBack().isEmpty());
+        QVERIFY(live.goToItem(1, 0));   // another item: the flag goes
+        QVERIFY(live.heldBack().isEmpty());
+    }
+
     void restoreThenSetServicePicksTheServiceBackUp()
     {
         const QList<LiveItem> items = service();

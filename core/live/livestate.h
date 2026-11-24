@@ -37,6 +37,8 @@ class LiveState : public QObject
     Q_PROPERTY(int itemIndex READ itemIndex NOTIFY changed)
     // The live slide's content layer, even while its text is cleared; empty with no slide.
     Q_PROPERTY(visualis::Content content READ content NOTIFY changed)
+    // Why what's live is an older copy, empty when it isn't (see update()); for the operator.
+    Q_PROPERTY(QString heldBack READ heldBack NOTIFY changed)
 
 public:
     explicit LiveState(QObject *parent = nullptr);
@@ -59,7 +61,9 @@ public:
     // Swaps in a new rendering of the live item (after its song or template changed), keeping
     // the slide index, clamped to the slides it has now. The live item is the one with the
     // same service item id, or, for a library song, the same song id. Returns false, changing
-    // nothing, when `item` isn't the live one.
+    // nothing, when `item` isn't the live one. A rendering that can't show (its song deleted,
+    // or over the limits) never blanks the output: the copy on screen stays, and heldBack()
+    // says why until another item goes live.
     bool update(const LiveItem &item);
 
     // The service being run, one LiveItem per service item in order (#51). Doesn't change
@@ -122,6 +126,7 @@ public:
     QString serviceIdString() const { return braceless(m_serviceId); }
     QString itemIdString() const { return braceless(m_live.id()); }
     int itemIndex() const;
+    QString heldBack() const { return m_heldBack; }
 
 signals:
     void changed();
@@ -141,6 +146,7 @@ private:
     int m_index = -1;
     bool m_textCleared = false;
     bool m_backgroundCleared = false;
+    QString m_heldBack;
     QUuid m_serviceId;
     QList<LiveItem> m_items;
 };

@@ -20,6 +20,7 @@ bool LiveState::show(const LiveItem &item, int index)
     if (!acceptable(item))
         return false;
     m_live = item;
+    m_heldBack.clear();
     const bool valid = index >= 0 && index < m_live.slides.size();
     m_index = valid ? index : -1;
     m_textCleared = false;
@@ -36,6 +37,7 @@ bool LiveState::restore(const LiveItem &item, int index, bool textCleared, bool 
         m_items.clear();
     m_serviceId = service;
     m_live = item;
+    m_heldBack.clear();
     m_index = index >= 0 && index < m_live.slides.size() ? index : -1;
     m_textCleared = textCleared;
     m_backgroundCleared = backgroundCleared;
@@ -66,7 +68,14 @@ bool LiveState::update(const LiveItem &item)
 
 void LiveState::replaceLive(const LiveItem &item)
 {
+    if (!item.error.isEmpty() || (item.slides.isEmpty() && !m_live.slides.isEmpty())) {
+        const QString why = item.error.isEmpty() ? QStringLiteral("its song is gone") : item.error;
+        m_heldBack = QStringLiteral("\"%1\" can't be shown as it is now (%2), so the audience still sees it as it was.")
+                         .arg(m_live.song.title, why);
+        return;
+    }
     m_live = item;
+    m_heldBack.clear();
     if (m_index >= m_live.slides.size())
         m_index = int(m_live.slides.size()) - 1;
 }
@@ -98,6 +107,7 @@ bool LiveState::goToItem(int n, int slide)
 void LiveState::showItem(int n, int slide)
 {
     m_live = m_items[n];
+    m_heldBack.clear();
     m_index = slide;
     m_textCleared = false;
     emit changed();
