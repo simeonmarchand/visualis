@@ -1,4 +1,5 @@
 #include "live/liveitem.h"
+#include "template/overrides.h"
 #include "template/template.h"
 
 #include <QtTest>
@@ -52,7 +53,7 @@ QList<LiveItem> service(const Template &t, const QList<Song> &songs, const QList
     return out;
 }
 
-QString fontOf(const LiveItem &live) { return live.slides.value(0).content.regions.value("main").style.fontFamily; }
+QString fontOf(const LiveItem &live) { return live.slides.value(0).content->regions.value("main").style.fontFamily; }
 
 } // namespace
 
@@ -69,10 +70,10 @@ private slots:
         QVERIFY(!live.templateFellBack);
         const Template builtIn = builtInLyricsTemplate();
         for (const LiveSlide &s : live.slides) {
-            QCOMPARE(s.content.regions.keys(), QList<QString>{"main"});
-            QCOMPARE(s.content.regions["main"].text, s.slide.text);
-            QCOMPARE(s.content.regions["main"].style, builtIn.regions[0].style);
-            QCOMPARE(s.content.transition, builtIn.transitions.content);
+            QCOMPARE(s.content->regions.keys(), QList<QString>{"main"});
+            QCOMPARE(s.content->regions["main"].text, s.slide.text);
+            QCOMPARE(s.content->regions["main"].style, builtIn.regions[0].style);
+            QCOMPARE(s.content->transition, builtIn.transitions.content);
         }
         QCOMPARE(live.slides[2].slide.text, QStringLiteral("And heaven and nature sing"));
     }
@@ -107,7 +108,7 @@ private slots:
         text.body = "Welcome!";
         LiveItem live = liveItem(text, std::nullopt, set);
         QCOMPARE(live.templateId(), builtInLyricsTemplateId());
-        QCOMPARE(live.slides[0].content.regions["main"].text, QStringLiteral("Welcome!"));
+        QCOMPARE(live.slides[0].content->regions["main"].text, QStringLiteral("Welcome!"));
         text.overrides = pick(georgia);
         live = liveItem(text, std::nullopt, set);
         QCOMPARE(live.templateId(), georgia.id);
@@ -123,7 +124,7 @@ private slots:
         const LiveItem live = liveSong(song, {}, templateSet({}));
         QVERIFY2(live.error.isEmpty(), qPrintable(live.error));
         QCOMPARE(live.slides.size(), 3);
-        QCOMPARE(live.slides[0].content.regions["main"].style.color, builtInLyricsTemplate().regions[0].style.color);
+        QCOMPARE(live.slides[0].content->regions["main"].style.color, builtInLyricsTemplate().regions[0].style.color);
         QCOMPARE(live.warnings.size(), 1);
         QVERIFY2(live.warnings[0].contains("too much style"), qPrintable(live.warnings[0]));
     }
@@ -142,7 +143,7 @@ private slots:
             QStringList out;
             for (const LiveItem &item : service)
                 for (const LiveSlide &s : item.slides)
-                    out << s.content.regions["main"].style.fontFamily;
+                    out << s.content->regions["main"].style.fontFamily;
             return out;
         };
         QCOMPARE(fonts(service(t, songs, items)),
@@ -155,7 +156,7 @@ private slots:
                  (QStringList{"Georgia", "Courier", "Georgia", "Menlo", "Menlo", "Menlo", "Georgia", "Georgia", "Georgia"}));
         for (const LiveItem &item : after)   // what nothing overrides follows the template everywhere
             for (const LiveSlide &s : item.slides)
-                QCOMPARE(s.content.regions["main"].style.color, QStringLiteral("#ffcc00"));
+                QCOMPARE(s.content->regions["main"].style.color, QStringLiteral("#ffcc00"));
     }
 
     // Phase 3 acceptance (#93): moving the lyrics region moves it on every slide.
@@ -171,8 +172,8 @@ private slots:
         const LiveItem live = liveItem(item, song, templateSet({t}));
         QCOMPARE(live.slides.size(), 3);
         for (const LiveSlide &s : live.slides)
-            QCOMPARE(s.content.regions["main"].style.frame, lowerThird);
-        QCOMPARE(liveSong(song, {}, templateSet({t})).slides[1].content.regions["main"].style.frame, lowerThird);
+            QCOMPARE(s.content->regions["main"].style.frame, lowerThird);
+        QCOMPARE(liveSong(song, {}, templateSet({t})).slides[1].content->regions["main"].style.frame, lowerThird);
     }
 
     void aMissingTemplateFallsBackToTheBuiltInWithOneWarning()
@@ -206,7 +207,7 @@ private slots:
             const LiveItem live = liveItem(songItem(song), song, templateSet({t}));
             QCOMPARE(live.templateId(), builtInLyricsTemplateId());
             QVERIFY(live.templateFellBack);
-            QCOMPARE(live.slides[0].content.regions.value("main").text, song.groups[0].slides[0]);
+            QCOMPARE(live.slides[0].content->regions.value("main").text, song.groups[0].slides[0]);
             QCOMPARE(live.warnings.size(), 1);
             QVERIFY(live.warnings[0].contains("built-in"));
         }
@@ -218,7 +219,7 @@ private slots:
         song.groups[0].slideOverrides = {mainStyle({{"weight", 2.5}}), mainStyle({{"weight", 2.5}})};
         const LiveItem live = liveItem(songItem(song, mainStyle({{"color", "gold"}})), song, templateSet({}));
         QCOMPARE(live.warnings.size(), 2);   // the item's bad color on all 3 slides, the slides' weight on 2
-        QCOMPARE(live.slides[0].content.regions["main"].style.color, builtInLyricsTemplate().regions[0].style.color);
+        QCOMPARE(live.slides[0].content->regions["main"].style.color, builtInLyricsTemplate().regions[0].style.color);
     }
 
     // #96: the item's transition, then the slide's; cuts unless something says otherwise.
@@ -227,16 +228,96 @@ private slots:
         const Song plain = sample();
         const LiveItem builtIn = liveItem(songItem(plain), plain, templateSet({}));
         for (const LiveSlide &s : builtIn.slides)
-            QCOMPARE(s.content.transition.kind, TransitionKind::Cut);
+            QCOMPARE(s.content->transition.kind, TransitionKind::Cut);
 
         Song song = sample();
         song.groups[1].slideOverrides = {{{"transition", QJsonObject{{"kind", "cut"}}}}};
         const QJsonObject itemFade{{"transition", QJsonObject{{"kind", "fade"}, {"ms", 250}}}};
         const LiveItem live = liveItem(songItem(song, itemFade), song, templateSet({}));
-        QCOMPARE(live.slides[0].content.transition, (Transition{TransitionKind::Fade, 250}));
-        QCOMPARE(live.slides[1].content.transition, (Transition{TransitionKind::Fade, 250}));
-        QCOMPARE(live.slides[2].content.transition, (Transition{TransitionKind::Cut, 250}));
+        QCOMPARE(live.slides[0].content->transition, (Transition{TransitionKind::Fade, 250}));
+        QCOMPARE(live.slides[1].content->transition, (Transition{TransitionKind::Fade, 250}));
+        QCOMPARE(live.slides[2].content->transition, (Transition{TransitionKind::Cut, 250}));
         QVERIFY(live.warnings.isEmpty());
+    }
+
+    // #99: each slide's background is the item's override, else its group's default, else the
+    // song's, else none, with the template's background transition.
+    void aSlidesBackgroundIsTheItemsThenTheGroupsThenTheSongs()
+    {
+        Template t = named("Avenir");
+        t.transitions.background = {TransitionKind::Fade, 700};
+        const QUuid songBg = QUuid::createUuid(), groupBg = QUuid::createUuid(), itemBg = QUuid::createUuid();
+        Song song = sample();
+        song.defaultTemplate = t.id;
+        song.defaultBackground = songBg;
+        song.groups[1].defaultBackground = groupBg;
+        auto backgrounds = [](const LiveItem &live) {
+            QList<QUuid> out;
+            for (const LiveSlide &s : live.slides)
+                out << (s.background ? s.background->asset : QUuid());
+            return out;
+        };
+
+        const LiveItem live = liveItem(songItem(song), song, templateSet({t}));
+        QCOMPARE(backgrounds(live), (QList<QUuid>{songBg, songBg, groupBg}));
+        for (const LiveSlide &s : live.slides)
+            QCOMPARE(s.background->transition, (Transition{TransitionKind::Fade, 700}));
+        QCOMPARE(backgrounds(liveSong(song, {}, templateSet({t}))), (QList<QUuid>{songBg, songBg, groupBg}));
+
+        QJsonObject overrides;
+        overrides::setBackground(overrides, itemBg);
+        QCOMPARE(backgrounds(liveItem(songItem(song, overrides), song, templateSet({t}))), (QList<QUuid>{itemBg, itemBg, itemBg}));
+
+        // A blank step the song has no group for (Planning Center's Intro) takes the song's.
+        ServiceItem custom = songItem(song);
+        custom.customSequence = {"Intro", "Chorus"};
+        QCOMPARE(backgrounds(liveItem(custom, song, templateSet({t}))), (QList<QUuid>{songBg, groupBg}));
+
+        // With none set anywhere the slides carry no background, so the live one stays.
+        const Song plain = sample();
+        QCOMPARE(backgrounds(liveItem(songItem(plain), plain, templateSet({}))), (QList<QUuid>{{}, {}, {}}));
+    }
+
+    void aTextItemCarriesOnlyItsOwnBackground()
+    {
+        ServiceItem text;
+        text.id = QUuid::createUuid();
+        text.kind = ServiceItem::Kind::Text;
+        text.body = "Welcome!";
+        QVERIFY(!liveItem(text, std::nullopt, templateSet({})).slides[0].background);
+        const QUuid asset = QUuid::createUuid();
+        overrides::setBackground(text.overrides, asset);
+        QCOMPARE(liveItem(text, std::nullopt, templateSet({})).slides[0].background->asset, asset);
+    }
+
+    // A media item is one slide carrying its asset as the background and no text, so the
+    // lyrics on screen stay (#99).
+    void aMediaItemIsOneSlideWithABackgroundAndNoText()
+    {
+        ServiceItem media;
+        media.id = QUuid::createUuid();
+        media.kind = ServiceItem::Kind::Media;
+        media.title = "Countdown";
+        media.ref = QUuid::createUuid();
+        const LiveItem live = liveItem(media, std::nullopt, templateSet({}));
+        QVERIFY(live.error.isEmpty());
+        QCOMPARE(live.slides.size(), 1);
+        QVERIFY(!live.slides[0].content);
+        QCOMPARE(live.slides[0].background, (SlideBackground{media.ref, builtInLyricsTemplate().transitions.background}));
+        QCOMPARE(live.slides[0].slide.groupLabel, QStringLiteral("Countdown"));
+        QCOMPARE(live.song.title, QStringLiteral("Countdown"));   // the journal keeps it
+        QCOMPARE(liveItem(media, live.song, templateSet({})), live);   // recovery renders it the same
+
+        // Its template's background transition, when the item picks one.
+        Template t = named("Avenir");
+        t.transitions.background = {TransitionKind::Fade, 900};
+        media.overrides = pick(t);
+        QCOMPARE(liveItem(media, std::nullopt, templateSet({t})).slides[0].background->transition,
+                 (Transition{TransitionKind::Fade, 900}));
+
+        // A Planning Center media item with no file in the library yet has nothing to show.
+        media.ref = QUuid();
+        QVERIFY(liveItem(media, std::nullopt, templateSet({})).slides.isEmpty());
     }
 
     // Recovery re-renders from the journal, which keeps the live item's own song.

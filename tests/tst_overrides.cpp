@@ -166,7 +166,7 @@ private slots:
         song.groups[0].fitSlideOverrides();
         QCOMPARE(overrides::setTransition(song.groups[0].slideOverrides[1], parse("{'kind': 'cut', 'ms': 300}")), QString());
 
-        auto transition = [&](int slide) { return liveSong(song, {}, templateSet({t})).slides[slide].content.transition; };
+        auto transition = [&](int slide) { return liveSong(song, {}, templateSet({t})).slides[slide].content->transition; };
         QCOMPARE(transition(0), (Transition{TransitionKind::Fade, 400}));
         QCOMPARE(transition(1), (Transition{TransitionKind::Cut, 300}));
 
@@ -206,7 +206,7 @@ private slots:
         QCOMPARE(overrides::setProperty(song.groups[0].slideOverrides[1], "main", "color", "#ffcc00"), QString());
 
         auto style = [&](int slide) {
-            return liveSong(song, {}, templateSet({t})).slides[slide].content.regions["main"].style;
+            return liveSong(song, {}, templateSet({t})).slides[slide].content->regions["main"].style;
         };
         QCOMPARE(style(1).color, QStringLiteral("#ffcc00"));
         QCOMPARE(style(0).color, QStringLiteral("#ffffff"));

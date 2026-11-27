@@ -277,7 +277,7 @@ const SongSlide *LiveState::currentSlide() const
 
 Content LiveState::content() const
 {
-    return m_index >= 0 && m_index < m_live.slides.size() ? m_live.slides[m_index].content : Content();
+    return m_index >= 0 && m_index < m_live.slides.size() ? m_live.slides[m_index].content.value_or(Content()) : Content();
 }
 
 QString LiveState::currentText() const

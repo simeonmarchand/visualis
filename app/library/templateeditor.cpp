@@ -177,7 +177,7 @@ Content TemplateEditor::preview() const
     sample.defaultTemplate = m_tmpl.id;
     TemplateSet set = m_library ? m_library->templates() : templateSet({});
     set.insert(m_tmpl.id, m_tmpl);
-    return liveSong(sample, {}, set).slides.value(0).content;
+    return liveSong(sample, {}, set).slides.value(0).content.value_or(Content());
 }
 
 bool TemplateEditor::requireEditable()

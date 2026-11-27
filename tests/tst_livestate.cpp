@@ -138,12 +138,12 @@ private slots:
         QCOMPARE(live.content(), Content());
         const LiveItem item = libraryItem(sample());
         QVERIFY(live.show(item, 1));
-        QCOMPARE(live.content(), item.slides[1].content);
+        QCOMPARE(live.content(), *item.slides[1].content);
         QCOMPARE(live.content().regions["main"].text, QStringLiteral("Joy to the world"));
         live.next();
-        QCOMPARE(live.content(), item.slides[2].content);
+        QCOMPARE(live.content(), *item.slides[2].content);
         live.clearText();   // each output decides what clearing hides, as with currentText
-        QCOMPARE(live.content(), item.slides[2].content);
+        QCOMPARE(live.content(), *item.slides[2].content);
     }
 
     // #93: after the live song or its template changes, what's live is the new rendering, at
@@ -582,7 +582,7 @@ private slots:
         const QString before = live.currentText();
 
         items[3].slides[1].slide.text = "edited";
-        items[3].slides[1].content.regions["main"].text = "edited";
+        items[3].slides[1].content->regions["main"].text = "edited";
         live.setService(id, items);
         QCOMPARE(live.itemIndex(), 3);
         QCOMPARE(live.slideIndex(), 1);

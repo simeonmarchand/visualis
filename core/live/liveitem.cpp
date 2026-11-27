@@ -38,18 +38,40 @@ QList<QUuid> customSteps(Song &song, const QUuid &itemId, const QStringList &lab
     return steps;
 }
 
-// The slides with their content layer, in template `wanted` (null: the built-in), with the
-// item's overrides and then each slide's applied, to the style and the transition alike.
-void render(LiveItem &live, const TemplateSet &templates, const QUuid &wanted, const QJsonObject &itemOverrides)
+// Takes template `wanted` (null: the built-in) for `live`, noting a fallback in `warnings`.
+const Template &takeTemplate(LiveItem &live, const TemplateSet &templates, const QUuid &wanted, QStringList &warnings)
 {
     const TemplateChoice choice = chooseTemplate(templates, wanted);
-    const Template &t = choice.tmpl;
-    QStringList warnings;
     if (!choice.problem.isEmpty()) {
         live.templateFellBack = true;
         warnings << choice.problem;
     }
-    live.tmpl = t;
+    live.tmpl = choice.tmpl;
+    return live.tmpl;
+}
+
+// The background a slide of group `group` carries (#99). Precedence: the item's override, else
+// the group's default, else the song's, else none (the slide leaves the live one alone).
+std::optional<SlideBackground> slideBackground(const Template &t, const QJsonObject &itemOverrides, const Group *group,
+                                               const Song &song)
+{
+    QUuid asset = overrideBackgroundId(itemOverrides);
+    if (asset.isNull() && group)
+        asset = group->defaultBackground;
+    if (asset.isNull())
+        asset = song.defaultBackground;
+    if (asset.isNull())
+        return std::nullopt;
+    return SlideBackground{asset, t.transitions.background};
+}
+
+// The slides with their layers, in template `wanted` (null: the built-in): the content with
+// the item's overrides and then each slide's applied, to the style and the transition alike,
+// and the background.
+void render(LiveItem &live, const TemplateSet &templates, const QUuid &wanted, const QJsonObject &itemOverrides)
+{
+    QStringList warnings;
+    const Template &t = takeTemplate(live, templates, wanted, warnings);
     for (const SongSlide &s : songSlides(live.song, live.arrangement, &live.error)) {
         Content content;
         const Group *group = live.song.group(s.groupId);
@@ -65,7 +87,7 @@ void render(LiveItem &live, const TemplateSet &templates, const QUuid &wanted, c
             content.regions.insert(region.id, {region.id == QStringLiteral("main") ? s.text : QString(),
                                                effectiveStyle(t, region.id, layers, &warnings).value_or(region.style)});
         }
-        live.slides << LiveSlide{s, content};
+        live.slides << LiveSlide{s, content, slideBackground(t, itemOverrides, group, live.song)};
     }
     warnings.removeDuplicates();   // an item's bad override reads the same on every slide
     live.warnings << warnings;
@@ -101,7 +123,7 @@ QVariantList slideMaps(const QList<LiveSlide> &slides)
     for (const LiveSlide &l : slides) {
         const SongSlide &s = l.slide;
         list.append(QVariantMap{{"text", s.text}, {"groupLabel", s.groupLabel}, {"groupColor", s.groupColor},
-                                {"content", QVariant::fromValue(l.content)}});
+                                {"content", QVariant::fromValue(l.content.value_or(Content()))}});
     }
     return list;
 }
@@ -148,6 +170,18 @@ LiveItem liveItem(const ServiceItem &item, const std::optional<Song> &song, cons
             live.arrangement = item.id;
         }
         break;
+    case ServiceItem::Kind::Media: {
+        // One slide that carries the asset and no text, so the lyrics on screen stay.
+        if (item.ref.isNull())   // a Planning Center media item with no file linked yet
+            return live;
+        live.song.title = item.title;
+        QStringList warnings;
+        const Template &t = takeTemplate(live, templates, overrideTemplateId(item.overrides), warnings);
+        const SongSlide slide{.groupId = item.id, .groupLabel = item.title};
+        live.slides << LiveSlide{slide, std::nullopt, SlideBackground{item.ref, t.transitions.background}};
+        live.warnings << warnings;
+        return live;
+    }
     case ServiceItem::Kind::Text:
         live.song.title = item.title;
         live.song.groups = {Group{item.id, {}, {}, item.body.isEmpty() ? QStringList{} : QStringList{item.body}}};

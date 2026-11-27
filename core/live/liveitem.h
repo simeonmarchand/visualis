@@ -20,6 +20,8 @@ namespace visualis {
 //    arrangement of its own, with a blank group for each lyric-less step the song has no
 //    group for (Intro, Ending);
 //  - a text item is a one-slide song titled as the item (an empty body is a blank slide);
+//  - a media item is one slide titled as the item, carrying its asset as the background and
+//    no text (#99); one with no asset yet (from Planning Center) has no slides;
 //  - headers, placeholders, and kinds that can't show yet have no slides, and Next and
 //    Previous skip them;
 //  - a song over the size limits (songlimits.h) has no slides either, and `error` says why.
@@ -65,10 +67,21 @@ struct BackgroundLayer {
     QString assetId() const { return asset.isNull() ? QString() : asset.toString(QUuid::WithoutBraces); }
 };
 
-// A slide as it will show (GLOSSARY.md "LiveSlide"): its place in the song plus its layers.
+// The background a slide carries (#99): a media asset, and the transition it changes with
+// (the template's background transition).
+struct SlideBackground {
+    QUuid asset;
+    Transition transition;
+
+    bool operator==(const SlideBackground &) const = default;
+};
+
+// A slide as it will show (GLOSSARY.md "LiveSlide"): its place in the song plus the layers
+// it carries. A slide changes only the layers it carries (plan 5.2).
 struct LiveSlide {
     SongSlide slide;
-    Content content;
+    std::optional<Content> content;              // none: it leaves the text alone (a media item)
+    std::optional<SlideBackground> background;   // none: it leaves the background alone
 
     bool operator==(const LiveSlide &) const = default;
 };
@@ -106,6 +119,9 @@ TemplateChoice chooseTemplate(const TemplateSet &templates, const QUuid &wanted)
 
 // `song` is the item's song from the library, for song items; without it a song item has
 // no slides. `templates` must include the built-ins (templateSet()).
+// Each slide's background (#99), resolved here so LiveState only applies it: the item's
+// override, else its group's default, else the song's, else none, with the template's
+// background transition. A media item's comes from its template choice, else the built-in.
 LiveItem liveItem(const ServiceItem &item, const std::optional<Song> &song, const TemplateSet &templates);
 // A song taken live from the library, not from a service.
 LiveItem liveSong(const Song &song, const QUuid &arrangement, const TemplateSet &templates);
