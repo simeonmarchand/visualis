@@ -779,30 +779,46 @@ private slots:
     // #99: a media tile dragged from the media pane goes into the service where it's dropped.
     void aMediaTileIsDraggedIntoTheService()
     {
-        auto *media = m_engine->singletonInstance<MediaLibrary *>("Visualis.Ui", "MediaLibrary");
-        QTemporaryDir in;
-        QImage image(16, 9, QImage::Format_RGB32);
-        image.fill(Qt::green);
-        QVERIFY(image.save(in.filePath("Countdown.png")));
-        QSignalSpy finished(media, &MediaLibrary::importFinished);
-        QVERIFY(media->importFiles({QUrl::fromLocalFile(in.filePath("Countdown.png"))}));
-        QVERIFY(finished.wait(10'000));
-        const QString asset = media->assets()[0].toMap().value("id").toString();
-
+        const QString asset = importImage("Countdown");
         QQuickWindow *window = serviceOperatorWindow();
-        click(window, item(window, "mediaTab"));
-        QQuickItem *from = item(window, "mediaTile0");
         QQuickItem *onto = item(window, "serviceItem1");
-        const QPoint start = from->mapToScene(QPointF(from->width() / 2, from->height() / 2)).toPoint();
-        const QPoint end = onto->mapToScene(QPointF(onto->width() / 2, onto->height() - 4)).toPoint();
-        QTest::mousePress(window, Qt::LeftButton, {}, start);
-        for (int step = 1; step <= 20; ++step)
-            QTest::mouseMove(window, start + (end - start) * step / 20);
-        QTest::mouseRelease(window, Qt::LeftButton, {}, end);
+        dragMediaTile(window, onto->mapToScene(QPointF(onto->width() / 2, onto->height() - 4)).toPoint());
         QTRY_COMPARE(titles(m_services->items()), (QStringList{"Song 1", "Song 2", "Countdown", "Offering", "Song 3", "Song 4"}));
         QCOMPARE(m_services->items()[2].toMap()["kind"].toString(), QStringLiteral("media"));
         QVERIFY(m_live->goToItem(2));
         QCOMPARE(m_live->backgroundId(), asset);
+    }
+
+    void mediaDroppedOnAnEmptyServiceOrBelowTheLastRowIsAdded()
+    {
+        importImage("Countdown");
+        QVERIFY(m_services->createService("Sunday"));
+        QQuickWindow *window = loadOperatorWindow();
+        window->requestActivate();
+        QVERIFY(QTest::qWaitForWindowActive(window));
+        QQuickItem *list = item(window, "serviceItems");
+        dragMediaTile(window, list->mapToScene(QPointF(list->width() / 2, list->height() / 2)).toPoint());
+        QTRY_COMPARE(titles(m_services->items()), QStringList{"Countdown"});
+        dragMediaTile(window, list->mapToScene(QPointF(list->width() / 2, list->height() - 10)).toPoint());
+        QTRY_COMPARE(titles(m_services->items()), (QStringList{"Countdown", "Countdown"}));
+    }
+
+    void mediaDroppedOnAScrolledServiceLandsUnderThePointer()
+    {
+        importImage("Countdown");
+        QVERIFY(m_services->createService("Sunday"));
+        for (int i = 0; i < 60; ++i)
+            QVERIFY(m_services->addHeader(QStringLiteral("Header %1").arg(i)));
+        QQuickWindow *window = loadOperatorWindow();
+        window->requestActivate();
+        QVERIFY(QTest::qWaitForWindowActive(window));
+        QQuickItem *list = item(window, "serviceItems");
+        QVERIFY(list->property("contentHeight").toReal() > list->height() + 340);
+        list->setProperty("contentY", 340);   // ten rows down
+        QQuickItem *onto = item(window, "serviceItem20");
+        dragMediaTile(window, onto->mapToScene(QPointF(onto->width() / 2, onto->height() - 4)).toPoint());
+        QTRY_COMPARE(m_services->items().size(), 61);
+        QCOMPARE(m_services->items()[21].toMap()["title"].toString(), QStringLiteral("Countdown"));
     }
 
     void tileClicksOnAServiceItemAreCommands()
@@ -1366,6 +1382,38 @@ private:
         if (!QTest::qWaitForWindowActive(window))
             qFatal("operator window didn't activate");
         return window;
+    }
+
+    // Imports a one-color image as `title`; returns its asset id. Each call uses a new color,
+    // because the media library dedups by content.
+    QString importImage(const QString &title)
+    {
+        auto *media = m_engine->singletonInstance<MediaLibrary *>("Visualis.Ui", "MediaLibrary");
+        QTemporaryDir in;
+        QImage image(16, 9, QImage::Format_RGB32);
+        image.fill(QColor::fromHsv((media->assets().size() * 47) % 360, 255, 255));
+        const QString file = in.filePath(title + ".png");
+        if (!image.save(file))
+            qFatal("couldn't write the test image");
+        QSignalSpy finished(media, &MediaLibrary::importFinished);
+        if (!media->importFiles({QUrl::fromLocalFile(file)}) || !finished.wait(10'000))
+            qFatal("the test image didn't import");
+        for (const QVariant &a : media->assets())
+            if (a.toMap().value("name").toString() == title + ".png")
+                return a.toMap().value("id").toString();
+        qFatal("no imported asset %s", qPrintable(title));
+    }
+
+    // Drags the first media tile from the Media tab and drops it at `end` (scene coordinates).
+    static void dragMediaTile(QQuickWindow *window, QPoint end)
+    {
+        click(window, item(window, "mediaTab"));
+        QQuickItem *from = item(window, "mediaTile0");
+        const QPoint start = from->mapToScene(QPointF(from->width() / 2, from->height() / 2)).toPoint();
+        QTest::mousePress(window, Qt::LeftButton, {}, start);
+        for (int step = 1; step <= 20; ++step)
+            QTest::mouseMove(window, start + (end - start) * step / 20);
+        QTest::mouseRelease(window, Qt::LeftButton, {}, end);
     }
 
     static QQuickItem *item(QQuickWindow *window, const QString &name)

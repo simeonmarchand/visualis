@@ -89,7 +89,9 @@ ColumnLayout {
                 anchors.fill: parent
                 acceptedButtons: Qt.LeftButton | Qt.RightButton
                 drag.target: dragged
-                // Dropped where the pointer is, not where the thumbnail's middle is.
+                // Dropped where the pointer is: not the thumbnail's middle, and not trailing it by
+                // the drag threshold.
+                drag.smoothed: false
                 onPressed: mouse => dragged.Drag.hotSpot = Qt.point(mouse.x, mouse.y)
                 onReleased: {
                     if (drag.active)
