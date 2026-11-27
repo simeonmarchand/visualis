@@ -225,13 +225,11 @@ bool LiveState::setBackground(const QUuid &asset, const Transition &transition)
     return shown;
 }
 
-void LiveState::backgroundFailed(const QUuid &asset, const QUuid &showing, const Transition &showingTransition,
-                                 const QString &why)
+void LiveState::backgroundFailed(const QUuid &asset, const BackgroundLayer &showing, const QString &why)
 {
     if (asset != m_background.asset)
         return;
-    m_background.asset = showing;
-    m_background.transition = showingTransition;
+    m_background = showing;
     m_backgroundAlert = why;
     emit changed();
 }

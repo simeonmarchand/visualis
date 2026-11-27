@@ -120,9 +120,8 @@ BackgroundPlayer *BackgroundPlayer::create(QQmlEngine *qml, QJSEngine *)
     qml->addImageProvider(QStringLiteral("background"), new BackgroundImages(player));
     if (auto *media = qml->singletonInstance<MediaLibrary *>("Visualis.Ui", "MediaLibrary")) {
         media->setInUse([player = QPointer(player)](const QUuid &asset) {
-            return player && player->inUse(asset)
-                       ? QStringLiteral("it's the live background. Pick another background before deleting it.")
-                       : QString();
+            const QString why = player ? player->whyInUse(asset) : QString();
+            return why.isEmpty() ? why : why + QStringLiteral(". Pick another background before deleting it.");
         });
     }
     return player;
@@ -146,13 +145,22 @@ void BackgroundPlayer::setFillMode(const QString &mode)
 void BackgroundPlayer::layerChanged()
 {
     const BackgroundLayer &layer = m_live->background();
+    const bool changing = layer.asset != m_wanted;
+    if (changing && !m_pending)
+        m_frontCleared = m_cleared;   // what comes back if this pick fails
     // A new background un-clears the layer; the cleared one mustn't show while it loads.
-    if (m_cleared && !layer.cleared && layer.asset != m_wanted && m_slots[m_front]->opacity > 0) {
+    if (m_cleared && !layer.cleared && changing && m_slots[m_front]->opacity > 0) {
         m_slots[m_front]->opacity = 0;
         emit slotsChanged();
     }
     if (layer.cleared != m_cleared) {
         m_cleared = layer.cleared;
+        // Shown again after a failed pick over it was put back cleared: it was left hidden.
+        Slot &front = *m_slots[m_front];
+        if (!m_cleared && !changing && !front.asset.isNull() && front.opacity == 0 && !fading()) {
+            front.opacity = 1;
+            emit slotsChanged();
+        }
         const double target = m_cleared ? 0 : 1;
         m_clearFade.stop();
         if (layer.transition.kind == TransitionKind::Fade && layer.transition.ms > 0) {
@@ -166,10 +174,12 @@ void BackgroundPlayer::layerChanged()
         }
     }
     // Every slide change lands here; only a different asset does anything.
-    if (layer.asset != m_wanted) {
+    if (changing) {
         m_wanted = layer.asset;
         play(layer.asset, layer.transition);
     }
+    if (!m_pending)
+        m_frontCleared = m_cleared;
 }
 
 void BackgroundPlayer::play(const QUuid &asset, const Transition &transition)
@@ -177,7 +187,8 @@ void BackgroundPlayer::play(const QUuid &asset, const Transition &transition)
     finishFade();
     cancelPending();
     if (asset == m_slots[m_front]->asset) {   // back to what's showing
-        if (m_slots[m_front]->opacity == 0 && !asset.isNull()) {   // hidden for a pick that failed
+        // Hidden for a pick that failed; it stays hidden if the layer went back to cleared.
+        if (m_slots[m_front]->opacity == 0 && !asset.isNull() && !m_cleared) {
             m_slots[m_front]->opacity = 1;
             emit slotsChanged();
         }
@@ -207,7 +218,7 @@ void BackgroundPlayer::play(const QUuid &asset, const Transition &transition)
 void BackgroundPlayer::refuse(const QUuid &asset, const QString &why)
 {
     if (m_live)
-        m_live->backgroundFailed(asset, showing(), m_slots[m_front]->transition, why);
+        m_live->backgroundFailed(asset, {showing(), m_frontCleared, m_slots[m_front]->transition}, why);
 }
 
 void BackgroundPlayer::giveUp(const QString &why)
@@ -218,9 +229,15 @@ void BackgroundPlayer::giveUp(const QString &why)
     refuse(asset, QStringLiteral("The background can't be shown: %1").arg(why));
 }
 
-bool BackgroundPlayer::inUse(const QUuid &asset) const
+QString BackgroundPlayer::whyInUse(const QUuid &asset) const
 {
-    return !asset.isNull() && (asset == showing() || (m_pending && m_pending->asset == asset));
+    if (asset.isNull())
+        return {};
+    if (asset == showing())
+        return m_cleared ? QStringLiteral("it's the current background (cleared)") : QStringLiteral("it's the live background");
+    if (m_pending && m_pending->asset == asset)
+        return QStringLiteral("it's loading as the background");
+    return {};
 }
 
 void BackgroundPlayer::setLoadTimeout(int ms)

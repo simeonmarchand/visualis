@@ -9,6 +9,8 @@
 #include <QScreen>
 #include <QThreadPool>
 
+#include <cmath>
+
 #include <memory>
 
 using namespace visualis;
@@ -39,16 +41,15 @@ void VideoSource::stop()
 }
 
 namespace {
-// Lower than an import's limit: a format that can't scale while decoding (PNG, TIFF, HEIC) is
-// read whole first, and a background shouldn't cost the outputs that much memory mid-service.
-// About 11k x 11k RGBA; a JPEG of any size decodes scaled and never comes near it.
-constexpr int kStillAllocationMb = 512;
+constexpr int kMaxSide = 8192;   // the largest texture every Metal GPU takes
 }
 
 StillImage decodeStill(const QString &path, const QSize &bound)
 {
     QImageReader reader(path);
-    reader.setAllocationLimit(kStillAllocationMb);
+    // The import's limit, so anything that imported can show. A format that can't scale while
+    // decoding (PNG, TIFF, HEIC) is read whole first; JPEGs decode scaled.
+    reader.setAllocationLimit(medialimits::kImageAllocationMb);
     reader.setAutoTransform(true);
     const QSize stored = reader.size();
     if (!stored.isValid())
@@ -57,10 +58,14 @@ StillImage decodeStill(const QString &path, const QSize &bound)
     const bool turned = reader.transformation() & QImageIOHandler::TransformationRotate90;
     const QSize shown = turned ? stored.transposed() : stored;
     QSize target = shown.scaled(bound, Qt::KeepAspectRatioByExpanding);
-    // A panorama covering the output would be far wider than it and than a GPU texture can be;
-    // past twice the output it's fitted within that instead, and fill crops the rest.
-    if (const QSize cap = bound * 2; target.width() > cap.width() || target.height() > cap.height())
-        target = shown.scaled(cap, Qt::KeepAspectRatio);
+    // A panorama covering the output can be wider than a GPU texture can be, and an odd shape
+    // can need many times the output's pixels: either is scaled down to fit, and shows a
+    // little softer, rather than failing.
+    if (target.width() > kMaxSide || target.height() > kMaxSide)
+        target = target.scaled(kMaxSide, kMaxSide, Qt::KeepAspectRatio);
+    if (const double budget = 4.0 * bound.width() * bound.height(), area = double(target.width()) * target.height();
+        area > budget)
+        target = (QSizeF(target) * std::sqrt(budget / area)).toSize();
     if (target.width() < shown.width())
         reader.setScaledSize(turned ? target.transposed() : target);
     QImage image = reader.read();

@@ -875,7 +875,7 @@ private slots:
         live.setMediaCheck(FakeMedia{{a, b, c}}.fn());
         live.setBackground(a, kFade);
         live.setBackground(b, kFade);
-        live.backgroundFailed(b, a, kFade, "it won't decode");
+        live.backgroundFailed(b, {a, false, kFade}, "it won't decode");
         QCOMPARE(live.background().asset, a);
         QCOMPARE(live.backgroundAlert(), QStringLiteral("it won't decode"));
         QVERIFY(live.setBackground(b, kFade));   // asked for again: tried again
@@ -883,7 +883,7 @@ private slots:
 
         live.setBackground(c, kFade);
         QSignalSpy changed(&live, &LiveState::changed);
-        live.backgroundFailed(b, a, kFade, "too late");   // the layer has moved on
+        live.backgroundFailed(b, {a, false, kFade}, "too late");   // the layer has moved on
         QCOMPARE(changed.count(), 0);
         QCOMPARE(live.background().asset, c);
     }

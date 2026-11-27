@@ -167,8 +167,7 @@ private slots:
         QVERIFY(m_live->setBackground(b, Transition{TransitionKind::Fade, 400}));
         sourceFor("/media/b")->becomeReady();
         QCOMPARE(runningVideos(), 2);
-        QTest::qWait(100);
-        QVERIFY2(front().opacity > 0 && front().opacity < 1, qPrintable(QString::number(front().opacity)));
+        QTRY_VERIFY(front().opacity > 0 && front().opacity < 1);   // partway, however slow the machine
         QCOMPARE(back().opacity, 1.0);   // the old one stays opaque beneath until the end
         QTRY_COMPARE(runningVideos(), 1);
         QCOMPARE(front().opacity, 1.0);
@@ -276,9 +275,13 @@ private slots:
         m_live->clearBackground();
         QVERIFY(m_live->setBackground(b, kCut));
         sourceFor("/media/b")->fail("damaged");
-        // The layer says A, not cleared (picking B un-cleared it), so A is what shows.
+        // Back to A as it was: cleared. The operator never asked for A back on air.
         QCOMPARE(m_live->background().asset, a);
-        QVERIFY(!m_live->backgroundCleared());
+        QVERIFY(m_live->backgroundCleared());
+        QVERIFY(front().opacity == 0 || m_player->opacity() == 0);
+        QTRY_COMPARE(m_player->opacity(), 0.0);
+        m_live->showBackground();   // asked for now
+        QCOMPARE(m_player->opacity(), 1.0);
         QCOMPARE(front().opacity, 1.0);
     }
 
@@ -316,11 +319,15 @@ private slots:
     {
         const QUuid a = add(false, "/media/a"), b = add(false, "/media/b"), c = add(false, "/media/c");
         show(a, kCut);
-        QVERIFY(m_player->inUse(a));
-        QVERIFY(!m_player->inUse(b));
+        QCOMPARE(m_player->whyInUse(a), QStringLiteral("it's the live background"));
+        QVERIFY(m_player->whyInUse(b).isEmpty());
+        m_live->clearBackground();
+        QCOMPARE(m_player->whyInUse(a), QStringLiteral("it's the current background (cleared)"));
+        m_live->showBackground();
         QVERIFY(m_live->setBackground(b, kCut));
-        QVERIFY(m_player->inUse(a) && m_player->inUse(b));   // A is still up while B loads
-        QVERIFY(!m_player->inUse(c));
+        QVERIFY(!m_player->whyInUse(a).isEmpty());   // A is still up while B loads
+        QCOMPARE(m_player->whyInUse(b), QStringLiteral("it's loading as the background"));
+        QVERIFY(m_player->whyInUse(c).isEmpty());
     }
 
     // The layer checked it, but the file can still vanish before the player opens it.
@@ -341,8 +348,7 @@ private slots:
         show(a, kCut);
         QVERIFY(m_live->setBackground({}, Transition{TransitionKind::Fade, 300}));
         QCOMPARE(m_player->showing(), QUuid());
-        QTest::qWait(100);
-        QVERIFY(back().opacity > 0 && back().opacity < 1);   // fading out over black
+        QTRY_VERIFY(back().opacity > 0 && back().opacity < 1);   // fading out over black
         QTRY_COMPARE(running(), QStringList{});
         QCOMPARE(front().kind, QStringLiteral("none"));
     }
@@ -352,8 +358,7 @@ private slots:
         const QUuid a = add(true, "/media/a");
         show(a, Transition{TransitionKind::Fade, 300});
         m_live->clearBackground();
-        QTest::qWait(100);
-        QVERIFY2(m_player->opacity() > 0 && m_player->opacity() < 1, qPrintable(QString::number(m_player->opacity())));
+        QTRY_VERIFY(m_player->opacity() > 0 && m_player->opacity() < 1);
         QTRY_COMPARE(m_player->opacity(), 0.0);
         QCOMPARE(running(), QStringList{"/media/a"});   // cleared, not stopped: show is instant
         m_live->showBackground();
@@ -396,16 +401,28 @@ private slots:
         QCOMPARE(still.image.size(), QSize(1920, 1280));   // covers 1920 x 1080 at 3:2
     }
 
-    // A panorama covering the output would be enormous; it's capped at twice the output.
-    void aPanoramaIsCappedAtTwiceTheOutput()
+    // A panorama covering the output would overrun a GPU texture; it's capped at 8192 a side,
+    // and at four times the output's pixels, keeping as much of its height as it can.
+    void aPanoramaIsCappedAtTheTextureLimit()
     {
         QTemporaryDir dir;
-        QImage wide(12000, 1000, QImage::Format_Grayscale8);
+        QImage wide(20000, 1500, QImage::Format_Grayscale8);
         wide.fill(90);
         const QString path = write(dir.filePath("wide.jpg"), jpeg(wide));
         const QSize size = decodeStill(path, QSize(1920, 1080)).image.size();
-        QVERIFY2(size.width() <= 3840 && size.height() <= 2160, qPrintable(QStringLiteral("%1x%2").arg(size.width()).arg(size.height())));
-        QCOMPARE(size, QSize(3840, 320));
+        QVERIFY2(size.width() == 8192 && qAbs(size.height() - 614) <= 1, qPrintable(QStringLiteral("%1x%2").arg(size.width()).arg(size.height())));
+    }
+
+    void aTallOutputSizedBudgetCapsTheArea()
+    {
+        QTemporaryDir dir;
+        QImage square(6000, 6000, QImage::Format_Grayscale8);
+        square.fill(90);
+        const QString path = write(dir.filePath("square.jpg"), jpeg(square));
+        // Covering a 4000 x 500 output needs 4000 x 4000 (16 MP), over 4 x 2 MP: 2828 x 2828.
+        const QSize size = decodeStill(path, QSize(4000, 500)).image.size();
+        QVERIFY2(qAbs(size.width() - 2828) <= 2 && size.width() == size.height(),
+                 qPrintable(QStringLiteral("%1x%2").arg(size.width()).arg(size.height())));
     }
 
     void aSmallImageIsNotEnlarged()

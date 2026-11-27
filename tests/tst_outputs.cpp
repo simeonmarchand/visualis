@@ -235,8 +235,9 @@ private slots:
         QTRY_COMPARE_WITH_TIMEOUT(visibleLyrics(w)->opacity(), 1.0, 3 * kLongFadeMs);
         QQuickItem *shown = visibleLyrics(w);
         m_live->clearText();
-        QTest::qWait(50);
-        QVERIFY(shown->opacity() > 0 && shown->opacity() < 1);   // fading out
+        // Fading out, not cut: seen partway within the fade. Polled, since a slow runner may
+        // not have run a frame of it yet after any fixed wait.
+        QTRY_VERIFY_WITH_TIMEOUT(shown->opacity() > 0 && shown->opacity() < 1, kLongFadeMs);
         QTRY_COMPARE_WITH_TIMEOUT(shown->opacity(), 0.0, 3 * kLongFadeMs);
     }
 
@@ -364,8 +365,7 @@ private slots:
 
         QVERIFY(m_live->setBackground(addStill(Qt::blue), {TransitionKind::Fade, kLongFadeMs}));
         m_live->clearBackground();
-        QTest::qWait(150);
-        QVERIFY2(background->opacity() > 0 && background->opacity() < 1, qPrintable(QString::number(background->opacity())));
+        QTRY_VERIFY_WITH_TIMEOUT(background->opacity() > 0 && background->opacity() < 1, kLongFadeMs);
         QTRY_COMPARE_WITH_TIMEOUT(background->opacity(), 0.0, 3 * kLongFadeMs);
     }
 

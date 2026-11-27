@@ -69,10 +69,11 @@ struct StillImage {
     QString error;   // for the operator; empty when it decoded
 };
 
-// Decodes `path` just large enough to cover `bound` (the output, in pixels), never larger than
-// the image or than twice `bound` either way, and turned as its EXIF orientation says. A JPEG
-// decodes at that size directly, so a 50-megapixel photo never sits in memory whole; formats
-// that can't scale while decoding are read whole, up to 512 MB, then scaled. Any thread.
+// Decodes `path` just large enough to cover `bound` (the output, in pixels), turned as its EXIF
+// orientation says: never larger than the image, than 8192 a side, or than four times the
+// output's pixels. A JPEG decodes at that size directly, so a 50-megapixel photo never sits in
+// memory whole; formats that can't scale while decoding are read whole, up to
+// medialimits::kImageAllocationMb, then scaled. Any thread.
 StillImage decodeStill(const QString &path, const QSize &bound);
 
 // A still image, decoded on the thread pool so a large photo never holds up the outputs.

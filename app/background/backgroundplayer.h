@@ -88,8 +88,9 @@ public:
     QString status() const;
     QString alert() const;
 
-    // Whether the asset's file is showing or loading, so the library won't delete it.
-    bool inUse(const QUuid &asset) const;
+    // Why the asset's file mustn't be deleted now (it's showing, cleared, or loading), for
+    // the operator; empty when it may be.
+    QString whyInUse(const QUuid &asset) const;
     // How long a background may take to get its first picture before it's given up. For tests.
     void setLoadTimeout(int ms);
 
@@ -137,6 +138,7 @@ private:
     int m_front = 0;
     QUuid m_wanted;   // the layer's asset last seen
     bool m_cleared = false;
+    bool m_frontCleared = false;   // the cleared state that goes with what's showing
     std::optional<Pending> m_pending;   // loading in the back slot
     QTimer m_loadTimer;
     QVariantAnimation m_fade;           // the front slot fading in
