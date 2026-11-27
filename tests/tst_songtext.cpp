@@ -97,6 +97,17 @@ private slots:
         QCOMPARE(e.song.arrangements, s.arrangements);
     }
 
+    void editingAGroupKeepsItsBackground()
+    {
+        Song s = sample();
+        s.groups[2].defaultBackground = QUuid::createUuid();
+        verifyLossless(s);
+        QString text = lyricsText(s);
+        text.replace("set free", "set free!");
+        const LyricsEdit e = applyLyricsText(s, text);
+        QCOMPARE(e.song.groups[2].defaultBackground, s.groups[2].defaultBackground);
+    }
+
     void slidesAreTakenAsWrittenNotResplit()
     {
         const Song s = sample();

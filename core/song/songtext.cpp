@@ -136,6 +136,7 @@ LyricsEdit applyLyricsText(const Song &song, const QString &text)
             const Group &was = old[matchOf[p]];
             g.id = was.id;
             g.color = was.color;
+            g.defaultBackground = was.defaultBackground;
             // A group whose text wasn't touched keeps its slides exactly as they were (the parser
             // would trim them).
             // Remapped first, so parsed text is compared with parsed text.
