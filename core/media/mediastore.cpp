@@ -125,13 +125,14 @@ QList<MediaAsset> MediaStore::list() const
 
 MediaStore::UsedBy MediaStore::usedBy(const QUuid &id) const
 {
-    // Ids are stored without braces, here and in the override JSON (overrides.h).
+    // Ids are stored lowercase without braces. The override JSON is written that way too
+    // (overrides.h), but liveItem reads any form QUuid::fromString takes, so match those.
     UsedBy out;
     QSqlQuery q(m_library.database());
     q.prepare("SELECT s.title FROM service s WHERE s.default_background = :id OR EXISTS ("
               " SELECT 1 FROM service_item i WHERE i.service_id = s.id AND ("
               "  (i.kind = 'media' AND i.ref_id = :id)"
-              "  OR CASE WHEN json_valid(i.overrides) THEN json_extract(i.overrides, '$.background') END = :id))"
+              "  OR CASE WHEN json_valid(i.overrides) THEN lower(trim(json_extract(i.overrides, '$.background'), '{}')) END = :id))"
               " ORDER BY s.date DESC, s.title");
     q.bindValue(":id", key(id));
     q.exec();

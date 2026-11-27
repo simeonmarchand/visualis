@@ -6,6 +6,7 @@
 #include "service/servicestore.h"
 #include "song/songstore.h"
 #include "template/overrides.h"
+#include "template/template.h"
 
 #include <QCryptographicHash>
 #include <QDir>
@@ -542,6 +543,27 @@ private slots:
         QVERIFY(songs.save(own).ok && songs.save(group).ok && songs.save(plain).ok);
 
         QCOMPARE(media.usedBy(a.id), (MediaStore::UsedBy{{"Easter", "Advent"}, {"Amazing Grace", "Be Thou My Vision"}}));
+    }
+
+    // PR #127 review: an override written by hand or another tool may brace or capitalize
+    // the id, and liveItem still shows it, so usedBy must count it.
+    void usedByCountsAnOverrideIdWrittenWithBraces()
+    {
+        QTemporaryDir lib;
+        auto library = Library::open(lib.path()).library;
+        MediaStore media(*library);
+        MediaAsset a = asset("Sunrise.mp4", MediaAsset::Kind::Video);
+        QVERIFY(media.save(a).ok);
+        Service s;
+        s.title = "Advent";
+        ServiceItem item;
+        item.kind = ServiceItem::Kind::Text;
+        item.title = "Welcome";
+        item.overrides["background"] = a.id.toString(QUuid::WithBraces).toUpper();
+        QCOMPARE(overrideBackgroundId(item.overrides), a.id);   // what goes live
+        s.items << item;
+        QVERIFY(ServiceStore(*library).save(s).ok);
+        QCOMPARE(media.usedBy(a.id).services, QStringList{"Advent"});
     }
 
     void removeDeletesTheRowFileAndThumbnail()
