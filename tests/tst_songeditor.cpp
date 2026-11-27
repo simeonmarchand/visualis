@@ -203,9 +203,17 @@ private slots:
         QVERIFY2(m_editor->error().contains("characters"), qPrintable(m_editor->error()));
     }
 
-    // Thermo: lyrics typed while a pick waits are saved before the other song opens.
-    void lyricsTypedWhileAPickWaitsAreSavedFirst()
+    // Thermo: typing not yet applied while a pick waits is saved before the other song opens.
+    void typingWhileAPickWaitsIsSavedFirst_data()
     {
+        QTest::addColumn<QString>("field");
+        QTest::newRow("lyrics, before the typing pause") << QStringLiteral("lyricsText");
+        QTest::newRow("title, before editing finishes") << QStringLiteral("songTitle");
+    }
+
+    void typingWhileAPickWaitsIsSavedFirst()
+    {
+        QFETCH(QString, field);
         m_engine->loadFromModule("Visualis.Ui", "Main");
         auto *main = qobject_cast<QQuickWindow *>(m_engine->rootObjects().value(0));
         QVERIFY(main);
@@ -215,8 +223,8 @@ private slots:
         QMetaObject::invokeMethod(editorWindow, "edit", Q_ARG(QVariant, first));
         QVERIFY(QTest::qWaitForWindowExposed(editorWindow));
         auto *windowEditor = editorWindow->findChild<SongEditor *>();
-        auto *lyrics = findItem(editorWindow->contentItem(), "lyricsText");
-        QVERIFY(windowEditor && lyrics);
+        auto *typedIn = findItem(editorWindow->contentItem(), qPrintable(field));
+        QVERIFY(windowEditor && typedIn);
         QVERIFY(m_songs->createFromPaste("Other", "Verse 1\nOne\n"));
         const QString other = m_songs->selectedId();
         {
@@ -225,13 +233,18 @@ private slots:
             windowEditor->setBackgroundId(QUuid::createUuid().toString(QUuid::WithoutBraces));
             windowEditor->setSongId(other);
             QCOMPARE(windowEditor->songId(), first);
-            lyrics->forceActiveFocus();
-            QVERIFY(lyrics->hasActiveFocus());
-            lyrics->setProperty("text", lyrics->property("text").toString().replace("Amazing grace", "Typed grace"));
+            typedIn->forceActiveFocus();
+            QVERIFY(typedIn->hasActiveFocus());
+            typedIn->setProperty("text", typedIn->property("text").toString().replace("Amazing", "Typed"));
             QVERIFY(QSqlQuery(program.database()).exec("ROLLBACK"));
         }
-        QTRY_COMPARE(windowEditor->songId(), other);
-        QVERIFY(m_songs->loadSong(QUuid::fromString(first))->groups[1].slides[0].startsWith("Typed grace"));
+        windowEditor->setSongId(other);   // now, so no timer saves the typing first
+        QCOMPARE(windowEditor->songId(), other);
+        const Song saved = *m_songs->loadSong(QUuid::fromString(first));
+        if (field == "lyricsText")
+            QVERIFY(saved.groups[1].slides[0].startsWith("Typed grace"));
+        else
+            QCOMPARE(saved.title, QStringLiteral("Typed Grace"));
     }
 
     // Thermo: deleting the song opens the one picked while its save was waiting.

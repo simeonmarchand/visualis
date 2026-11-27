@@ -29,9 +29,17 @@ Window {
     }
 
     onClosing: {
-        applyPendingLyrics()
+        applyPendingEdits()
         editor.flush()
     }
+
+    // Taking the focus finishes a title or credit being typed; lyrics wait for a pause.
+    function applyPendingEdits() {
+        focusSink.forceActiveFocus()
+        applyPendingLyrics()
+    }
+
+    Item { id: focusSink }   // not a focus scope, so the field's focus really moves here
 
     function applyPendingLyrics() {
         if (lyricsDirty.running) {
@@ -42,7 +50,7 @@ Window {
 
     SongEditor {
         id: editor
-        onLeavingSong: window.applyPendingLyrics()
+        onLeavingSong: window.applyPendingEdits()
         onLyricsReset: {
             lyricsArea.text = editor.lyrics
             lyricsDirty.stop()
@@ -77,7 +85,7 @@ Window {
         standardButtons: Dialog.Yes | Dialog.Cancel
         Label { text: "The song and its arrangements are removed from the library. What's on screen now stays." }
         onAccepted: {
-            if (editor.deleteSong())
+            if (editor.deleteSong() && !editor.loaded)   // or it opened the song picked meanwhile
                 window.close()
         }
     }
