@@ -1045,7 +1045,7 @@ private slots:
         LiveState live;
         live.setMediaCheck(FakeMedia{{broken, fixed}}.fn());
         const QUuid service = QUuid::createUuid();
-        live.setService(service, {songItemOf(sample())}, broken);
+        live.setService(service, {songItemOf(sample()), songItemOf(sample())}, broken);
         QVERIFY(live.next());
         QCOMPARE(live.background().asset, broken);
         live.backgroundFailed(broken, {}, "it won't decode");
@@ -1058,15 +1058,14 @@ private slots:
         QVERIFY(live.next());
         QCOMPARE(live.background().asset, QUuid());
 
-        live.setService(service, live.serviceItems(), fixed);
-        QVERIFY(live.previous());
+        QVERIFY(live.goToItem(1));   // once per item: the file may be back
+        QCOMPARE(live.background().asset, broken);
+        live.backgroundFailed(broken, {}, "it won't decode");
+
+        live.setService(service, live.serviceItems(), fixed);   // or a new choice
+        QVERIFY(live.next());
         QCOMPARE(live.background().asset, fixed);
         QVERIFY(live.backgroundAlert().isEmpty());
-        live.setService(service, live.serviceItems(), {});
-        live.setService(service, live.serviceItems(), broken);   // chosen again: worth a try
-        QVERIFY(live.pickBackground(""));
-        QVERIFY(live.next());
-        QCOMPARE(live.background().asset, broken);
     }
 
     // A carried background whose file is gone leaves the layer as it was and says so; the

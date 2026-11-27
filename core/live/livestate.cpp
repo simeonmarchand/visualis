@@ -21,6 +21,7 @@ bool LiveState::show(const LiveItem &item, int index)
         return false;
     m_live = item;
     m_heldBack.clear();
+    m_failedDefault = QUuid();   // one try per item: the file may be back
     const bool valid = index >= 0 && index < m_live.slides.size();
     m_index = valid ? index : -1;
     enterSlide();
@@ -119,6 +120,7 @@ void LiveState::showItem(int n, int slide)
 {
     m_live = m_items[n];
     m_heldBack.clear();
+    m_failedDefault = QUuid();   // one try per item: the file may be back
     m_index = slide;
     enterSlide();
     emit changed();
