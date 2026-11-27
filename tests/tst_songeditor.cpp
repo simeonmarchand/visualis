@@ -193,8 +193,8 @@ private slots:
         song.arrangements[0].sequence = QList<QUuid>(songlimits::kSteps, song.groups[1].id);
         const QUuid arrangement = song.arrangements[0].id;
         const QString name = song.arrangements[0].name;
-        QString error;
-        QVERIFY2(m_songs->saveSong(song, &error), qPrintable(error));
+        const SongStore::Result saved = m_songs->saveSong(song);
+        QVERIFY2(saved.ok, qPrintable(saved.error));
         m_editor->setSongId(idText(song.id));
         m_editor->selectArrangement(idText(arrangement));
         QCOMPARE(m_editor->sequence().size(), songlimits::kSteps);
@@ -322,7 +322,7 @@ private slots:
         QVERIFY(templates->save(t).ok);
         Song song = *m_songs->loadSong(QUuid::fromString(m_editor->songId()));
         song.defaultTemplate = t.id;
-        QVERIFY(m_songs->saveSong(song, nullptr));
+        QVERIFY(m_songs->saveSong(song).ok);
         m_editor->setSongId(m_editor->songId());
         auto previewFont = [this] {
             return m_editor->previewSlides().value(1).toMap()["content"].value<Content>().regions.value("main").style.fontFamily;

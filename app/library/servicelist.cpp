@@ -215,11 +215,15 @@ bool ServiceList::linkSong(int index, const QString &songId)
         for (const SongCandidate &c : SongStore(*m_songs->library()).matchCandidates()) {
             if (c.id == song->id || c.pcoSongId != pco->id)
                 continue;
-            if (std::optional<Song> holder = m_songs->loadSong(c.id); holder && releasePcoSong(*holder, pco->id))
-                m_songs->saveSong(*holder, &error);
+            if (std::optional<Song> holder = m_songs->loadSong(c.id); holder && releasePcoSong(*holder, pco->id)) {
+                if (const SongStore::Result r = m_songs->saveSong(*holder); !r.ok)
+                    error = r.error;
+            }
         }
-        if (takePcoSong(*song, *pco))
-            m_songs->saveSong(*song, &error);
+        if (takePcoSong(*song, *pco)) {
+            if (const SongStore::Result r = m_songs->saveSong(*song); !r.ok)
+                error = r.error;
+        }
         if (!error.isEmpty())
             setReport(error);   // still linked for this service; it just won't match by id next week
     }

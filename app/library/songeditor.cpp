@@ -56,17 +56,18 @@ SongEditor::~SongEditor()
         discardPendingStyle();   // the whole save takes it too
         if (m_library)
             disconnect(m_library, nullptr, this, nullptr);
-        QString error = QStringLiteral("the library isn't open");
-        if (!m_library || !m_library->saveSong(m_song, &error))
-            qCWarning(lcSongEditor).noquote() << QStringLiteral("the last edits to \"%1\" were not saved: %2").arg(m_song.title, error);
+        const SongStore::Result r = m_library ? m_library->saveSong(m_song, Library::Transaction::Lock::Wait)
+                                              : SongStore::Result{false, QStringLiteral("the library isn't open")};
+        if (!r.ok)
+            qCWarning(lcSongEditor).noquote() << QStringLiteral("the last edits to \"%1\" were not saved: %2").arg(m_song.title, r.error);
+        return;
+    }
+    if (m_songUnsaved) {   // refused, not busy: waiting won't help
+        qCWarning(lcSongEditor).noquote() << QStringLiteral("the last edits to \"%1\" were not saved: %2").arg(m_song.title, m_error);
         return;
     }
     if (!m_stylePending)
         return;
-    if (m_songUnsaved) {
-        qCWarning(lcSongEditor).noquote() << QStringLiteral("the last edits to \"%1\" were not saved: %2").arg(m_song.title, m_error);
-        return;
-    }
     discardPendingStyle();
     if (m_library)
         disconnect(m_library, nullptr, this, nullptr);   // nothing to follow now
@@ -126,7 +127,7 @@ void SongEditor::save()
 {
     SongLibrary *lib = library();
     // From the GUI thread, often mid-service: never wait on another program's lock.
-    const SongStore::Result r = lib ? lib->saveSongWithoutWaiting(m_song)
+    const SongStore::Result r = lib ? lib->saveSong(m_song)
                                     : SongStore::Result{false, QStringLiteral("no library")};
     m_songUnsaved = !r.ok;
     if (r.busy) {

@@ -512,8 +512,8 @@ private slots:
         const QStringList ids = makeSongs({"Amazing Grace", "Holy Spirit"});
         Song song = *m_songs->loadSong(QUuid::fromString(ids[0]));
         song.defaultTemplate = t.id;
-        QString error;
-        QVERIFY2(m_songs->saveSong(song, &error), qPrintable(error));
+        const SongStore::Result saved = m_songs->saveSong(song);
+        QVERIFY2(saved.ok, qPrintable(saved.error));
         QVERIFY(m_services->createService("Sunday"));
         QVERIFY(m_services->addSong(ids[0]));
         QVERIFY(m_live->goToItem(0, 1));
@@ -552,8 +552,8 @@ private slots:
 
         Song song = *m_songs->loadSong(QUuid::fromString(ids[0]));
         song.groups[0].slides[0] = "Edited since";
-        QString error;
-        QVERIFY2(m_songs->saveSong(song, &error), qPrintable(error));
+        const SongStore::Result saved = m_songs->saveSong(song);
+        QVERIFY2(saved.ok, qPrintable(saved.error));
         Template t = builtInLyricsTemplate();
         t.id = QUuid();
         t.name = "Any";
@@ -598,8 +598,8 @@ private slots:
         const QStringList ids = makeSongs({"Amazing Grace"});
         Song song = *m_songs->loadSong(QUuid::fromString(ids[0]));
         song.defaultTemplate = t.id;
-        QString error;
-        QVERIFY2(m_songs->saveSong(song, &error), qPrintable(error));
+        const SongStore::Result saved = m_songs->saveSong(song);
+        QVERIFY2(saved.ok, qPrintable(saved.error));
 
         {
             QSqlQuery q(m_songs->library()->database());
@@ -634,8 +634,8 @@ private slots:
         const QStringList ids = makeSongs({"Amazing Grace"});
         Song song = *m_songs->loadSong(QUuid::fromString(ids[0]));
         song.defaultTemplate = t.id;
-        QString error;
-        QVERIFY2(m_songs->saveSong(song, &error), qPrintable(error));
+        const SongStore::Result saved = m_songs->saveSong(song);
+        QVERIFY2(saved.ok, qPrintable(saved.error));
         m_songs->select(ids[0]);
 
         QQuickWindow *window = loadOperatorWindow();
@@ -659,8 +659,8 @@ private slots:
         const QStringList ids = makeSongs({"Amazing Grace", "Holy Spirit"});
         Song song = *m_songs->loadSong(QUuid::fromString(ids[0]));
         song.defaultTemplate = QUuid::createUuid();   // a template that's gone
-        QString error;
-        QVERIFY2(m_songs->saveSong(song, &error), qPrintable(error));
+        const SongStore::Result saved = m_songs->saveSong(song);
+        QVERIFY2(saved.ok, qPrintable(saved.error));
         QVERIFY(m_services->createService("Sunday"));
         QVERIFY(m_services->addSong(ids[0]));
         QVERIFY(m_services->addSong(ids[1]));

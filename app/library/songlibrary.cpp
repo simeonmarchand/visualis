@@ -425,24 +425,12 @@ std::optional<Song> SongLibrary::loadSong(const QUuid &id) const
     return m_store ? m_store->load(id) : std::nullopt;
 }
 
-bool SongLibrary::saveSong(Song &song, QString *error)
-{
-    const SongStore::Result r = storeSong(song, Library::Transaction::Lock::Wait);
-    if (!r.ok && error)
-        *error = r.error;
-    return r.ok;
-}
-
-SongStore::Result SongLibrary::saveSongWithoutWaiting(Song &song)
-{
-    return storeSong(song, Library::Transaction::Lock::NowOrBusy);
-}
-
-SongStore::Result SongLibrary::storeSong(Song &song, Library::Transaction::Lock lock)
+SongStore::Result SongLibrary::saveSong(Song &song, Library::Transaction::Lock lock)
 {
     if (!m_store)
         return {false, QStringLiteral("The song library isn't open.")};
-    const SongStore::Result r = m_store->save(song, lock);
+    const SongStore::Result r = lock == Library::Transaction::Lock::NowOrBusy ? m_store->saveWithoutWaiting(song)
+                                                                             : m_store->save(song);
     if (!r.ok)
         return r;
     emit songsChanged();   // the title may have changed

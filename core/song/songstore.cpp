@@ -142,7 +142,7 @@ SongStore::SongStore(Library &library)
 {
 }
 
-SongStore::Result SongStore::save(Song &song, Library::Transaction::Lock lock)
+SongStore::Result SongStore::save(Song &song)
 {
     // Before anything else, so no caller (paste, the editor, an import) can make this thread
     // write an unbounded song (#83).
@@ -171,12 +171,6 @@ SongStore::Result SongStore::save(Song &song, Library::Transaction::Lock lock)
         s.created = now;
     s.updated = now;
 
-    std::optional<Library::Transaction> locked;
-    if (lock == Library::Transaction::Lock::NowOrBusy) {
-        locked.emplace(m_library, lock);
-        if (!locked->ok())
-            return {false, locked->error(), locked->busy()};
-    }
     QSqlDatabase db = m_library.database();
     const QString songId = key(s.id);
 
@@ -259,10 +253,20 @@ SongStore::Result SongStore::save(Song &song, Library::Transaction::Lock lock)
 
     if (const QString released = run(db, "RELEASE song_save", {}); !released.isEmpty())
         return fail(released);
-    if (locked) {
-        if (const QString committed = locked->commit(); !committed.isEmpty())
-            return {false, QStringLiteral("Couldn't save \"%1\": %2").arg(s.title, committed)};
-    }
+    song = s;
+    return {};
+}
+
+SongStore::Result SongStore::saveWithoutWaiting(Song &song)
+{
+    Library::Transaction t(m_library, Library::Transaction::Lock::NowOrBusy);
+    if (!t.ok())
+        return {false, t.error(), t.busy()};
+    Song s = song;   // so a commit that fails leaves the caller's song as it was too
+    if (Result r = save(s); !r.ok)
+        return r;
+    if (const QString committed = t.commit(); !committed.isEmpty())
+        return {false, QStringLiteral("Couldn't save \"%1\": %2").arg(s.title, committed)};
     song = s;
     return {};
 }

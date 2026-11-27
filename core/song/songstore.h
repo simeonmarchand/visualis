@@ -36,9 +36,10 @@ public:
     // Saves the song, its groups, and its arrangements. Gives new songs, groups, and
     // arrangements ids, and sets the timestamps. Rejects arrangements that use another
     // song's groups or a group that doesn't exist, and songs over the limits in songlimits.h.
-    // With NowOrBusy (the song editor, from the GUI thread) it's a transaction of its own that
-    // never waits for the write lock: `busy` if another program has it. Not inside a Batch.
-    Result save(Song &song, Library::Transaction::Lock lock = Library::Transaction::Lock::Wait);
+    Result save(Song &song);
+    // save() as a transaction of its own that never waits for the write lock: `busy` if another
+    // program has it (the song editor, from the GUI thread). Not inside a Batch.
+    Result saveWithoutWaiting(Song &song);
     // Saves only the slide overrides of a song already in the library, and its updated time
     // (#95: the song editor's style edits, from the GUI thread during a service). With
     // NowOrBusy it never waits for the write lock: if another program holds it, it fails at
