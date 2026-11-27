@@ -36,6 +36,7 @@ bool LiveState::restore(const LiveItem &item, int index, bool textCleared, const
     if (service != m_serviceId) {
         m_items.clear();
         m_serviceDefault = QUuid();
+        m_failedDefault = QUuid();
     }
     m_serviceId = service;
     m_live = item;
@@ -55,6 +56,8 @@ void LiveState::setService(const QUuid &id, const QList<LiveItem> &items, const 
 {
     m_serviceId = id;
     m_items = items;
+    if (defaultBackground != m_serviceDefault)
+        m_failedDefault = QUuid();   // a new choice is worth a try
     m_serviceDefault = defaultBackground;   // fills an empty layer on the next move, not now
     if (const int n = itemIndex(); n >= 0)
         replaceLive(m_items[n]);   // its song or template may have changed
@@ -182,7 +185,7 @@ void LiveState::enterSlide()
         return;
     if (s->background)
         takeBackground(s->background->asset, s->background->transition);
-    else if (m_background.asset.isNull() && !m_serviceDefault.isNull())
+    else if (m_background.asset.isNull() && !m_serviceDefault.isNull() && m_serviceDefault != m_failedDefault)
         takeBackground(m_serviceDefault, m_live.tmpl.transitions.background);
 }
 
@@ -265,6 +268,8 @@ void LiveState::backgroundFailed(const QUuid &asset, const BackgroundLayer &show
 {
     if (asset != m_background.asset)
         return;
+    if (asset == m_serviceDefault)
+        m_failedDefault = asset;   // or every move would load it again
     m_background = showing;
     m_backgroundAlert = why;
     emit changed();

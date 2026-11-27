@@ -203,6 +203,7 @@ private:
     Content m_content;   // the text layer shown, which a media slide leaves up
     BackgroundLayer m_background;
     QUuid m_serviceDefault;
+    QUuid m_failedDefault;   // a default the player couldn't show; not filled again until it changes
     QString m_backgroundAlert;
     MediaCheckFn m_check;
     QString m_heldBack;
