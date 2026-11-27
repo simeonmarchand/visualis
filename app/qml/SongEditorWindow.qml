@@ -45,22 +45,9 @@ Window {
         onTriggered: editor.applyLyrics(lyricsArea.text)
     }
 
-    // groupId "" for the song's own.
     BackgroundPicker {
         id: backgroundPicker
         objectName: "songBackgroundPicker"
-        property string groupId
-        onChosen: id => {
-            if (groupId === "")
-                editor.backgroundId = id
-            else
-                editor.setGroupBackground(groupId, id)
-        }
-    }
-    function pickBackground(groupId, current) {
-        backgroundPicker.groupId = groupId
-        backgroundPicker.currentId = current
-        backgroundPicker.open()
     }
 
     ColorDialog {
@@ -121,14 +108,7 @@ Window {
             Button {
                 objectName: "songBackground"
                 text: editor.backgroundId !== "" ? "Background ✓" : "Background…"
-                onClicked: window.pickBackground("", editor.backgroundId)
-            }
-            ToolButton {
-                text: "✕"
-                visible: editor.backgroundId !== ""
-                onClicked: editor.backgroundId = ""
-                ToolTip.visible: hovered
-                ToolTip.text: "No background of its own"
+                onClicked: backgroundPicker.pick(editor.backgroundId, id => editor.backgroundId = id)
             }
             Button {
                 text: "Delete song…"
@@ -226,13 +206,12 @@ Window {
                         ToolButton {
                             text: "▣"
                             highlighted: groupRow.modelData.backgroundId !== ""
-                            onClicked: window.pickBackground(groupRow.modelData.id, groupRow.modelData.backgroundId)
-                            ToolTip.visible: hovered
-                            ToolTip.text: groupRow.modelData.backgroundId !== "" ? "Background set (right-click to remove)" : "Background…"
-                            TapHandler {
-                                acceptedButtons: Qt.RightButton
-                                onTapped: editor.setGroupBackground(groupRow.modelData.id, "")
+                            onClicked: {
+                                const groupId = groupRow.modelData.id
+                                backgroundPicker.pick(groupRow.modelData.backgroundId, id => editor.setGroupBackground(groupId, id))
                             }
+                            ToolTip.visible: hovered
+                            ToolTip.text: groupRow.modelData.backgroundId !== "" ? "Background (set)" : "Background…"
                         }
                         ToolButton { text: "✕"; onClicked: editor.removeGroup(groupRow.modelData.id) }
                     }

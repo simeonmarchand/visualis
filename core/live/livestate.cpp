@@ -44,6 +44,7 @@ bool LiveState::restore(const LiveItem &item, int index, bool textCleared, const
     m_textCleared = textCleared;
     // A media slide carries no text, and the journal doesn't keep what was held over from
     // before the crash, so the text layer comes back empty then.
+    m_content = {};
     takeContent();
     applyBackground(background);
     emit changed();
@@ -163,24 +164,20 @@ bool LiveState::moveTo(int n)
     return true;
 }
 
-bool LiveState::takeContent()
+void LiveState::takeContent()
 {
-    const LiveSlide *s = currentLiveSlide();
-    if (!s) {
+    if (const LiveSlide *s = currentLiveSlide(); !s)
         m_content = {};
-        return true;
-    }
-    if (!s->content)
-        return false;
-    m_content = *s->content;
-    return true;
+    else if (s->content)
+        m_content = *s->content;
 }
 
 void LiveState::enterSlide()
 {
-    if (takeContent())
-        m_textCleared = false;
     const LiveSlide *s = currentLiveSlide();
+    takeContent();
+    if (!s || s->content)
+        m_textCleared = false;   // the text shown changed (a media slide carries none)
     if (!s)
         return;
     if (s->background)
@@ -255,6 +252,7 @@ bool LiveState::takeBackground(const QUuid &asset, const Transition &transition)
 
 bool LiveState::setBackground(const QUuid &asset, const Transition &transition)
 {
+    // Emits only on a change someone can see: the layer, or the alert.
     const BackgroundLayer before = m_background;
     const QString alertBefore = m_backgroundAlert;
     const bool shown = takeBackground(asset, transition);

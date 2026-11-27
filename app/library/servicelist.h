@@ -41,9 +41,10 @@ class ServiceList : public QObject
     // Whether the open service came from a Planning Center plan, so it can be re-imported.
     Q_PROPERTY(bool openImported READ openImported NOTIFY serviceChanged)
     // {id, kind, title, hasSlides, songPlaceholder, suggestions, pcoRemoved, templateId,
-    // backgroundId} per item of the open service, in order. `templateId`: the template the
-    // item picks, or "". `backgroundId`: its background override (#99), or "". `songPlaceholder`: an imported song not linked to the library
-    // yet; `suggestions`: [{id, title}] of library songs it may be (#55); `pcoRemoved`: taken
+    // backgroundId, canHaveBackground} per item of the open service, in order. `templateId`:
+    // the template the item picks, or "". `backgroundId`: its background override (#99), or
+    // ""; `canHaveBackground`: whether one shows (songs and text; a media item is its asset).
+    // `songPlaceholder`: an imported song not linked to the library yet; `suggestions`: [{id, title}] of library songs it may be (#55); `pcoRemoved`: taken
     // out of the plan in Planning Center (#56).
     Q_PROPERTY(QVariantList items READ items NOTIFY serviceChanged)
     Q_PROPERTY(int selectedIndex READ selectedIndex NOTIFY selectionChanged)

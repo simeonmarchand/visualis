@@ -723,6 +723,9 @@ private slots:
         QCOMPARE(stored.items[1].ref, asset);
         QCOMPARE(m_services->items()[1].toMap()["kind"].toString(), QStringLiteral("media"));
         QVERIFY(m_services->items()[1].toMap()["hasSlides"].toBool());
+        // A media item is its asset: an override of it wouldn't show.
+        QVERIFY(!m_services->items()[1].toMap()["canHaveBackground"].toBool());
+        QVERIFY(m_services->items()[0].toMap()["canHaveBackground"].toBool());
     }
 
     // #99: an item's background and the service's default are set from the service list,

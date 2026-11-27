@@ -536,7 +536,8 @@ QVariantList ServiceList::items() const
                                 {"songPlaceholder", songPlaceholder}, {"suggestions", m_suggestions.value(i)},
                                 {"pcoRemoved", it.pcoRemoved},
                                 {"templateId", braceless(overrideTemplateId(it.overrides))},
-                                {"backgroundId", braceless(overrideBackgroundId(it.overrides))}});
+                                {"backgroundId", braceless(overrideBackgroundId(it.overrides))},
+                                {"canHaveBackground", it.kind == ServiceItem::Kind::Song || it.kind == ServiceItem::Kind::Text}});
     }
     return list;
 }

@@ -123,10 +123,10 @@ QList<MediaAsset> MediaStore::list() const
     return out;
 }
 
-QStringList MediaStore::usedBy(const QUuid &id) const
+MediaStore::UsedBy MediaStore::usedBy(const QUuid &id) const
 {
     // Ids are stored without braces, here and in the override JSON (overrides.h).
-    QStringList out;
+    UsedBy out;
     QSqlQuery q(m_library.database());
     q.prepare("SELECT s.title FROM service s WHERE s.default_background = :id OR EXISTS ("
               " SELECT 1 FROM service_item i WHERE i.service_id = s.id AND ("
@@ -136,14 +136,14 @@ QStringList MediaStore::usedBy(const QUuid &id) const
     q.bindValue(":id", key(id));
     q.exec();
     while (q.next())
-        out << q.value(0).toString();
+        out.services << q.value(0).toString();
     q.prepare("SELECT s.title FROM song s WHERE s.default_background = :id OR EXISTS ("
               " SELECT 1 FROM song_group g WHERE g.song_id = s.id AND g.default_background = :id)"
               " ORDER BY s.title COLLATE NOCASE");
     q.bindValue(":id", key(id));
     q.exec();
     while (q.next())
-        out << QStringLiteral("the song \"%1\"").arg(q.value(0).toString());
+        out.songs << q.value(0).toString();
     return out;
 }
 

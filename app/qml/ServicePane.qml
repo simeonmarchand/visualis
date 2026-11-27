@@ -263,12 +263,7 @@ ColumnLayout {
             objectName: "serviceBackground"
             text: "Default background…"
             enabled: ServiceList.openId !== ""
-            onTriggered: pane.pickBackground(ServiceList.serviceBackgroundId, id => ServiceList.setServiceBackground(id))
-        }
-        MenuItem {
-            text: "No default background"
-            enabled: ServiceList.serviceBackgroundId !== ""
-            onTriggered: ServiceList.setServiceBackground("")
+            onTriggered: backgroundPicker.pick(ServiceList.serviceBackgroundId, id => ServiceList.setServiceBackground(id))
         }
         MenuSeparator {}
         MenuItem { text: "Delete…"; enabled: ServiceList.openId !== ""; onTriggered: deleteDialog.open() }
@@ -278,16 +273,10 @@ ColumnLayout {
     BackgroundPicker {
         id: backgroundPicker
         objectName: "serviceBackgroundPicker"
-        property var then: null
-        onChosen: id => {
-            if (then)
-                then(id)
-        }
     }
-    function pickBackground(current, then) {
-        backgroundPicker.currentId = current
-        backgroundPicker.then = then
-        backgroundPicker.open()
+    // By id, as the items may change while the picker is open.
+    function indexOfItem(id) {
+        return ServiceList.items.findIndex(it => it.id === id)
     }
 
     ReimportDialog { id: reimportDialog }
@@ -339,15 +328,12 @@ ColumnLayout {
         MenuItem {
             objectName: "itemBackground"
             text: "Background…"
+            enabled: pane.selectedItem?.canHaveBackground ?? false
             onTriggered: {
-                const index = ServiceList.selectedIndex
-                pane.pickBackground(pane.selectedItem?.backgroundId ?? "", id => ServiceList.setItemBackground(index, id))
+                const itemId = pane.selectedItem.id
+                backgroundPicker.pick(pane.selectedItem.backgroundId,
+                                      id => ServiceList.setItemBackground(pane.indexOfItem(itemId), id))
             }
-        }
-        MenuItem {
-            text: "No background of its own"
-            enabled: (pane.selectedItem?.backgroundId ?? "") !== ""
-            onTriggered: ServiceList.setItemBackground(ServiceList.selectedIndex, "")
         }
         MenuItem { text: "Remove from service"; onTriggered: ServiceList.removeItem(ServiceList.selectedIndex) }
     }

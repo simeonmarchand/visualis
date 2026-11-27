@@ -5,8 +5,8 @@ import QtQuick.Layouts
 import Visualis.Ui
 
 // Picks a background from the media library: the live one (#98), or a service's, item's,
-// song's, or group's default (#99). Whoever opens it acts on `chosen`. The search is the
-// media pane's.
+// song's, or group's default (#99): open it with pick(), or bind `currentId` and act on
+// `chosen`. "None" chooses "". The search is the media pane's.
 Popup {
     id: picker
     width: 520
@@ -18,8 +18,19 @@ Popup {
     property string currentId: ""
     signal chosen(string id)
 
+    property var then: null
+
+    // Opens with `current` highlighted; `then(id)` gets the choice.
+    function pick(current, then) {
+        picker.currentId = current
+        picker.then = then
+        picker.open()
+    }
+
     function choose(id) {
         picker.chosen(id)
+        if (picker.then)
+            picker.then(id)
         picker.close()
     }
 
@@ -27,11 +38,22 @@ Popup {
         anchors.fill: parent
         spacing: 8
 
-        TextField {
+        RowLayout {
             Layout.fillWidth: true
-            placeholderText: "Search media"
-            text: MediaLibrary.search
-            onTextEdited: MediaLibrary.search = text
+            spacing: 8
+            TextField {
+                Layout.fillWidth: true
+                placeholderText: "Search media"
+                text: MediaLibrary.search
+                onTextEdited: MediaLibrary.search = text
+            }
+            Button {
+                objectName: "noBackground"
+                text: "None"
+                focusPolicy: Qt.NoFocus
+                enabled: picker.currentId !== ""
+                onClicked: picker.choose("")
+            }
         }
 
         GridView {

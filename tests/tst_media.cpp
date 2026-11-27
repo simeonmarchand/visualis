@@ -498,7 +498,7 @@ private slots:
         s.items << item;
         QVERIFY(services.save(s).ok);
 
-        QCOMPARE(media.usedBy(used.id), QStringList{"Sunday"});
+        QCOMPARE(media.usedBy(used.id).services, QStringList{"Sunday"});
         QVERIFY(media.usedBy(unused.id).isEmpty());
     }
 
@@ -541,8 +541,7 @@ private slots:
         plain.title = "Holy, Holy, Holy";
         QVERIFY(songs.save(own).ok && songs.save(group).ok && songs.save(plain).ok);
 
-        QCOMPARE(media.usedBy(a.id), (QStringList{"Easter", "Advent", "the song \"Amazing Grace\"",
-                                                  "the song \"Be Thou My Vision\""}));
+        QCOMPARE(media.usedBy(a.id), (MediaStore::UsedBy{{"Easter", "Advent"}, {"Amazing Grace", "Be Thou My Vision"}}));
     }
 
     void removeDeletesTheRowFileAndThumbnail()

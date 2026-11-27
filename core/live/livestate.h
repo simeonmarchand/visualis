@@ -187,8 +187,8 @@ private:
     // background, or the service default into an empty layer. Doesn't emit changed().
     void enterSlide();
     // The current slide's content becomes the text layer; with no slide it empties. A slide
-    // carrying none (a media item) leaves it. True when the layer was taken.
-    bool takeContent();
+    // carrying none (a media item) leaves it.
+    void takeContent();
     const LiveSlide *currentLiveSlide() const;
     // setBackground() without changed().
     bool takeBackground(const QUuid &asset, const Transition &transition);
