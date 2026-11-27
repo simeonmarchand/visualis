@@ -1,6 +1,7 @@
 #include "library/library.h"
 #include "media/mediafiles.h"
 #include "media/medialimits.h"
+#include "media/mediaresolve.h"
 #include "media/mediastore.h"
 #include "service/servicestore.h"
 
@@ -154,6 +155,41 @@ private slots:
         QCOMPARE(filesUnder(media.path()), QStringList{});
     }
 
+    // #98: the resolver rehashes with hashFile; both must agree on a file's hash.
+    void hashFileAgreesWithTheCopy()
+    {
+        QTemporaryDir in, media;
+        const QByteArray bytes = QByteArray(3 * 1024 * 1024 + 17, 'v');   // more than one chunk
+        const QString source = writeFile(in.filePath("Motion.mov"), bytes);
+        const PartialCopy c = copyToPartial(source, media.path(), medialimits::kVideoBytes);
+        QVERIFY(c.ok());
+        const FileHash h = hashFile(source);
+        QVERIFY(h.ok());
+        QCOMPARE(h.hash, c.hash);
+        QCOMPARE(h.hash, sha256(bytes));
+    }
+
+    void aStoppedHashIsCancelledNotAnError()
+    {
+        QTemporaryDir in;
+        const QString source = writeFile(in.filePath("Long.mov"), QByteArray(5 * 1024 * 1024, 'x'));
+        const std::atomic_bool stop{true};
+        const FileHash h = hashFile(source, &stop);
+        QVERIFY(h.cancelled);
+        QVERIFY(h.error.isEmpty());
+        QVERIFY(h.hash.isEmpty());
+        QVERIFY(!h.ok());
+    }
+
+    void hashingAMissingFileIsAnError()
+    {
+        QTemporaryDir in;
+        const FileHash h = hashFile(in.filePath("gone.png"));
+        QVERIFY(!h.ok());
+        QVERIFY(!h.cancelled);
+        QVERIFY(!h.error.isEmpty());
+    }
+
     void aFileOverTheCapIsRefusedBeforeCopying()
     {
         QTemporaryDir in, media;
@@ -296,7 +332,7 @@ private slots:
         const std::optional<MediaAsset> a = store.load(id);
         QVERIFY(a);
         QVERIFY(a->file.isEmpty());
-        QVERIFY(store.filePath(*a).isEmpty());
+        QCOMPARE(checkMedia(snapshotOf(library->mediaPath(), store.list()), id).status, MediaStatus::InvalidPath);
         QVERIFY(store.remove(id).ok);
         QVERIFY(QFile::exists(victim));
         QVERIFY(!store.load(id));
@@ -309,7 +345,7 @@ private slots:
         auto library = Library::open(lib.path()).library;
         MediaStore store(*library);
         const MediaAsset a = storeFile(store, *library, in.path(), "Cross.png", "cross pixels");
-        QVERIFY(QFile::exists(store.filePath(a)));
+        QVERIFY(checkMedia(snapshotOf(library->mediaPath(), store.list()), a.id).ok());
 
         // Replace the asset's folder with a link to a folder holding a file of the same name.
         const QString folder = QDir(library->mediaPath()).filePath(a.contentHash.left(2));
@@ -317,7 +353,7 @@ private slots:
         const QString victim = writeFile(QDir(outside.path()).filePath(QFileInfo(a.file).fileName()), "keep me");
         QVERIFY(QFile::link(outside.path(), folder));
 
-        QVERIFY(store.filePath(a).isEmpty());
+        QCOMPARE(checkMedia(snapshotOf(library->mediaPath(), store.list()), a.id).status, MediaStatus::InvalidPath);
         QVERIFY(store.remove(a.id).ok);
         QVERIFY(QFile::exists(victim));
     }
@@ -330,8 +366,9 @@ private slots:
         auto library = Library::open(lib.path()).library;
         MediaStore store(*library);
         const MediaAsset a = storeFile(store, *library, in.path(), "Cross.png", "cross pixels");
-        QVERIFY(!store.filePath(a).isEmpty());
-        QCOMPARE(readAll(store.filePath(a)), QByteArray("cross pixels"));
+        const MediaCheck c = checkMedia(snapshotOf(library->mediaPath(), store.list()), a.id);
+        QVERIFY(c.ok());
+        QCOMPARE(readAll(c.path), QByteArray("cross pixels"));
         QVERIFY(store.remove(a.id).ok);
         QCOMPARE(filesUnder(drive.path()), QStringList{});
     }

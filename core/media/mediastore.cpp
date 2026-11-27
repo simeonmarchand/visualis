@@ -173,19 +173,12 @@ MediaStore::Result MediaStore::remove(const QUuid &id)
     // The row is the truth: a file left behind by a failed delete is harmless, and a file
     // another row still uses (hashes are unique, so only a hand-edited database) is kept.
     if (!asset->file.isEmpty() && !isReferenced(asset->file)) {
-        if (const QString path = filePath(*asset); !path.isEmpty())
+        if (const QString path = containedPath(m_library.mediaPath(), asset->file); !path.isEmpty())
             QFile::remove(path);
         if (const QString path = thumbnailPath(*asset); !path.isEmpty())
             QFile::remove(path);
     }
     return {};
-}
-
-QString MediaStore::filePath(const MediaAsset &asset) const
-{
-    if (!isValidMediaFile(asset.file, asset.contentHash))
-        return {};
-    return containedPath(m_library.mediaPath(), asset.file);
 }
 
 QString MediaStore::thumbnailPath(const MediaAsset &asset) const

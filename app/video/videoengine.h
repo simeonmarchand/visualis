@@ -9,7 +9,6 @@
 #include <QObject>
 #include <QUrl>
 #include <QVideoSink>
-#include <QtQml/qqmlregistration.h>
 
 #include <memory>
 #include <vector>
@@ -30,11 +29,11 @@ Q_DECLARE_LOGGING_CATEGORY(lcVideoFrames)
 // A watchdog restarts the player if frames stop arriving and tells the operator. While
 // every display is asleep AVFoundation delivers no frames at all, so stalls then aren't
 // failures, and the player restarts the moment the displays wake (#61).
+//
+// The background player owns one per slot (backgroundsource.h); nothing else sets its source.
 class VideoEngine : public QObject
 {
     Q_OBJECT
-    QML_ELEMENT
-    QML_SINGLETON
     Q_PROPERTY(QUrl source READ source WRITE setSource NOTIFY sourceChanged)
     // For the operator: "No background", "Loading", "Playing", or what went wrong.
     Q_PROPERTY(QString status READ status NOTIFY statusChanged)
@@ -61,6 +60,8 @@ public:
 signals:
     void sourceChanged();
     void statusChanged();
+    // The first frame after a start, or a restart, arrived.
+    void playing();
 
 private:
     QRhi *hubRhi();

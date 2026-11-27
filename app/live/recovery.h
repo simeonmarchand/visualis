@@ -4,14 +4,14 @@
 #include <QPointer>
 #include <QtQml/qqmlregistration.h>
 
-class VideoEngine;
 namespace visualis {
 class LiveState;
 }
 
 // Crash recovery (plan 5.9, #25). Writes what's live to a journal file on every change and
 // deletes it on a clean quit, so a journal found at startup means the last run didn't end
-// cleanly: the live song, slide, clears, and background come back, and the operator is told.
+// cleanly: the live song, slide, clears, and background layer come back, and the operator is
+// told. Everything comes from LiveState and goes back through it (plan 5.2).
 class Recovery : public QObject
 {
     Q_OBJECT
@@ -30,7 +30,7 @@ public:
 
     // Restores from `journalPath` if the last run crashed, then keeps the journal from now
     // on. Returns true when something was restored.
-    bool start(const QString &journalPath, visualis::LiveState *live, VideoEngine *video);
+    bool start(const QString &journalPath, visualis::LiveState *live);
     // A clean quit: nothing to recover next time.
     void finish();
 
@@ -45,7 +45,6 @@ private:
 
     QString m_path;
     QPointer<visualis::LiveState> m_live;
-    QPointer<VideoEngine> m_video;
     QString m_message;
     bool m_warnedWriteFailure = false;
 };

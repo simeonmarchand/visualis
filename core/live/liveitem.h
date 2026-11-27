@@ -53,6 +53,18 @@ public:
     QVariantMap regionMap() const;
 };
 
+// The live background (GLOSSARY.md "Background layer"): a media asset, whether it's
+// cleared, and the transition it arrived with, which clearing and showing it use too (#98).
+struct BackgroundLayer {
+    QUuid asset;   // null: no background
+    bool cleared = false;
+    Transition transition = Transitions{}.background;
+
+    bool operator==(const BackgroundLayer &) const = default;
+
+    QString assetId() const { return asset.isNull() ? QString() : asset.toString(QUuid::WithoutBraces); }
+};
+
 // A slide as it will show (GLOSSARY.md "LiveSlide"): its place in the song plus its layers.
 struct LiveSlide {
     SongSlide slide;

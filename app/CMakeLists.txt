@@ -9,6 +9,8 @@ qt_add_qml_module(visualis_ui
         qml/Main.qml
         qml/OutputWindow.qml
         qml/AudienceLyrics.qml
+        qml/BackgroundPicker.qml
+        qml/BackgroundView.qml
         qml/StageDisplay.qml
         qml/OutputSettings.qml
         qml/PlanningCenterDialog.qml
@@ -33,6 +35,8 @@ qt_add_qml_module(visualis_ui
         output/platformdisplay.h
         output/latencyprobe.h output/latencyprobe.cpp
         video/videoengine.h video/videoengine.cpp
+        background/backgroundplayer.h background/backgroundplayer.cpp
+        background/backgroundsource.h background/backgroundsource.cpp
         live/livestateqml.h
         live/commandsqml.h live/commandsqml.cpp
         live/recovery.h live/recovery.cpp
@@ -55,7 +59,8 @@ qt_add_qml_module(visualis_ui
 # The generated QML type registrations include headers by file name alone.
 target_include_directories(visualis_ui PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/output
     ${CMAKE_CURRENT_SOURCE_DIR}/video ${CMAKE_CURRENT_SOURCE_DIR}/live
-    ${CMAKE_CURRENT_SOURCE_DIR}/library ${CMAKE_CURRENT_SOURCE_DIR}/pco)
+    ${CMAKE_CURRENT_SOURCE_DIR}/library ${CMAKE_CURRENT_SOURCE_DIR}/pco
+    ${CMAKE_CURRENT_SOURCE_DIR}/background)
 # GuiPrivate for QRhi: the video hub's own GPU context (ADR 0001, kept in videoengine.cpp).
 target_link_libraries(visualis_ui PRIVATE Qt6::Quick Qt6::Multimedia Qt6::Network Qt6::GuiPrivate visualis_core)
 if(APPLE)

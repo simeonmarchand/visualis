@@ -28,7 +28,7 @@ bool LiveState::show(const LiveItem &item, int index)
     return valid;
 }
 
-bool LiveState::restore(const LiveItem &item, int index, bool textCleared, bool backgroundCleared,
+bool LiveState::restore(const LiveItem &item, int index, bool textCleared, const BackgroundLayer &background,
                         const QUuid &service)
 {
     if (!acceptable(item))
@@ -40,7 +40,7 @@ bool LiveState::restore(const LiveItem &item, int index, bool textCleared, bool 
     m_heldBack.clear();
     m_index = index >= 0 && index < m_live.slides.size() ? index : -1;
     m_textCleared = textCleared;
-    m_backgroundCleared = backgroundCleared;
+    applyBackground(background);
     emit changed();
     return true;
 }
@@ -179,10 +179,70 @@ bool LiveState::goToGroupStartingWith(const QString &letter)
 
 void LiveState::showBackground()
 {
-    if (!m_backgroundCleared)
+    if (!m_background.cleared)
         return;
-    m_backgroundCleared = false;
+    m_background.cleared = false;
     emit changed();
+}
+
+MediaCheck LiveState::checkMedia(const QUuid &asset) const
+{
+    if (m_check)
+        return m_check(asset);
+    MediaCheck ok;
+    ok.status = MediaStatus::Ok;
+    return ok;
+}
+
+bool LiveState::applyBackground(const BackgroundLayer &layer)
+{
+    // A spun-down external drive can make this stat take seconds, holding up the operator
+    // window and the outputs. Media lives in the library folder, normally on the internal disk.
+    if (!layer.asset.isNull()) {
+        if (const MediaCheck c = checkMedia(layer.asset); !c.ok()) {
+            m_backgroundAlert = c.message;
+            return false;
+        }
+    }
+    m_background = layer;
+    m_backgroundAlert.clear();
+    return true;
+}
+
+bool LiveState::setBackground(const QUuid &asset, const Transition &transition)
+{
+    if (asset == m_background.asset) {
+        // Already live: no restart and no new transition, but a cleared one comes back.
+        if (!m_background.cleared && m_backgroundAlert.isEmpty())
+            return true;
+        m_background.cleared = false;
+        m_backgroundAlert.clear();
+        emit changed();
+        return true;
+    }
+    const bool shown = applyBackground({asset, false, transition});
+    emit changed();   // the layer, or the alert
+    return shown;
+}
+
+void LiveState::backgroundFailed(const QUuid &asset, const BackgroundLayer &showing, const QString &why)
+{
+    if (asset != m_background.asset)
+        return;
+    m_background = showing;
+    m_backgroundAlert = why;
+    emit changed();
+}
+
+void LiveState::restoreBackground(const BackgroundLayer &layer)
+{
+    applyBackground(layer);
+    emit changed();
+}
+
+bool LiveState::pickBackground(const QString &assetId)
+{
+    return setBackground(QUuid::fromString(assetId), m_live.tmpl.transitions.background);
 }
 
 void LiveState::clearText()
@@ -195,18 +255,18 @@ void LiveState::clearText()
 
 void LiveState::clearBackground()
 {
-    if (m_backgroundCleared)
+    if (m_background.cleared)
         return;
-    m_backgroundCleared = true;
+    m_background.cleared = true;
     emit changed();
 }
 
 void LiveState::clearAll()
 {
-    if (m_textCleared && m_backgroundCleared)
+    if (m_textCleared && m_background.cleared)
         return;
     m_textCleared = true;
-    m_backgroundCleared = true;
+    m_background.cleared = true;
     emit changed();
 }
 

@@ -3,6 +3,7 @@
 #include "library/library.h"
 #include "media/mediafiles.h"
 #include "media/mediaprobe.h"
+#include "media/mediaresolve.h"
 #include "media/mediastore.h"
 
 #include <QDirIterator>
@@ -194,7 +195,8 @@ private slots:
         MediaStore store(*m_songs->library());
         QCOMPARE(store.list().size(), 1);
         const MediaAsset stored = store.list()[0];
-        const QString file = store.filePath(stored);
+        const QString file = checkMedia(m_media->snapshot(), stored.id).path;
+        QVERIFY(!file.isEmpty());
         const qint64 size = QFileInfo(file).size();
         if (truncate)
             QVERIFY(QFile::resize(file, 0));
@@ -305,7 +307,7 @@ private slots:
         for (const MediaAsset &a : store.list()) {
             if (a.originalName == "Sunrise again.mp4") {
                 found = true;
-                QVERIFY2(QFileInfo(store.filePath(a)).isFile(), qPrintable(a.file));
+                QVERIFY2(checkMedia(m_media->snapshot(), a.id).ok(), qPrintable(a.file));
             }
         }
         QVERIFY2(found, qPrintable(m_media->report()));
@@ -408,6 +410,43 @@ private slots:
         QVERIFY(!QFile::exists(thumb));
         m_media->setSearch("");
         QCOMPARE(m_media->assets().size(), 1);
+    }
+
+    // #98: the resolver's snapshot follows imports, deletes, and the search doesn't narrow it.
+    void theSnapshotFollowsTheLibrary()
+    {
+        QTemporaryDir in;
+        QImage image(8, 8, QImage::Format_RGB32);
+        image.fill(Qt::blue);
+        QVERIFY(image.save(in.filePath("Cross.png")));
+        QCOMPARE(m_media->snapshot().folder, m_songs->library()->mediaPath());
+        QVERIFY(m_media->snapshot().assets.isEmpty());
+        QVERIFY(importAndWait({QUrl::fromLocalFile(in.filePath("Cross.png"))}));
+        const QUuid id = QUuid::fromString(asset("Cross.png").value("id").toString());
+        QVERIFY(checkMedia(m_media->snapshot(), id).ok());
+        m_media->setSearch("nothing matches this");
+        QVERIFY(checkMedia(m_media->snapshot(), id).ok());
+        QVERIFY(m_media->removeAsset(id.toString(QUuid::WithoutBraces)));
+        QCOMPARE(checkMedia(m_media->snapshot(), id).status, MediaStatus::UnknownId);
+    }
+
+    // #126 review: the live background's file isn't deleted from under the outputs.
+    void anAssetInUseIsNotDeleted()
+    {
+        QTemporaryDir in;
+        QImage image(8, 8, QImage::Format_RGB32);
+        image.fill(Qt::blue);
+        QVERIFY(image.save(in.filePath("Cross.png")));
+        QVERIFY(importAndWait({QUrl::fromLocalFile(in.filePath("Cross.png"))}));
+        const QString id = asset("Cross.png").value("id").toString();
+        m_media->setInUse([id](const QUuid &asset) {
+            return asset == QUuid::fromString(id) ? QStringLiteral("it's the live background") : QString();
+        });
+        QVERIFY(!m_media->removeAsset(id));
+        QVERIFY2(m_media->report().contains("live background"), qPrintable(m_media->report()));
+        QVERIFY(checkMedia(m_media->snapshot(), QUuid::fromString(id)).ok());
+        m_media->setInUse({});
+        QVERIFY(m_media->removeAsset(id));
     }
 
     // Opening another library mid-import drops what's left for the old one.

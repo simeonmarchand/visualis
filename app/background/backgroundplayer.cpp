@@ -1,0 +1,355 @@
+#include "background/backgroundplayer.h"
+
+#include "background/backgroundsource.h"
+#include "library/medialibrary.h"
+
+#include <QQmlEngine>
+#include <QQuickImageProvider>
+#include <QSettings>
+
+using namespace visualis;
+
+struct BackgroundPlayer::Slot {
+    std::unique_ptr<BackgroundSource> video;
+    std::unique_ptr<BackgroundSource> still;
+    QUuid asset;   // null when empty
+    MediaAsset::Kind kind = MediaAsset::Kind::Image;
+    double opacity = 0;
+    Transition transition;          // the one it arrived with, for LiveState if the next fails
+    quint64 imageGeneration = 0;   // so each new still is a new URL, which QML loads afresh
+
+    BackgroundSource *source() const
+    {
+        return asset.isNull() ? nullptr : kind == MediaAsset::Kind::Video ? video.get() : still.get();
+    }
+};
+
+namespace {
+
+const QString kFillModeKey = QStringLiteral("background/fillMode");
+
+// Serves each slot's still to the outputs' Image items: "image://background/<slot>/<n>". The
+// image is decoded already (StillSource), so a request only hands it over.
+class BackgroundImages : public QQuickImageProvider
+{
+public:
+    explicit BackgroundImages(BackgroundPlayer *player)
+        : QQuickImageProvider(QQuickImageProvider::Image)
+        , m_player(player)
+    {
+    }
+
+    QImage requestImage(const QString &id, QSize *size, const QSize &) override
+    {
+        const QImage image = m_player ? m_player->image(id.section('/', 0, 0).toInt()) : QImage();
+        if (size)
+            *size = image.size();
+        return image;
+    }
+
+private:
+    QPointer<BackgroundPlayer> m_player;
+};
+
+} // namespace
+
+BackgroundPlayer::BackgroundPlayer(LiveState *live, const SourceFactory &makeSource, QObject *parent)
+    : QObject(parent)
+    , m_live(live)
+    , m_fillMode(QStringLiteral("fill"))
+{
+    for (int n = 0; n < 2; ++n) {
+        auto slot = std::make_unique<Slot>();
+        slot->video = makeSource(MediaAsset::Kind::Video);
+        slot->still = makeSource(MediaAsset::Kind::Image);
+        for (BackgroundSource *source : {slot->video.get(), slot->still.get()}) {
+            connect(source, &BackgroundSource::ready, this, [this, n, source] { sourceReady(n, source); });
+            connect(source, &BackgroundSource::failed, this,
+                    [this, n, source](const QString &why) { sourceFailed(n, source, why); });
+            connect(source, &BackgroundSource::statusChanged, this, &BackgroundPlayer::statusChanged);
+        }
+        m_slots[n] = std::move(slot);
+    }
+    m_fade.setStartValue(0.0);
+    m_fade.setEndValue(1.0);
+    connect(&m_fade, &QVariantAnimation::valueChanged, this, [this](const QVariant &value) {
+        const double t = value.toDouble();
+        Slot &in = *m_slots[m_front];
+        in.opacity = t;
+        if (in.asset.isNull())   // fading to nothing: the old one fades out over black instead
+            back().opacity = 1 - t;
+        emit slotsChanged();
+    });
+    connect(&m_fade, &QVariantAnimation::finished, this, &BackgroundPlayer::endFade);
+    connect(&m_clearFade, &QVariantAnimation::valueChanged, this, [this](const QVariant &value) {
+        m_opacity = value.toDouble();
+        emit opacityChanged();
+    });
+
+    // A video that never plays (or a still that never decodes) would leave the layer saying
+    // one thing and the outputs another, so a load that takes this long is given up.
+    m_loadTimer.setSingleShot(true);
+    m_loadTimer.setInterval(10'000);
+    connect(&m_loadTimer, &QTimer::timeout, this, [this] {
+        if (m_pending)
+            giveUp(QStringLiteral("it didn't start within %1 s").arg(m_loadTimer.interval() / 1000.0));
+    });
+
+    if (!m_live)
+        return;
+    connect(m_live, &LiveState::changed, this, &BackgroundPlayer::layerChanged);
+    // Whatever is live already shows, without a fade in: as an output window that opens.
+    m_cleared = m_live->background().cleared;
+    m_opacity = m_cleared ? 0 : 1;
+    layerChanged();
+}
+
+BackgroundPlayer::~BackgroundPlayer() = default;
+
+BackgroundPlayer *BackgroundPlayer::create(QQmlEngine *qml, QJSEngine *)
+{
+    auto *live = qml->singletonInstance<LiveState *>("Visualis.Ui", "LiveState");
+    auto *player = new BackgroundPlayer(live, [](MediaAsset::Kind kind) -> std::unique_ptr<BackgroundSource> {
+        if (kind == MediaAsset::Kind::Video)
+            return std::make_unique<VideoSource>();
+        return std::make_unique<StillSource>();
+    });
+    player->setFillMode(QSettings().value(kFillModeKey, player->fillMode()).toString());
+    connect(player, &BackgroundPlayer::fillModeChanged, player,
+            [player] { QSettings().setValue(kFillModeKey, player->fillMode()); });
+    qml->addImageProvider(QStringLiteral("background"), new BackgroundImages(player));
+    if (auto *media = qml->singletonInstance<MediaLibrary *>("Visualis.Ui", "MediaLibrary")) {
+        media->setInUse([player = QPointer(player)](const QUuid &asset) {
+            const QString why = player ? player->whyInUse(asset) : QString();
+            return why.isEmpty() ? why : why + QStringLiteral(". Pick another background before deleting it.");
+        });
+    }
+    return player;
+}
+
+void BackgroundPlayer::addOutput(QVideoSink *slotA, QVideoSink *slotB)
+{
+    m_slots[0]->video->addTarget(slotA);
+    m_slots[1]->video->addTarget(slotB);
+}
+
+void BackgroundPlayer::setFillMode(const QString &mode)
+{
+    const QString valid = mode == QLatin1String("fit") ? mode : QStringLiteral("fill");
+    if (valid == m_fillMode)
+        return;
+    m_fillMode = valid;
+    emit fillModeChanged();
+}
+
+void BackgroundPlayer::layerChanged()
+{
+    const BackgroundLayer &layer = m_live->background();
+    const bool changing = layer.asset != m_wanted;
+    if (changing && !m_pending)
+        m_frontCleared = m_cleared;   // what comes back if this pick fails
+    // A new background un-clears the layer; the cleared one mustn't show while it loads.
+    if (m_cleared && !layer.cleared && changing && m_slots[m_front]->opacity > 0) {
+        m_slots[m_front]->opacity = 0;
+        emit slotsChanged();
+    }
+    if (layer.cleared != m_cleared) {
+        m_cleared = layer.cleared;
+        // Shown again after a failed pick over it was put back cleared: it was left hidden.
+        Slot &front = *m_slots[m_front];
+        if (!m_cleared && !changing && !front.asset.isNull() && front.opacity == 0 && !fading()) {
+            front.opacity = 1;
+            emit slotsChanged();
+        }
+        const double target = m_cleared ? 0 : 1;
+        m_clearFade.stop();
+        if (layer.transition.kind == TransitionKind::Fade && layer.transition.ms > 0) {
+            m_clearFade.setStartValue(m_opacity);
+            m_clearFade.setEndValue(target);
+            m_clearFade.setDuration(layer.transition.ms);
+            m_clearFade.start();
+        } else {
+            m_opacity = target;
+            emit opacityChanged();
+        }
+    }
+    // Every slide change lands here; only a different asset does anything.
+    if (changing) {
+        m_wanted = layer.asset;
+        play(layer.asset, layer.transition);
+    }
+    if (!m_pending)
+        m_frontCleared = m_cleared;
+}
+
+void BackgroundPlayer::play(const QUuid &asset, const Transition &transition)
+{
+    finishFade();
+    cancelPending();
+    if (asset == m_slots[m_front]->asset) {   // back to what's showing
+        // Hidden for a pick that failed; it stays hidden if the layer went back to cleared.
+        if (m_slots[m_front]->opacity == 0 && !asset.isNull() && !m_cleared) {
+            m_slots[m_front]->opacity = 1;
+            emit slotsChanged();
+        }
+        emit statusChanged();
+        return;
+    }
+    Slot &next = back();
+    if (asset.isNull()) {
+        m_pending = Pending{asset, transition};
+        swapIn();
+        return;
+    }
+    // LiveState checked it a moment ago; this finds the file, which may have gone since.
+    const MediaCheck check = m_live->checkMedia(asset);
+    if (!check.ok() || check.path.isEmpty()) {
+        refuse(asset, check.message.isEmpty() ? QStringLiteral("The background's file can't be found.") : check.message);
+        return;
+    }
+    next.asset = asset;
+    next.kind = check.kind;
+    m_pending = Pending{asset, transition};
+    next.source()->load(check.path);
+    m_loadTimer.start();
+    emit statusChanged();
+}
+
+void BackgroundPlayer::refuse(const QUuid &asset, const QString &why)
+{
+    if (m_live)
+        m_live->backgroundFailed(asset, {showing(), m_frontCleared, m_slots[m_front]->transition}, why);
+}
+
+void BackgroundPlayer::giveUp(const QString &why)
+{
+    const QUuid asset = m_pending->asset;
+    cancelPending();
+    emit statusChanged();
+    refuse(asset, QStringLiteral("The background can't be shown: %1").arg(why));
+}
+
+QString BackgroundPlayer::whyInUse(const QUuid &asset) const
+{
+    if (asset.isNull())
+        return {};
+    if (asset == showing())
+        return m_cleared ? QStringLiteral("it's the current background (cleared)") : QStringLiteral("it's the live background");
+    if (m_pending && m_pending->asset == asset)
+        return QStringLiteral("it's loading as the background");
+    return {};
+}
+
+void BackgroundPlayer::setLoadTimeout(int ms)
+{
+    m_loadTimer.setInterval(ms);
+}
+
+void BackgroundPlayer::sourceReady(int n, BackgroundSource *source)
+{
+    if (m_pending && n != m_front && m_slots[n]->source() == source)
+        swapIn();
+}
+
+void BackgroundPlayer::sourceFailed(int n, BackgroundSource *source, const QString &why)
+{
+    if (m_pending && n != m_front && m_slots[n]->source() == source)
+        giveUp(why);
+}
+
+void BackgroundPlayer::swapIn()
+{
+    m_loadTimer.stop();
+    const Transition transition = std::exchange(m_pending, std::nullopt)->transition;
+    const int old = m_front;
+    m_front = 1 - m_front;
+    Slot &in = *m_slots[m_front];
+    in.transition = transition;
+    if (!in.asset.isNull() && in.kind == MediaAsset::Kind::Image)
+        ++in.imageGeneration;
+    if (transition.kind == TransitionKind::Fade && transition.ms > 0) {
+        in.opacity = 0;
+        m_fade.setDuration(transition.ms);
+        m_fade.start();
+    } else {
+        in.opacity = 1;
+        retire(old);
+    }
+    emit slotsChanged();
+    emit statusChanged();
+}
+
+void BackgroundPlayer::finishFade()
+{
+    if (!fading())
+        return;
+    m_fade.stop();
+    endFade();
+}
+
+void BackgroundPlayer::endFade()
+{
+    m_slots[m_front]->opacity = 1;
+    retire(1 - m_front);
+    emit slotsChanged();
+}
+
+void BackgroundPlayer::cancelPending()
+{
+    if (!m_pending)
+        return;
+    m_loadTimer.stop();
+    m_pending.reset();
+    retire(1 - m_front);
+}
+
+void BackgroundPlayer::retire(int n)
+{
+    Slot &s = *m_slots[n];
+    s.video->stop();
+    s.still->stop();
+    s.asset = QUuid();
+    s.opacity = 0;
+}
+
+QString BackgroundPlayer::status() const
+{
+    if (m_pending)
+        return QStringLiteral("Loading");
+    const BackgroundSource *front = m_slots[m_front]->source();
+    return front ? front->status() : QStringLiteral("No background");
+}
+
+QString BackgroundPlayer::alert() const
+{
+    for (const Slot *s : {m_slots[1 - m_front].get(), m_slots[m_front].get()}) {
+        if (const BackgroundSource *source = s->source(); source && !source->alert().isEmpty())
+            return source->alert();
+    }
+    return {};
+}
+
+QImage BackgroundPlayer::image(int n) const
+{
+    return n == 0 || n == 1 ? m_slots[n]->still->image() : QImage();
+}
+
+QUuid BackgroundPlayer::showing() const
+{
+    return m_slots[m_front]->asset;
+}
+
+BackgroundSlot BackgroundPlayer::slot(int n) const
+{
+    const Slot &s = *m_slots[n];
+    BackgroundSlot out;
+    out.opacity = s.opacity;
+    out.front = n == m_front;
+    if (s.asset.isNull())
+        return out;
+    out.kind = s.kind == MediaAsset::Kind::Video ? QStringLiteral("video") : QStringLiteral("image");
+    const bool loading = m_pending && n != m_front;   // a still being decoded isn't drawn yet
+    if (s.kind == MediaAsset::Kind::Image && !loading)
+        out.image = QUrl(QStringLiteral("image://background/%1/%2").arg(n).arg(s.imageGeneration));
+    return out;
+}

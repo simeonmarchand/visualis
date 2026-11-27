@@ -1,6 +1,7 @@
 #pragma once
 
 #include "media/mediaasset.h"
+#include "media/mediaresolve.h"
 
 #include <QObject>
 #include <QPointer>
@@ -62,6 +63,10 @@ public:
     Q_INVOKABLE QStringList usedBy(const QString &id) const;
     Q_INVOKABLE bool removeAsset(const QString &id);
 
+    // Why an asset can't be deleted now (empty: it can), asked before every delete. The
+    // background player says when it's showing or loading it (#126 review).
+    void setInUse(std::function<QString(const QUuid &)> why) { m_inUse = std::move(why); }
+
     // How long a finished file waits for another program to let go of the library before
     // it's reported failed (#88's pattern). For tests.
     void setLockWaitLimit(int ms);
@@ -71,6 +76,10 @@ public:
     // For tests: runs on the worker after each file is read, before it's handed over. It
     // stands in for a read that won't return.
     void setWorkerPause(std::function<void()> pause);
+
+    // Every asset, whatever the search, and the media folder, as a value for the resolver
+    // (mediaresolve.h). Changes with assetsChanged.
+    visualis::MediaSnapshot snapshot() const { return m_snapshot; }
 
     QString search() const { return m_search; }
     void setSearch(const QString &search);
@@ -99,10 +108,13 @@ private:
     void abandonIfStuck();
     void abandonWorker();
     void setReport(const QString &report);
+    // Reads the assets again from the library, and emits assetsChanged.
+    void reloadAssets();
 
     QPointer<SongLibrary> m_songs;
     std::unique_ptr<visualis::MediaStore> m_store;
     QList<visualis::MediaAsset> m_assets;
+    visualis::MediaSnapshot m_snapshot;
     QString m_search;
     QString m_report;
     std::unique_ptr<ImportRun> m_import;
@@ -111,4 +123,5 @@ private:
     int m_abandonAfterMs = 2'000;   // a working copy sees Stop within one 1 MB read
     quint64 m_importGeneration = 0;   // tells a late abandon timer its import has ended
     std::function<void()> m_workerPause;
+    std::function<QString(const QUuid &)> m_inUse;
 };

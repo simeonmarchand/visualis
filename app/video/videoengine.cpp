@@ -20,6 +20,7 @@ VideoEngine::VideoEngine(QObject *parent)
     connect(&m_watchdog, &FrameWatchdog::playing, this, [this] {
         m_failuresInARow = 0;
         setStatus(QStringLiteral("Playing"), m_alert);
+        emit playing();
     });
     connect(&m_watchdog, &FrameWatchdog::stalled, this, &VideoEngine::onStalled);
     m_displaysAsleep = m_sleepWatcher.displaysAsleep();

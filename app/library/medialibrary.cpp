@@ -4,6 +4,7 @@
 #include "media/mediafiles.h"
 #include "media/medialimits.h"
 #include "media/mediaprobe.h"
+#include "media/mediaresolve.h"
 #include "media/mediastore.h"
 
 #include <QDeadlineTimer>
@@ -232,8 +233,7 @@ void MediaLibrary::libraryChanged()
         if (const std::optional<QSet<QString>> inUse = m_store->contentHashes())
             removeUnusedMediaFiles(library->mediaPath(), *inUse);
     }
-    m_assets = m_store ? m_store->list() : QList<MediaAsset>{};
-    emit assetsChanged();
+    reloadAssets();
     if (m_import)
         saveFinishedFiles();
 }
@@ -361,7 +361,7 @@ bool MediaLibrary::saveOne(MediaImportFile &f)
     }
     // The same content is already an asset, under whatever extension: one file, one row.
     if (const std::optional<MediaAsset> existing = m_store->findByHash(f.asset->contentHash)) {
-        const QFileInfo there(m_store->filePath(*existing));
+        const QFileInfo there(containedPath(m_import->mediaFolder, existing->file));
         if (there.isFile() && there.size() == QFileInfo(f.partial).size()) {
             removePartials(f);
             summary.skipped << std::pair{f.name, QStringLiteral("already in the library as \"%1\"").arg(existing->originalName)};
@@ -460,10 +460,8 @@ void MediaLibrary::saveFinishedFiles()
         }
         m_import->pending.removeFirst();
     }
-    if (m_import->summary.imported.size() != before) {
-        m_assets = m_store->list();
-        emit assetsChanged();
-    }
+    if (m_import->summary.imported.size() != before)
+        reloadAssets();
     m_import->waitingForLock = waiting;
     emit importProgressChanged();
     if (m_import->threadDone && m_import->pending.isEmpty())
@@ -499,15 +497,28 @@ bool MediaLibrary::removeAsset(const QString &id)
 {
     if (!m_store)
         return false;
+    // Deleting the file the outputs are playing would freeze them at the next loop or restart.
+    if (const QString why = m_inUse ? m_inUse(QUuid::fromString(id)) : QString(); !why.isEmpty()) {
+        const std::optional<MediaAsset> asset = m_store->load(QUuid::fromString(id));
+        setReport(QStringLiteral("Couldn't delete \"%1\": %2").arg(asset ? asset->originalName : QStringLiteral("it"), why));
+        return false;
+    }
     // On the GUI thread, like every import's publish and save, so a delete can't interleave
     // with them: a pending import of the same content publishes its own copy afterwards.
     if (const MediaStore::Result r = m_store->remove(QUuid::fromString(id)); !r.ok) {
         setReport(r.busy ? QStringLiteral("Couldn't delete it: another program is using the library. Try again.") : r.error);
         return false;
     }
-    m_assets = m_store->list();
-    emit assetsChanged();
+    reloadAssets();
     return true;
+}
+
+void MediaLibrary::reloadAssets()
+{
+    m_assets = m_store ? m_store->list() : QList<MediaAsset>{};
+    Library *library = m_songs ? m_songs->library() : nullptr;
+    m_snapshot = snapshotOf(library && m_store ? library->mediaPath() : QString(), m_assets);
+    emit assetsChanged();
 }
 
 void MediaLibrary::setSearch(const QString &search)

@@ -1,27 +1,17 @@
 import QtQuick
 import QtQuick.Controls
-import QtQuick.Dialogs
 import QtQuick.Layouts
 import Visualis.Ui
 
-// Output displays and the background video: a stopgap bar until a settings window and the
-// media library exist.
+// Output displays and the background: a stopgap bar until a settings window exists. The
+// background is picked from the media library (#98).
 ColumnLayout {
     id: settings
     spacing: 8
 
     signal templatesRequested()
 
-    FileDialog {
-        id: backgroundDialog
-        title: "Choose a background video"
-        nameFilters: ["Video (*.mp4 *.mov *.m4v)", "All files (*)"]
-        onAccepted: {
-            VideoEngine.source = selectedFile
-            Commands.run("show_background")   // choosing one brings a cleared background back
-        }
-    }
-
+    BackgroundPicker { id: backgroundPicker }
     PlanningCenterDialog { id: pcoDialog }
     PlanPickerDialog { id: planPicker }
 
@@ -54,7 +44,7 @@ ColumnLayout {
         }
     }
 
-    // Background video: a stopgap until the media library and service items.
+    // The live background, until service items and song defaults set it (#99).
     RowLayout {
         spacing: 12
 
@@ -64,15 +54,17 @@ ColumnLayout {
             Layout.preferredWidth: 80
         }
         Button {
-            text: "Choose video…"
+            objectName: "chooseBackground"
+            text: "Choose…"
             focusPolicy: Qt.NoFocus
-            onClicked: backgroundDialog.open()
+            enabled: SongLibrary.error === ""
+            onClicked: backgroundPicker.open()
         }
         Button {
             text: "None"
             focusPolicy: Qt.NoFocus
-            enabled: VideoEngine.source.toString() !== ""
-            onClicked: VideoEngine.source = ""
+            enabled: LiveState.backgroundId !== ""
+            onClicked: LiveState.pickBackground("")
         }
         Button {
             objectName: "showBackground"
@@ -81,9 +73,23 @@ ColumnLayout {
             visible: LiveState.backgroundCleared
             onClicked: Commands.run("show_background")
         }
+        ComboBox {
+            objectName: "backgroundFillMode"
+            focusPolicy: Qt.NoFocus   // arrow keys belong to the slides
+            model: [{ text: "Fill", value: "fill" }, { text: "Fit", value: "fit" }]
+            textRole: "text"
+            valueRole: "value"
+            currentIndex: indexOfValue(BackgroundPlayer.fillMode)
+            onActivated: {
+                BackgroundPlayer.fillMode = currentValue
+                currentIndex = Qt.binding(() => indexOfValue(BackgroundPlayer.fillMode))
+            }
+            ToolTip.visible: hovered
+            ToolTip.text: "Stills: fill the output, cropping the edges, or fit inside it with bars"
+        }
         Label {
             objectName: "backgroundStatus"
-            text: VideoEngine.status
+            text: BackgroundPlayer.status
             color: "#8b8f96"
         }
         Button {
@@ -96,8 +102,9 @@ ColumnLayout {
 
     Label {
         objectName: "backgroundAlert"
-        visible: VideoEngine.alert !== ""
-        text: VideoEngine.alert
+        readonly property string message: LiveState.backgroundAlert !== "" ? LiveState.backgroundAlert : BackgroundPlayer.alert
+        visible: message !== ""
+        text: message
         color: "#e0b040"
     }
 

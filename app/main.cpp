@@ -6,7 +6,6 @@
 #include "output/outputcontroller.h"
 #include "pco/planimporter.h"
 #include "pco/planningcenter.h"
-#include "video/videoengine.h"
 
 #include <QCommandLineParser>
 #include <QEventLoop>
@@ -38,7 +37,6 @@ int main(int argc, char *argv[])
         "Keep settings in an INI file in this directory instead of the user's preferences.", "dir");
     const QCommandLineOption assignOpt("assign",
         "Put an output on the display with this name, e.g. stage=\"Fake Stage\". Repeatable.", "role=name");
-    const QCommandLineOption backgroundOpt("background", "Play this video as the background.", "file");
     const QCommandLineOption libraryOpt("library",
         "Use the song library in this folder instead of ~/Documents/Visualis.", "dir");
     const QCommandLineOption journalOpt("journal",
@@ -47,7 +45,7 @@ int main(int argc, char *argv[])
         "Run an operator command after startup, e.g. next_slide or goto_slide=2. Repeatable.", "name[=arg]");
     const QCommandLineOption importOpt("import",
         "Import the Visualis song and service exports in this folder, and open the last service.", "dir");
-    parser.addOptions({settingsDirOpt, assignOpt, backgroundOpt, libraryOpt, journalOpt, commandOpt, importOpt});
+    parser.addOptions({settingsDirOpt, assignOpt, libraryOpt, journalOpt, commandOpt, importOpt});
     parser.process(app);
 
     if (parser.isSet(settingsDirOpt)) {
@@ -91,10 +89,9 @@ int main(int argc, char *argv[])
 
     // Back to what was live if the last run crashed (#25), then journal every change.
     auto *live = engine.singletonInstance<visualis::LiveState *>("Visualis.Ui", "LiveState");
-    auto *video = engine.singletonInstance<VideoEngine *>("Visualis.Ui", "VideoEngine");
     if (auto *recovery = engine.singletonInstance<Recovery *>("Visualis.Ui", "Recovery"); recovery && live) {
         const QString journal = parser.isSet(journalOpt) ? parser.value(journalOpt) : Recovery::defaultJournalPath();
-        if (recovery->start(journal, live, video)) {
+        if (recovery->start(journal, live)) {
             // The operator sees its slides: the service item it was, else the library's song.
             if (!live->serviceIdString().isEmpty() && services && services->openId() != live->serviceIdString())
                 services->openService(live->serviceIdString());
@@ -120,8 +117,6 @@ int main(int argc, char *argv[])
                 qCWarning(lcOutput).noquote() << "--assign: no display named" << name;
         }
     }
-    if (parser.isSet(backgroundOpt) && video)
-        video->setSource(QUrl::fromLocalFile(QFileInfo(parser.value(backgroundOpt)).absoluteFilePath()));
     if (auto *commands = engine.singletonInstance<Commands *>("Visualis.Ui", "Commands")) {
         for (const QString &c : parser.values(commandOpt))
             commands->run(c.section('=', 0, 0), c.contains('=') ? QVariant(c.section('=', 1)) : QVariant());

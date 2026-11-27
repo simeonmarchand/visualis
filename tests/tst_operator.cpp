@@ -1,4 +1,6 @@
+#include "background/backgroundplayer.h"
 #include "library/medialibrary.h"
+#include "media/mediaresolve.h"
 #include "library/servicelist.h"
 #include "library/songlibrary.h"
 #include "library/templatelibrary.h"
@@ -222,6 +224,44 @@ private slots:
 
         QVERIFY(QMetaObject::invokeMethod(dialog, "accept"));
         QTRY_VERIFY(media->assets().isEmpty());
+    }
+
+    // #98: the background is picked from the media library and plays from the library's file.
+    // One whose file has gone is refused with a warning, and what was showing stays.
+    void aBackgroundIsPickedFromTheMediaLibrary()
+    {
+        auto *media = m_engine->singletonInstance<MediaLibrary *>("Visualis.Ui", "MediaLibrary");
+        auto *player = m_engine->singletonInstance<BackgroundPlayer *>("Visualis.Ui", "BackgroundPlayer");
+        QVERIFY(media && player);
+        QTemporaryDir in;
+        for (const auto &[name, color] : {std::pair{"Sunrise.png", Qt::red}, std::pair{"Cross.png", Qt::blue}}) {
+            QImage image(64, 36, QImage::Format_RGB32);
+            image.fill(color);
+            QVERIFY(image.save(in.filePath(name)));
+        }
+        QSignalSpy finished(media, &MediaLibrary::importFinished);
+        QVERIFY(media->importFiles({QUrl::fromLocalFile(in.path())}));
+        QVERIFY(finished.wait(10'000));
+        QCOMPARE(media->assets().size(), 2);
+        const QString cross = media->assets()[0].toMap().value("id").toString();
+        const QString sunrise = media->assets()[1].toMap().value("id").toString();
+
+        QQuickWindow *window = loadOperatorWindow();
+        QObject *picker = window->findChild<QObject *>("backgroundPicker");
+        QVERIFY(picker);
+        QVERIFY(QMetaObject::invokeMethod(picker, "choose", Q_ARG(QVariant, sunrise)));
+        QCOMPARE(m_live->backgroundId(), sunrise);
+        QTRY_COMPARE_WITH_TIMEOUT(player->showing(), QUuid::fromString(sunrise), 5000);
+        QCOMPARE(player->status(), QStringLiteral("Showing a still"));
+
+        // Its file goes missing from the media folder: picking it warns and keeps Sunrise.
+        QVERIFY(QFile::remove(checkMedia(media->snapshot(), QUuid::fromString(cross)).path));
+        QVERIFY(QMetaObject::invokeMethod(picker, "choose", Q_ARG(QVariant, cross)));
+        QCOMPARE(m_live->backgroundId(), sunrise);
+        QCOMPARE(player->showing(), QUuid::fromString(sunrise));
+        auto *alert = window->findChild<QQuickItem *>("backgroundAlert");
+        QTRY_VERIFY(alert->isVisible());
+        QVERIFY2(alert->property("text").toString().contains("Cross.png"), qPrintable(alert->property("text").toString()));
     }
 
     void goLiveShowsTheSelectedSongsSlide()

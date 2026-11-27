@@ -73,7 +73,7 @@ private slots:
         s.arrangement = s.song->arrangements[0].id;
         s.slideIndex = 2;
         s.textCleared = true;
-        s.background = "file:///Users/op/Motions/blue.mp4";
+        s.background = {QUuid::createUuid(), false, Transition{TransitionKind::Fade, 900}};
         s.savedAt = QDateTime::currentDateTimeUtc();
 
         const SnapshotResult r = snapshotFromJson(snapshotToJson(s));
@@ -83,8 +83,8 @@ private slots:
         QCOMPARE(r.snapshot->arrangement, s.arrangement);
         QCOMPARE(r.snapshot->slideIndex, 2);
         QVERIFY(r.snapshot->textCleared);
-        QVERIFY(!r.snapshot->backgroundCleared);
         QCOMPARE(r.snapshot->background, s.background);
+        QVERIFY(!r.snapshot->skippedBackgroundUrl);
         QCOMPARE(r.snapshot->savedAt.toMSecsSinceEpoch(), s.savedAt.toMSecsSinceEpoch());
         QVERIFY(r.snapshot->service.isNull() && r.snapshot->item.isNull());
     }
@@ -105,13 +105,29 @@ private slots:
     void aBackgroundAloneIsKept()
     {
         LiveSnapshot s;
-        s.background = "file:///motion.mov";
-        s.backgroundCleared = true;
+        s.background = {QUuid::createUuid(), true, {}};
         const SnapshotResult r = snapshotFromJson(snapshotToJson(s));
         QVERIFY(r.snapshot && !r.snapshot->song);
-        QVERIFY(r.snapshot->backgroundCleared);
+        QCOMPARE(r.snapshot->background, s.background);
         QVERIFY(!r.snapshot->isEmpty());
         QVERIFY(LiveSnapshot{}.isEmpty());
+    }
+
+    // #98: before the background layer, a journal held the background video's file URL. It
+    // can't be turned into an asset, so it's dropped (and recovery says so in the log).
+    void aJournalWithABackgroundUrlDropsIt()
+    {
+        const QByteArray old = "{\"format\":\"visualis-live\",\"version\":1,\"slideIndex\":-1,"
+                               "\"backgroundCleared\":true,\"background\":\"file:///Users/op/Motions/blue.mp4\","
+                               "\"savedAt\":\"2026-11-23T10:00:00.000Z\"}";
+        const SnapshotResult r = snapshotFromJson(old);
+        QVERIFY2(r.snapshot, qPrintable(r.error));
+        QVERIFY(r.snapshot->skippedBackgroundUrl);
+        QCOMPARE(r.snapshot->background.asset, QUuid());
+        QVERIFY(r.snapshot->background.cleared);
+
+        const QByteArray none = "{\"format\":\"visualis-live\",\"version\":1,\"background\":\"\"}";
+        QVERIFY(!snapshotFromJson(none).snapshot->skippedBackgroundUrl);
     }
 
     void writesAndReadsAFile()
@@ -181,7 +197,7 @@ private slots:
         const Song song = sample();
         LiveState live;
         QSignalSpy changed(&live, &LiveState::changed);
-        live.restore(liveSong(song, song.arrangements[0].id, templateSet({})), 2, true, true);
+        live.restore(liveSong(song, song.arrangements[0].id, templateSet({})), 2, true, BackgroundLayer{.cleared = true});
         QCOMPARE(changed.count(), 1);
         QCOMPARE(live.slideIndex(), 2);
         QCOMPARE(live.groupLabel(), QStringLiteral("Chorus"));
@@ -193,7 +209,7 @@ private slots:
     {
         const Song song = sample();
         LiveState live;
-        live.restore(liveSong(song, song.arrangements[1].id, templateSet({})), 0, false, false);
+        live.restore(liveSong(song, song.arrangements[1].id, templateSet({})), 0, false);
         QCOMPARE(live.slideCount(), 1);   // "Short": just the chorus
         QCOMPARE(live.currentText(), QStringLiteral("And heaven and nature sing"));
     }
@@ -202,7 +218,7 @@ private slots:
     {
         const Song song = sample();
         LiveState live;
-        live.restore(liveSong(song, {}, templateSet({})), 40, false, false);
+        live.restore(liveSong(song, {}, templateSet({})), 40, false);
         QCOMPARE(live.songTitle(), song.title);
         QVERIFY(!live.hasSlide());
     }

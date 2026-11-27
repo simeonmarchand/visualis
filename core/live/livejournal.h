@@ -1,5 +1,6 @@
 #pragma once
 
+#include "live/liveitem.h"
 #include "service/service.h"
 #include "song/song.h"
 #include "template/template.h"
@@ -20,8 +21,10 @@ struct LiveSnapshot
     QUuid arrangement;
     int slideIndex = -1;
     bool textCleared = false;
-    bool backgroundCleared = false;
-    QString background;         // the background video's URL, or empty
+    BackgroundLayer background;
+    // The journal held a background as a file URL, from before the background layer (#98).
+    // It can't be restored; the caller logs it.
+    bool skippedBackgroundUrl = false;
     QUuid service;              // the live service, if one is being run (#51)
     QUuid item;                 // the service item the song is, if it came from one
     // What recovery renders the song with again (#93): the service item, overrides and all,
@@ -30,7 +33,7 @@ struct LiveSnapshot
     std::optional<Template> tmpl;
     QDateTime savedAt;          // UTC
 
-    bool isEmpty() const { return !song && background.isEmpty(); }
+    bool isEmpty() const { return !song && background.asset.isNull(); }
 };
 
 QByteArray snapshotToJson(const LiveSnapshot &snapshot);
