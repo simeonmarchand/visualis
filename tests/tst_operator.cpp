@@ -847,6 +847,24 @@ private slots:
         QCOMPARE(m_services->selectedIndex(), 0);
     }
 
+    // Thermo: a drop below the last row appends, even after another program appended.
+    void mediaAddedAtTheEndGoesBelowWhatAnotherProgramAdded()
+    {
+        QVERIFY(m_services->createService("Sunday"));
+        QVERIFY(m_services->addHeader("Welcome"));
+        ServiceStore other(*m_songs->library());
+        Service changed = *other.load(QUuid::fromString(m_services->openId()));
+        ServiceItem theirs = changed.items[0];
+        theirs.id = QUuid::createUuid();
+        theirs.title = QStringLiteral("Theirs");
+        changed.items << theirs;
+        QVERIFY(other.save(changed).ok);
+
+        QVERIFY(m_services->addMedia(QUuid::createUuid().toString(QUuid::WithoutBraces), "Countdown", 1));
+        QCOMPARE(titles(m_services->items()), (QStringList{"Welcome", "Theirs", "Countdown"}));
+        QCOMPARE(m_services->selectedIndex(), 2);
+    }
+
     void tileClicksOnAServiceItemAreCommands()
     {
         QQuickWindow *window = serviceOperatorWindow();

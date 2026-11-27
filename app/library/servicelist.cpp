@@ -331,12 +331,15 @@ bool ServiceList::insert(ServiceItem item, int at)
     if (at < 0)
         at = m_selected >= 0 ? m_selected + 1 : int(m_open->items.size());
     // After the item it follows here, found by id: another program may have changed the list.
+    const bool append = at == m_open->items.size();
     const QUuid after = at > 0 ? m_open->items[at - 1].id : QUuid();
     item.id = QUuid::createUuid();
     const bool added = applyToOpen(
         [&](Service &s) {
             qsizetype i = 0;
-            if (!after.isNull()) {
+            if (append) {
+                i = s.items.size();
+            } else if (!after.isNull()) {
                 i = std::min(qsizetype(at), s.items.size());
                 for (qsizetype n = 0; n < s.items.size(); ++n) {
                     if (s.items[n].id == after) {
@@ -352,8 +355,10 @@ bool ServiceList::insert(ServiceItem item, int at)
     if (!added)
         return false;
     for (int n = 0; n < m_open->items.size(); ++n) {
-        if (m_open->items[n].id == item.id)
+        if (m_open->items[n].id == item.id) {
             select(n);
+            break;
+        }
     }
     return true;
 }
