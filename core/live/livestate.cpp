@@ -42,9 +42,9 @@ bool LiveState::restore(const LiveItem &item, int index, bool textCleared, const
     m_heldBack.clear();
     m_index = index >= 0 && index < m_live.slides.size() ? index : -1;
     m_textCleared = textCleared;
-    // A media slide carries no text: what was held over before the crash isn't in the journal.
-    if (const LiveSlide *s = currentLiveSlide(); !s || s->content)
-        m_content = s ? *s->content : Content();
+    // A media slide carries no text, and the journal doesn't keep what was held over from
+    // before the crash, so the text layer comes back empty then.
+    takeContent();
     applyBackground(background);
     emit changed();
     return true;
@@ -84,9 +84,7 @@ void LiveState::replaceLive(const LiveItem &item)
     m_heldBack.clear();
     if (m_index >= m_live.slides.size())
         m_index = int(m_live.slides.size()) - 1;
-    // The text follows the new rendering; the background changes only on moves.
-    if (const LiveSlide *s = currentLiveSlide(); !s || s->content)
-        m_content = s ? *s->content : Content();
+    takeContent();   // the background changes only on moves
 }
 
 int LiveState::itemIndex() const
@@ -165,13 +163,24 @@ bool LiveState::moveTo(int n)
     return true;
 }
 
-void LiveState::enterSlide()
+bool LiveState::takeContent()
 {
     const LiveSlide *s = currentLiveSlide();
-    if (!s || s->content) {
-        m_content = s ? *s->content : Content();
-        m_textCleared = false;
+    if (!s) {
+        m_content = {};
+        return true;
     }
+    if (!s->content)
+        return false;
+    m_content = *s->content;
+    return true;
+}
+
+void LiveState::enterSlide()
+{
+    if (takeContent())
+        m_textCleared = false;
+    const LiveSlide *s = currentLiveSlide();
     if (!s)
         return;
     if (s->background)
