@@ -529,10 +529,12 @@ private slots:
         {
             auto old = Library::open(dir.path(), std::vector<Migration>(all.begin(), before));
             QVERIFY2(old.library, qPrintable(old.message));
-            Service s;
-            s.title = "Kept";
-            QVERIFY(ServiceStore(*old.library).save(s).ok);
-            serviceId = s.id;
+            // Written as that schema had it: today's ServiceStore needs later columns.
+            serviceId = QUuid::createUuid();
+            QSqlQuery q(old.library->database());
+            q.prepare("INSERT INTO service (id, title, created_at, updated_at) VALUES (?, 'Kept', '', '')");
+            q.addBindValue(serviceId.toString(QUuid::WithoutBraces));
+            QVERIFY(q.exec());
         }
         auto now = Library::open(dir.path());
         QVERIFY2(now.library, qPrintable(now.message));

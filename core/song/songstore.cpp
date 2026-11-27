@@ -196,14 +196,15 @@ SongStore::Result SongStore::save(Song &song)
 
     QString err = run(db,
         "INSERT INTO song (id, title, ccli_number, authors, copyright, pco_song_id, default_arrangement, "
-        "default_template, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+        "default_template, default_background, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
         "ON CONFLICT(id) DO UPDATE SET title = excluded.title, ccli_number = excluded.ccli_number, "
         "authors = excluded.authors, copyright = excluded.copyright, pco_song_id = excluded.pco_song_id, "
         "default_arrangement = excluded.default_arrangement, default_template = excluded.default_template, "
-        "updated_at = excluded.updated_at",
+        "default_background = excluded.default_background, updated_at = excluded.updated_at",
         {songId, s.title, text(s.credits.ccliNumber), text(s.credits.authors), text(s.credits.copyright), text(s.pcoSongId),
          s.defaultArrangement.isNull() ? QVariant() : QVariant(key(s.defaultArrangement)),
          s.defaultTemplate.isNull() ? QStringLiteral("") : key(s.defaultTemplate),
+         s.defaultBackground.isNull() ? QStringLiteral("") : key(s.defaultBackground),
          timestamp(s.created), timestamp(s.updated)});
     if (!err.isEmpty())
         return fail(err);
@@ -224,11 +225,13 @@ SongStore::Result SongStore::save(Song &song)
     for (int i = 0; i < s.groups.size(); ++i) {
         const Group &g = s.groups[i];
         err = run(db,
-            "INSERT INTO song_group (id, song_id, position, label, color, slides, slide_overrides) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?) "
+            "INSERT INTO song_group (id, song_id, position, label, color, slides, slide_overrides, default_background) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(id) DO UPDATE SET position = excluded.position, label = excluded.label, "
-            "color = excluded.color, slides = excluded.slides, slide_overrides = excluded.slide_overrides",
-            {key(g.id), songId, i, text(g.label), text(g.color), slidesJson(g.slides), overridesJson(g.slideOverrides)});
+            "color = excluded.color, slides = excluded.slides, slide_overrides = excluded.slide_overrides, "
+            "default_background = excluded.default_background",
+            {key(g.id), songId, i, text(g.label), text(g.color), slidesJson(g.slides), overridesJson(g.slideOverrides),
+             g.defaultBackground.isNull() ? QStringLiteral("") : key(g.defaultBackground)});
         if (!err.isEmpty())
             return fail(err);
     }
@@ -343,7 +346,7 @@ std::optional<Song> SongStore::load(const QUuid &id) const
     const QString songId = key(id);
     QSqlQuery q(db);
     q.prepare("SELECT title, ccli_number, authors, copyright, pco_song_id, default_arrangement, created_at, "
-              "updated_at, default_template FROM song WHERE id = ?");
+              "updated_at, default_template, default_background FROM song WHERE id = ?");
     q.addBindValue(songId);
     if (!q.exec() || !q.next())
         return std::nullopt;
@@ -357,15 +360,17 @@ std::optional<Song> SongStore::load(const QUuid &id) const
     s.created = fromTimestamp(q.value(6));
     s.updated = fromTimestamp(q.value(7));
     s.defaultTemplate = uuid(q.value(8));
+    s.defaultBackground = uuid(q.value(9));
 
     QSqlQuery g(db);
-    g.prepare("SELECT id, label, color, slides, slide_overrides FROM song_group WHERE song_id = ? ORDER BY position");
+    g.prepare("SELECT id, label, color, slides, slide_overrides, default_background FROM song_group WHERE song_id = ? ORDER BY position");
     g.addBindValue(songId);
     g.exec();
     while (g.next()) {
         Group group{uuid(g.value(0)), g.value(1).toString(), g.value(2).toString(), slidesFromJson(g.value(3))};
         group.slideOverrides = overridesFromJson(g.value(4));
         group.fitSlideOverrides();
+        group.defaultBackground = uuid(g.value(5));
         s.groups << group;
     }
 

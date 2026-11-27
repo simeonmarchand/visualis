@@ -253,6 +253,11 @@ const std::vector<Migration> &Library::migrations()
              " width INTEGER NOT NULL DEFAULT 0, height INTEGER NOT NULL DEFAULT 0,"
              " duration_ms INTEGER NOT NULL DEFAULT 0, frame_rate REAL NOT NULL DEFAULT 0,"
              " codec TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL)"}},
+        // Default backgrounds (#99): a song's, a group's, and a service's media asset. Plain ids,
+        // like default_template: an asset that's gone is an alert when it would show.
+        {8, {"ALTER TABLE song ADD COLUMN default_background TEXT NOT NULL DEFAULT ''",
+             "ALTER TABLE song_group ADD COLUMN default_background TEXT NOT NULL DEFAULT ''",
+             "ALTER TABLE service ADD COLUMN default_background TEXT NOT NULL DEFAULT ''"}},
     };
     return all;
 }

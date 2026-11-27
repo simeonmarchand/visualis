@@ -41,6 +41,8 @@ struct Service {
     QString pcoPlanUrl;         // the plan in Planning Center's web app (P3 finding 7)
     QDateTime lastImportedAt;   // UTC; invalid if never imported
     QList<ServiceItem> items;   // in order
+    // The media asset that fills an empty background layer (#99); never replaces one that's up.
+    QUuid defaultBackground;
     // Imported items the operator deleted (#56), by Planning Center id, with what Planning
     // Center said when each was last merged: a re-import doesn't bring them back unless they
     // ask. Kept by ServiceStore when an imported item is deleted.

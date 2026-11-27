@@ -39,6 +39,8 @@ Song sampleSong()
         Arrangement{QUuid::createUuid(), "Short", {g[1].id, g[2].id}, {}},
     };
     s.defaultArrangement = s.arrangements[1].id;
+    s.defaultBackground = QUuid::createUuid();          // #99
+    s.groups[2].defaultBackground = QUuid::createUuid();
     return s;
 }
 

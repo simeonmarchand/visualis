@@ -19,6 +19,9 @@ struct Group {
     // SongStore and songjson fit it to exactly as long as `slides`, and applyLyricsText remaps
     // it when the text changes. Why it isn't a slide struct: docs/adr/0002.
     QList<QJsonObject> slideOverrides;
+    // The background when one of its slides goes live (#99), unless the service item sets
+    // one; null: the song's default.
+    QUuid defaultBackground;
 
     // Overrides compare as fitted to the slides: a missing entry is the same as {}.
     bool operator==(const Group &other) const;
@@ -56,6 +59,7 @@ struct Song {
     QList<Arrangement> arrangements;
     QUuid defaultArrangement;       // null: the first arrangement, or groups in order
     QUuid defaultTemplate;          // null: the built-in for the kind (plan 5.2)
+    QUuid defaultBackground;        // media asset its slides carry (#99); null: they leave it alone
     QDateTime created;              // set by SongStore, UTC
     QDateTime updated;
 

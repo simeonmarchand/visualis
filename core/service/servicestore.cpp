@@ -131,12 +131,14 @@ QString ServiceStore::write(Service &s)
     for (const ServiceItem &item : std::as_const(s.items))
         itemIds.insert(item.id);
     QString err = run(db,
-        "INSERT INTO service (id, title, date, pco_plan_id, pco_service_type_id, pco_plan_url, last_imported_at, created_at, "
-        "updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET title = excluded.title, date = excluded.date, "
-        "pco_plan_id = excluded.pco_plan_id, pco_service_type_id = excluded.pco_service_type_id, pco_plan_url = excluded.pco_plan_url, "
-        "last_imported_at = excluded.last_imported_at, updated_at = excluded.updated_at",
+        "INSERT INTO service (id, title, date, pco_plan_id, pco_service_type_id, pco_plan_url, last_imported_at, default_background, "
+        "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET title = excluded.title, "
+        "date = excluded.date, pco_plan_id = excluded.pco_plan_id, pco_service_type_id = excluded.pco_service_type_id, "
+        "pco_plan_url = excluded.pco_plan_url, last_imported_at = excluded.last_imported_at, "
+        "default_background = excluded.default_background, updated_at = excluded.updated_at",
         {serviceId, s.title, s.date.isValid() ? s.date.toString(Qt::ISODate) : QStringLiteral(""), text(s.pcoPlanId),
-         text(s.pcoServiceTypeId), text(s.pcoPlanUrl), timestamp(s.lastImportedAt), timestamp(s.created), timestamp(s.updated)});
+         text(s.pcoServiceTypeId), text(s.pcoPlanUrl), timestamp(s.lastImportedAt), key(s.defaultBackground),
+         timestamp(s.created), timestamp(s.updated)});
     if (!err.isEmpty())
         return err;
 
@@ -232,7 +234,7 @@ std::optional<Service> ServiceStore::load(const QUuid &id) const
     QSqlDatabase db = m_library.database();
     QSqlQuery q(db);
     q.prepare("SELECT title, date, pco_plan_id, pco_service_type_id, last_imported_at, created_at, updated_at, "
-              "pco_plan_url FROM service WHERE id = ?");
+              "pco_plan_url, default_background FROM service WHERE id = ?");
     q.addBindValue(key(id));
     if (!q.exec() || !q.next())
         return std::nullopt;
@@ -247,6 +249,7 @@ std::optional<Service> ServiceStore::load(const QUuid &id) const
     s.created = fromTimestamp(q.value(5));
     s.updated = fromTimestamp(q.value(6));
     s.pcoPlanUrl = q.value(7).toString();
+    s.defaultBackground = uuid(q.value(8));
 
     QSqlQuery items(db);
     items.prepare("SELECT id, kind, title, ref_id, arrangement_id, custom_sequence, body, service_position, "

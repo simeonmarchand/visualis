@@ -6,7 +6,8 @@ namespace visualis {
 
 bool Group::operator==(const Group &other) const
 {
-    if (id != other.id || label != other.label || color != other.color || slides != other.slides)
+    if (id != other.id || label != other.label || color != other.color || slides != other.slides
+        || defaultBackground != other.defaultBackground)
         return false;
     for (qsizetype i = 0; i < slides.size(); ++i) {
         if (slideOverride(i) != other.slideOverride(i))
