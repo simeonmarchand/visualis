@@ -138,6 +138,46 @@ private slots:
         QVERIFY(m_songs->loadSong(songId)->group(QUuid::fromString(chorusId))->defaultBackground.isNull());
     }
 
+    // PR #127 review: picking a background mid-service never waits on another program's lock.
+    // The pick stays in the editor and saves when the library is free.
+    void aBusyLibraryKeepsTheBackgroundsAndSavesThemLater()
+    {
+        const QString asset = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        const QString chorusId = strings(m_editor->groups(), "id")[2];
+        const QUuid songId = QUuid::fromString(m_editor->songId());
+        {
+            OtherProgram other(m_dir.filePath(QString::number(m_n)));
+            QVERIFY(QSqlQuery(other.database()).exec("BEGIN IMMEDIATE"));
+            QElapsedTimer t;
+            t.start();
+            m_editor->setBackgroundId(asset);
+            m_editor->setGroupBackground(chorusId, asset);
+            QVERIFY2(t.elapsed() < Library::kBusyTimeoutMs / 2, qPrintable(QString::number(t.elapsed())));
+            QVERIFY2(m_editor->error().startsWith("Not saved yet"), qPrintable(m_editor->error()));
+            QCOMPARE(m_editor->backgroundId(), asset);
+            QCOMPARE(strings(m_editor->groups(), "backgroundId")[2], asset);
+            QVERIFY(QSqlQuery(other.database()).exec("ROLLBACK"));
+        }
+        QTRY_COMPARE(m_songs->loadSong(songId)->defaultBackground, QUuid::fromString(asset));
+        QCOMPARE(m_songs->loadSong(songId)->group(QUuid::fromString(chorusId))->defaultBackground, QUuid::fromString(asset));
+        QVERIFY(m_editor->error().isEmpty());
+    }
+
+    // The rule's one exception: at quit, a save the busy library hasn't taken waits it out.
+    void aBackgroundTheBusyLibraryHasntTakenSavesAtQuit()
+    {
+        const QString asset = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        const QUuid songId = QUuid::fromString(m_editor->songId());
+        {
+            OtherProgram other(m_dir.filePath(QString::number(m_n)));
+            QVERIFY(QSqlQuery(other.database()).exec("BEGIN IMMEDIATE"));
+            m_editor->setBackgroundId(asset);
+            QVERIFY(QSqlQuery(other.database()).exec("ROLLBACK"));
+        }
+        m_editor.reset();   // before the retry runs
+        QCOMPARE(m_songs->loadSong(songId)->defaultBackground, QUuid::fromString(asset));
+    }
+
     void removingAGroupRemovesItsSteps()
     {
         m_editor->removeGroup(strings(m_editor->groups(), "id")[0]);

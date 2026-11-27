@@ -330,13 +330,31 @@ bool ServiceList::insert(ServiceItem item, int at)
         return false;
     if (at < 0)
         at = m_selected >= 0 ? m_selected + 1 : int(m_open->items.size());
-    m_open->items.insert(at, item);
-    if (!save()) {
-        m_open->items.removeAt(at);
+    // After the item it follows here, found by id: another program may have changed the list.
+    const QUuid after = at > 0 ? m_open->items[at - 1].id : QUuid();
+    item.id = QUuid::createUuid();
+    const bool added = applyToOpen(
+        [&](Service &s) {
+            qsizetype i = 0;
+            if (!after.isNull()) {
+                i = std::min(qsizetype(at), s.items.size());
+                for (qsizetype n = 0; n < s.items.size(); ++n) {
+                    if (s.items[n].id == after) {
+                        i = n + 1;
+                        break;
+                    }
+                }
+            }
+            s.items.insert(i, item);
+            return true;
+        },
+        tr("Nothing was added: the library is in use by another program. Try again."));
+    if (!added)
         return false;
+    for (int n = 0; n < m_open->items.size(); ++n) {
+        if (m_open->items[n].id == item.id)
+            select(n);
     }
-    refresh();
-    select(at);
     return true;
 }
 

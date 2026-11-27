@@ -41,6 +41,9 @@ SongEditor::SongEditor(QObject *parent)
     m_styleSave.setSingleShot(true);
     m_styleSave.setInterval(kSaveDelayMs);
     connect(&m_styleSave, &QTimer::timeout, this, &SongEditor::flush);
+    m_songRetry.setSingleShot(true);
+    m_songRetry.setInterval(kSaveDelayMs);
+    connect(&m_songRetry, &QTimer::timeout, this, &SongEditor::save);
     connect(this, &SongEditor::changed, this, &SongEditor::selectionChanged);
 }
 
@@ -48,6 +51,16 @@ SongEditor::SongEditor(QObject *parent)
 // lock instead of being lost. Mid-service saves never wait (flush()).
 SongEditor::~SongEditor()
 {
+    if (m_songRetry.isActive()) {   // a whole save the busy library hasn't taken yet
+        m_songRetry.stop();
+        discardPendingStyle();   // the whole save takes it too
+        if (m_library)
+            disconnect(m_library, nullptr, this, nullptr);
+        QString error = QStringLiteral("the library isn't open");
+        if (!m_library || !m_library->saveSong(m_song, &error))
+            qCWarning(lcSongEditor).noquote() << QStringLiteral("the last edits to \"%1\" were not saved: %2").arg(m_song.title, error);
+        return;
+    }
     if (!m_stylePending)
         return;
     if (m_songUnsaved) {
@@ -87,8 +100,10 @@ void SongEditor::setSongId(const QString &id)
         m_library = lib;
     }
     flush();
-    if (m_stylePending && !m_songUnsaved)
-        return;   // stay with the style edit the busy library hasn't taken yet
+    if (m_songRetry.isActive())
+        save();   // one more try before leaving it
+    if (m_songRetry.isActive() || (m_stylePending && !m_songUnsaved))
+        return;   // stay with the edit the busy library hasn't taken yet
     if (m_stylePending)
         qCWarning(lcSongEditor).noquote() << QStringLiteral("the last edits to \"%1\" were not saved: %2").arg(m_song.title, m_error);
     discardPendingStyle();
@@ -110,12 +125,19 @@ void SongEditor::setSongId(const QString &id)
 void SongEditor::save()
 {
     SongLibrary *lib = library();
-    QString error;
-    m_songUnsaved = !lib || !lib->saveSong(m_song, &error);
-    if (m_songUnsaved)
-        m_error = QStringLiteral("Couldn't save: %1").arg(error.isEmpty() ? QStringLiteral("no library") : error);
-    else
-        m_error.clear();
+    // From the GUI thread, often mid-service: never wait on another program's lock.
+    const SongStore::Result r = lib ? lib->saveSongWithoutWaiting(m_song)
+                                    : SongStore::Result{false, QStringLiteral("no library")};
+    m_songUnsaved = !r.ok;
+    if (r.busy) {
+        m_songRetry.setInterval(std::min(m_songRetry.interval() * 2, kMaxRetryMs));
+        m_songRetry.start();
+        m_error = QStringLiteral("Not saved yet: the library is in use by another program. Trying again.");
+    } else {
+        m_songRetry.stop();
+        m_songRetry.setInterval(kSaveDelayMs);
+        m_error = r.ok ? QString() : QStringLiteral("Couldn't save: %1").arg(r.error);
+    }
     // Saved with the rest; or, if that failed, left for the next save that works.
     if (m_songUnsaved)
         m_styleSave.stop();

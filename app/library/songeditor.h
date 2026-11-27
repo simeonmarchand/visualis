@@ -189,4 +189,5 @@ private:
     bool m_stylePending = false;       // a style edit waits to be saved
     bool m_songUnsaved = false;        // the last whole-song save failed; m_song is ahead of the library
     QTimer m_styleSave;                // when it will be; backs off while the library is busy
+    QTimer m_songRetry;                // a whole-song save the busy library didn't take; backs off
 };

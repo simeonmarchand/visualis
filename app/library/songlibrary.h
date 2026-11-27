@@ -84,6 +84,8 @@ public:
     // For the song editor: load a song, and save it whole (every edit saves at once).
     std::optional<visualis::Song> loadSong(const QUuid &id) const;
     bool saveSong(visualis::Song &song, QString *error);
+    // saveSong for the GUI thread mid-service: never waits on another program (`busy`).
+    visualis::SongStore::Result saveSongWithoutWaiting(visualis::Song &song);
     // Only its slide overrides (SongStore::saveSlideOverrides); by default without waiting on
     // another program.
     visualis::SongStore::Result saveSlideOverrides(visualis::Song &song,
@@ -144,6 +146,7 @@ public:
     static constexpr int kSaveBudgetMs = 5;
 
 private:
+    visualis::SongStore::Result storeSong(visualis::Song &song, visualis::Library::Transaction::Lock lock);
     // How an import lists and reads its files (on the worker), and what counts as a song
     // already in the library (when saving).
     struct ImportJob {

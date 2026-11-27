@@ -26,6 +26,7 @@
 #include <QtQml/qqmlextensionplugin.h>
 #include <QtTest>
 
+#include "otherprogram.h"
 #include "testkeychain.h"
 
 Q_IMPORT_QML_PLUGIN(Visualis_UiPlugin)
@@ -820,6 +821,30 @@ private slots:
         dragMediaTile(window, onto->mapToScene(QPointF(onto->width() / 2, onto->height() - 4)).toPoint());
         QTRY_COMPARE(m_services->items().size(), 61);
         QCOMPARE(m_services->items()[21].toMap()["title"].toString(), QStringLiteral("Countdown"));
+    }
+
+    // PR #127 review: adding to a service from the GUI thread never waits on another
+    // program's lock. It says so, and the operator adds again.
+    void addingToAServiceWhileTheLibraryIsBusyFailsAtOnce()
+    {
+        QVERIFY(m_services->createService("Sunday"));
+        QVERIFY(m_services->addHeader("Welcome"));
+        const QString asset = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        {
+            OtherProgram other(m_dir.filePath(QString::number(m_libraries)));
+            QVERIFY(QSqlQuery(other.database()).exec("BEGIN IMMEDIATE"));
+            QElapsedTimer t;
+            t.start();
+            QVERIFY(!m_services->addMedia(asset, "Countdown", 0));
+            QVERIFY(!m_services->addHeader("Offering"));
+            QVERIFY2(t.elapsed() < Library::kBusyTimeoutMs / 2, qPrintable(QString::number(t.elapsed())));
+            QVERIFY2(m_services->report().contains("in use by another program"), qPrintable(m_services->report()));
+            QCOMPARE(titles(m_services->items()), QStringList{"Welcome"});
+            QVERIFY(QSqlQuery(other.database()).exec("ROLLBACK"));
+        }
+        QVERIFY(m_services->addMedia(asset, "Countdown", 0));
+        QCOMPARE(titles(m_services->items()), (QStringList{"Countdown", "Welcome"}));
+        QCOMPARE(m_services->selectedIndex(), 0);
     }
 
     void tileClicksOnAServiceItemAreCommands()

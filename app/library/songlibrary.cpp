@@ -427,23 +427,30 @@ std::optional<Song> SongLibrary::loadSong(const QUuid &id) const
 
 bool SongLibrary::saveSong(Song &song, QString *error)
 {
-    if (!m_store) {
-        if (error)
-            *error = QStringLiteral("The song library isn't open.");
-        return false;
-    }
-    const SongStore::Result r = m_store->save(song);
-    if (!r.ok) {
-        if (error)
-            *error = r.error;
-        return false;
-    }
+    const SongStore::Result r = storeSong(song, Library::Transaction::Lock::Wait);
+    if (!r.ok && error)
+        *error = r.error;
+    return r.ok;
+}
+
+SongStore::Result SongLibrary::saveSongWithoutWaiting(Song &song)
+{
+    return storeSong(song, Library::Transaction::Lock::NowOrBusy);
+}
+
+SongStore::Result SongLibrary::storeSong(Song &song, Library::Transaction::Lock lock)
+{
+    if (!m_store)
+        return {false, QStringLiteral("The song library isn't open.")};
+    const SongStore::Result r = m_store->save(song, lock);
+    if (!r.ok)
+        return r;
     emit songsChanged();   // the title may have changed
     if (m_selected && m_selected->id == song.id) {
         m_selected = song;
         emit selectionChanged();
     }
-    return true;   // what's live stays as shown until the next go-live (#44)
+    return r;   // what's live stays as shown until the next go-live (#44)
 }
 
 SongStore::Result SongLibrary::saveSlideOverrides(Song &song, Library::Transaction::Lock lock)

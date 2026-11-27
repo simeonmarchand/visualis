@@ -142,7 +142,7 @@ SongStore::SongStore(Library &library)
 {
 }
 
-SongStore::Result SongStore::save(Song &song)
+SongStore::Result SongStore::save(Song &song, Library::Transaction::Lock lock)
 {
     // Before anything else, so no caller (paste, the editor, an import) can make this thread
     // write an unbounded song (#83).
@@ -171,6 +171,12 @@ SongStore::Result SongStore::save(Song &song)
         s.created = now;
     s.updated = now;
 
+    std::optional<Library::Transaction> locked;
+    if (lock == Library::Transaction::Lock::NowOrBusy) {
+        locked.emplace(m_library, lock);
+        if (!locked->ok())
+            return {false, locked->error(), locked->busy()};
+    }
     QSqlDatabase db = m_library.database();
     const QString songId = key(s.id);
 
@@ -253,6 +259,10 @@ SongStore::Result SongStore::save(Song &song)
 
     if (const QString released = run(db, "RELEASE song_save", {}); !released.isEmpty())
         return fail(released);
+    if (locked) {
+        if (const QString committed = locked->commit(); !committed.isEmpty())
+            return {false, QStringLiteral("Couldn't save \"%1\": %2").arg(s.title, committed)};
+    }
     song = s;
     return {};
 }
