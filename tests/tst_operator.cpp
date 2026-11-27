@@ -813,8 +813,9 @@ private slots:
         window->requestActivate();
         QVERIFY(QTest::qWaitForWindowActive(window));
         QQuickItem *list = item(window, "serviceItems");
-        QVERIFY(list->property("contentHeight").toReal() > list->height() + 340);
-        list->setProperty("contentY", 340);   // ten rows down
+        const qreal tenRows = 10 * item(window, "serviceItem0")->height();
+        QVERIFY(list->property("contentHeight").toReal() > list->height() + tenRows);
+        list->setProperty("contentY", tenRows);
         QQuickItem *onto = item(window, "serviceItem20");
         dragMediaTile(window, onto->mapToScene(QPointF(onto->width() / 2, onto->height() - 4)).toPoint());
         QTRY_COMPARE(m_services->items().size(), 61);
