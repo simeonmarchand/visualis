@@ -10,6 +10,7 @@
 #include <QVariantMap>
 
 #include <functional>
+#include <optional>
 #include <QtQml/qqmlregistration.h>
 
 class SongLibrary;
@@ -177,6 +178,7 @@ private:
     void fitRegion();        // m_regionId to one the song's template has
     void styleEdited();
     void discardPendingStyle();
+    void openWantedSong();   // the song picked while a busy save held the editor here
 
     visualis::Song m_song;
     QUuid m_arrangement;
@@ -190,4 +192,5 @@ private:
     bool m_songUnsaved = false;        // the last whole-song save failed; m_song is ahead of the library
     QTimer m_styleSave;                // when it will be; backs off while the library is busy
     QTimer m_songRetry;                // a whole-song save the busy library didn't take; backs off
+    std::optional<QString> m_wantedSongId;   // picked while a busy save kept the editor on this song
 };

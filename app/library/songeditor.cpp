@@ -13,6 +13,7 @@
 #include <QQmlEngine>
 
 #include <algorithm>
+#include <utility>
 
 using namespace visualis;
 
@@ -100,12 +101,15 @@ void SongEditor::setSongId(const QString &id)
         m_followsTemplates = true;
         m_library = lib;
     }
+    m_wantedSongId.reset();
     flush();
     if (m_songRetry.isActive())
         save();   // one more try before leaving it
-    if (m_songRetry.isActive() || (m_stylePending && !m_songUnsaved))
-        return;   // stay with the edit the busy library hasn't taken yet
-    if (m_stylePending)
+    if (m_songRetry.isActive() || (m_stylePending && !m_songUnsaved)) {
+        m_wantedSongId = id;   // stay with the edit the busy library hasn't taken yet, then open it
+        return;
+    }
+    if (m_stylePending || m_songUnsaved)
         qCWarning(lcSongEditor).noquote() << QStringLiteral("the last edits to \"%1\" were not saved: %2").arg(m_song.title, m_error);
     discardPendingStyle();
     m_songUnsaved = false;
@@ -146,6 +150,14 @@ void SongEditor::save()
         discardPendingStyle();
     pruneSelection();
     emit changed();
+    if (!r.busy)
+        openWantedSong();
+}
+
+void SongEditor::openWantedSong()
+{
+    if (m_wantedSongId)
+        setSongId(*std::exchange(m_wantedSongId, std::nullopt));
 }
 
 QString SongEditor::lyrics() const
@@ -575,6 +587,7 @@ bool SongEditor::flush()
         m_styleSave.setInterval(kSaveDelayMs);
         m_error.clear();
         emit changed();
+        openWantedSong();
         return true;
     }
     if (r.busy) {
@@ -594,6 +607,7 @@ bool SongEditor::flush()
     emit changed();
     if (lyricsText(m_song) != lyricsBefore)
         emit lyricsReset();
+    openWantedSong();
     return false;
 }
 
@@ -696,6 +710,11 @@ bool SongEditor::deleteSong()
     if (!loaded() || !lib || !lib->removeSong(songId()))
         return false;
     discardPendingStyle();
+    m_songRetry.stop();   // nothing left to save
+    m_songRetry.setInterval(kSaveDelayMs);
+    m_songUnsaved = false;
+    m_wantedSongId.reset();
+    m_error.clear();   // about the save that no longer matters
     m_song = Song{};
     m_arrangement = QUuid();
     m_selected.clear();

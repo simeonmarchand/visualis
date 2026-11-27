@@ -163,6 +163,41 @@ private slots:
         QVERIFY(m_editor->error().isEmpty());
     }
 
+    // Thermo: a song picked while a busy save is pending opens once that save lands.
+    void aSongPickedDuringABusySaveOpensWhenItLands()
+    {
+        const QString asset = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        const QUuid first = QUuid::fromString(m_editor->songId());
+        QVERIFY(m_songs->createFromPaste("Other", "Verse 1\nOne\n"));
+        const QString other = m_songs->selectedId();
+        {
+            OtherProgram program(m_dir.filePath(QString::number(m_n)));
+            QVERIFY(QSqlQuery(program.database()).exec("BEGIN IMMEDIATE"));
+            m_editor->setBackgroundId(asset);
+            m_editor->setSongId(other);
+            QCOMPARE(m_editor->songId(), first.toString(QUuid::WithoutBraces));   // stays until it saves
+            QVERIFY(QSqlQuery(program.database()).exec("ROLLBACK"));
+        }
+        QTRY_COMPARE(m_editor->songId(), other);
+        QCOMPARE(m_songs->loadSong(first)->defaultBackground, QUuid::fromString(asset));
+        QVERIFY(m_editor->error().isEmpty());
+    }
+
+    // Thermo: deleting the song drops its pending save, so nothing retries an empty song.
+    void deletingASongDropsItsPendingSave()
+    {
+        {
+            OtherProgram program(m_dir.filePath(QString::number(m_n)));
+            QVERIFY(QSqlQuery(program.database()).exec("BEGIN IMMEDIATE"));
+            m_editor->setBackgroundId(QUuid::createUuid().toString(QUuid::WithoutBraces));
+            QVERIFY(QSqlQuery(program.database()).exec("ROLLBACK"));
+        }
+        QVERIFY(m_editor->deleteSong());
+        QTest::qWait(4 * SongEditor::kSaveDelayMs);   // the retry would have run
+        QVERIFY2(m_editor->error().isEmpty(), qPrintable(m_editor->error()));
+        QVERIFY(m_songs->songs().isEmpty());
+    }
+
     // The rule's one exception: at quit, a save the busy library hasn't taken waits it out.
     void aBackgroundTheBusyLibraryHasntTakenSavesAtQuit()
     {
