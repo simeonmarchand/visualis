@@ -102,17 +102,17 @@ void SongEditor::setSongId(const QString &id)
         m_library = lib;
     }
     m_wantedSongId.reset();
+    emit leavingSong();   // typing not yet applied is applied now, to this song
     flush();
     if (m_songRetry.isActive())
         save();   // one more try before leaving it
-    if (m_songRetry.isActive() || (m_stylePending && !m_songUnsaved)) {
+    if (holdsBusyEdit()) {
         m_wantedSongId = id;   // stay with the edit the busy library hasn't taken yet, then open it
         return;
     }
     if (m_stylePending || m_songUnsaved)
         qCWarning(lcSongEditor).noquote() << QStringLiteral("the last edits to \"%1\" were not saved: %2").arg(m_song.title, m_error);
-    discardPendingStyle();
-    m_songUnsaved = false;
+    dropUnsavedEdits();
     const std::optional<Song> song = lib ? lib->loadSong(QUuid::fromString(id)) : std::nullopt;
     m_song = song.value_or(Song{});
     m_selected.clear();
@@ -151,12 +151,37 @@ void SongEditor::save()
     pruneSelection();
     emit changed();
     if (!r.busy)
-        openWantedSong();
+        saveEnded(r.ok);
+}
+
+bool SongEditor::holdsBusyEdit() const
+{
+    return m_songRetry.isActive() || (m_stylePending && !m_songUnsaved);
+}
+
+void SongEditor::dropUnsavedEdits()
+{
+    discardPendingStyle();
+    m_songRetry.stop();
+    m_songRetry.setInterval(kSaveDelayMs);
+    m_songUnsaved = false;
+}
+
+void SongEditor::saveEnded(bool ok)
+{
+    if (!m_wantedSongId)
+        return;
+    if (!ok) {
+        m_wantedSongId.reset();   // stay, with the reason showing, rather than drop the edit unseen
+        return;
+    }
+    // Queued: the edit that saved finishes on this song before the other opens.
+    QMetaObject::invokeMethod(this, &SongEditor::openWantedSong, Qt::QueuedConnection);
 }
 
 void SongEditor::openWantedSong()
 {
-    if (m_wantedSongId)
+    if (m_wantedSongId && !holdsBusyEdit())
         setSongId(*std::exchange(m_wantedSongId, std::nullopt));
 }
 
@@ -587,7 +612,7 @@ bool SongEditor::flush()
         m_styleSave.setInterval(kSaveDelayMs);
         m_error.clear();
         emit changed();
-        openWantedSong();
+        saveEnded(true);
         return true;
     }
     if (r.busy) {
@@ -607,7 +632,7 @@ bool SongEditor::flush()
     emit changed();
     if (lyricsText(m_song) != lyricsBefore)
         emit lyricsReset();
-    openWantedSong();
+    saveEnded(false);
     return false;
 }
 
@@ -709,16 +734,13 @@ bool SongEditor::deleteSong()
     SongLibrary *lib = library();
     if (!loaded() || !lib || !lib->removeSong(songId()))
         return false;
-    discardPendingStyle();
-    m_songRetry.stop();   // nothing left to save
-    m_songRetry.setInterval(kSaveDelayMs);
-    m_songUnsaved = false;
-    m_wantedSongId.reset();
-    m_error.clear();   // about the save that no longer matters
+    dropUnsavedEdits();   // nothing left to save
+    m_error.clear();      // about the save that no longer matters
     m_song = Song{};
     m_arrangement = QUuid();
     m_selected.clear();
     emit changed();
     emit lyricsReset();
+    openWantedSong();   // the song picked while this one's save was waiting
     return true;
 }

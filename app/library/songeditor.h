@@ -154,6 +154,7 @@ public:
 signals:
     void changed();
     void lyricsReset();
+    void leavingSong();   // about to open another song: apply what hasn't been yet
     void selectionChanged();
 
 private:
@@ -178,7 +179,10 @@ private:
     void fitRegion();        // m_regionId to one the song's template has
     void styleEdited();
     void discardPendingStyle();
-    void openWantedSong();   // the song picked while a busy save held the editor here
+    bool holdsBusyEdit() const;   // an edit the busy library hasn't taken yet keeps the editor here
+    void dropUnsavedEdits();
+    void saveEnded(bool ok);      // opens the song picked meanwhile, or forgets it if refused
+    void openWantedSong();        // the song picked while a busy save held the editor here
 
     visualis::Song m_song;
     QUuid m_arrangement;

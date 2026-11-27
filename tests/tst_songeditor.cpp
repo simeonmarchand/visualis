@@ -183,6 +183,73 @@ private slots:
         QVERIFY(m_editor->error().isEmpty());
     }
 
+    // Thermo: a save refused while a pick waits keeps the editor on the song, with the reason.
+    void aSaveRefusedWhileAPickWaitsKeepsTheSongAndItsError()
+    {
+        const QUuid first = QUuid::fromString(m_editor->songId());
+        const QString tooLong = m_editor->lyrics().replace("My chains are gone", QString(songlimits::kCharactersPerSlide + 1, 'a'));
+        QVERIFY(m_songs->createFromPaste("Other", "Verse 1\nOne\n"));
+        {
+            OtherProgram program(m_dir.filePath(QString::number(m_n)));
+            QVERIFY(QSqlQuery(program.database()).exec("BEGIN IMMEDIATE"));
+            m_editor->setBackgroundId(QUuid::createUuid().toString(QUuid::WithoutBraces));
+            m_editor->setSongId(m_songs->selectedId());
+            m_editor->applyLyrics(tooLong);   // still busy; refused once the library is free
+            QVERIFY(QSqlQuery(program.database()).exec("ROLLBACK"));
+        }
+        QTRY_VERIFY2(m_editor->error().contains("characters"), qPrintable(m_editor->error()));
+        QTest::qWait(4 * SongEditor::kSaveDelayMs);
+        QCOMPARE(m_editor->songId(), first.toString(QUuid::WithoutBraces));
+        QVERIFY2(m_editor->error().contains("characters"), qPrintable(m_editor->error()));
+    }
+
+    // Thermo: lyrics typed while a pick waits are saved before the other song opens.
+    void lyricsTypedWhileAPickWaitsAreSavedFirst()
+    {
+        m_engine->loadFromModule("Visualis.Ui", "Main");
+        auto *main = qobject_cast<QQuickWindow *>(m_engine->rootObjects().value(0));
+        QVERIFY(main);
+        auto *editorWindow = main->findChild<QQuickWindow *>("songEditorWindow");
+        QVERIFY(editorWindow);
+        const QString first = m_songs->selectedId();
+        QMetaObject::invokeMethod(editorWindow, "edit", Q_ARG(QVariant, first));
+        QVERIFY(QTest::qWaitForWindowExposed(editorWindow));
+        auto *windowEditor = editorWindow->findChild<SongEditor *>();
+        auto *lyrics = findItem(editorWindow->contentItem(), "lyricsText");
+        QVERIFY(windowEditor && lyrics);
+        QVERIFY(m_songs->createFromPaste("Other", "Verse 1\nOne\n"));
+        const QString other = m_songs->selectedId();
+        {
+            OtherProgram program(m_dir.filePath(QString::number(m_n)));
+            QVERIFY(QSqlQuery(program.database()).exec("BEGIN IMMEDIATE"));
+            windowEditor->setBackgroundId(QUuid::createUuid().toString(QUuid::WithoutBraces));
+            windowEditor->setSongId(other);
+            QCOMPARE(windowEditor->songId(), first);
+            lyrics->forceActiveFocus();
+            QVERIFY(lyrics->hasActiveFocus());
+            lyrics->setProperty("text", lyrics->property("text").toString().replace("Amazing grace", "Typed grace"));
+            QVERIFY(QSqlQuery(program.database()).exec("ROLLBACK"));
+        }
+        QTRY_COMPARE(windowEditor->songId(), other);
+        QVERIFY(m_songs->loadSong(QUuid::fromString(first))->groups[1].slides[0].startsWith("Typed grace"));
+    }
+
+    // Thermo: deleting the song opens the one picked while its save was waiting.
+    void deletingASongOpensTheOnePickedMeanwhile()
+    {
+        QVERIFY(m_songs->createFromPaste("Other", "Verse 1\nOne\n"));
+        const QString other = m_songs->selectedId();
+        {
+            OtherProgram program(m_dir.filePath(QString::number(m_n)));
+            QVERIFY(QSqlQuery(program.database()).exec("BEGIN IMMEDIATE"));
+            m_editor->setBackgroundId(QUuid::createUuid().toString(QUuid::WithoutBraces));
+            m_editor->setSongId(other);
+            QVERIFY(QSqlQuery(program.database()).exec("ROLLBACK"));
+        }
+        QVERIFY(m_editor->deleteSong());
+        QCOMPARE(m_editor->songId(), other);
+    }
+
     // Thermo: deleting the song drops its pending save, so nothing retries an empty song.
     void deletingASongDropsItsPendingSave()
     {

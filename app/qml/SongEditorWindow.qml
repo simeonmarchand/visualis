@@ -28,10 +28,21 @@ Window {
         requestActivate()
     }
 
-    onClosing: editor.flush()
+    onClosing: {
+        applyPendingLyrics()
+        editor.flush()
+    }
+
+    function applyPendingLyrics() {
+        if (lyricsDirty.running) {
+            lyricsDirty.stop()
+            editor.applyLyrics(lyricsArea.text)
+        }
+    }
 
     SongEditor {
         id: editor
+        onLeavingSong: window.applyPendingLyrics()
         onLyricsReset: {
             lyricsArea.text = editor.lyrics
             lyricsDirty.stop()
@@ -156,7 +167,7 @@ Window {
                         font.pixelSize: 13
                         wrapMode: TextArea.Wrap
                         onTextChanged: if (activeFocus) lyricsDirty.restart()
-                        onActiveFocusChanged: if (!activeFocus && lyricsDirty.running) { lyricsDirty.stop(); editor.applyLyrics(text) }
+                        onActiveFocusChanged: if (!activeFocus) window.applyPendingLyrics()
                     }
                 }
             }
