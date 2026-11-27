@@ -117,6 +117,22 @@ private slots:
         QCOMPARE(o, parse("{'regions': {'main': {'color': '#ffcc00'}}}"));
     }
 
+    // #99: an item's background, by media asset id. Not style, so resetting the style keeps it.
+    void aBackgroundIsSetAndResetOnItsOwn()
+    {
+        const QJsonObject original = parse("{'regions': {'main': {'color': '#ffcc00'}}, 'glow': true}");
+        QJsonObject o = original;
+        QVERIFY(overrideBackgroundId(o).isNull());
+        const QUuid asset = QUuid::createUuid();
+        overrides::setBackground(o, asset);
+        QCOMPARE(overrideBackgroundId(o), asset);
+        overrides::resetAll(o);
+        QCOMPARE(overrideBackgroundId(o), asset);
+        QCOMPARE(o, (QJsonObject{{"glow", true}, {"background", asset.toString(QUuid::WithoutBraces)}}));
+        overrides::setBackground(o, QUuid());
+        QCOMPARE(o, parse("{'glow': true}"));
+    }
+
     void aTransitionIsSetAndResetOnItsOwn()
     {
         const QJsonObject original = parse("{'regions': {'main': {'color': '#ffcc00'}}}");

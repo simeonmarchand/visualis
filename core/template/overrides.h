@@ -15,7 +15,8 @@
 //   {"template": "<template id>",
 //    "regions": {"main": {"color": "#ffcc00", "maxSize": 0.07, "shadow": {"opacity": 0.5},
 //                         "frame": {"y": 0.6}}},
-//    "transition": {"kind": "fade", "ms": 400}}
+//    "transition": {"kind": "fade", "ms": 400},
+//    "background": "<media asset id>"}
 //
 // Every key is optional, and keys Visualis doesn't know are kept through every edit.
 //  - "regions": per region id, properties named as in the template JSON (templatejson.h),
@@ -25,7 +26,8 @@
 //  - "template": another template for a service item. On a slide it's ignored.
 //  - "transition": the text's transition (#96), on a slide or an item, keys as in the
 //    template's transitions.content. Either key alone applies; the editor sets both.
-//  - "background" (#99) comes with that issue.
+//  - "background": a service item's background, a media asset id (#99). It wins over the
+//    song's and its groups' defaults on every slide of the item. On a slide it's ignored.
 // Layers apply in order, later winning: the item's overrides, then the slide's. liveItem()
 // (live/liveitem.h) is the only reader, and this is the only code that edits them.
 //
@@ -50,12 +52,14 @@ int propertyCount(const QJsonObject &overrides);
 QString setProperty(QJsonObject &overrides, const QString &regionId, const QString &path, const QJsonValue &value);
 // Removes one region property, and any object it leaves empty, so the template's value shows.
 void resetProperty(QJsonObject &overrides, const QString &regionId, const QString &path);
-// Removes every region property, the transition, and the template choice. Keys outside "regions" that
-// Visualis doesn't know stay.
+// Removes every region property, the transition, and the template choice. The background
+// isn't style, so it stays, as do keys outside "regions" that Visualis doesn't know.
 void resetAll(QJsonObject &overrides);
 
 // A service item's template; a null id removes the choice.
 void setTemplate(QJsonObject &overrides, const QUuid &templateId);
+// A service item's background (a media asset); a null id removes it, so the defaults show.
+void setBackground(QJsonObject &overrides, const QUuid &assetId);
 
 // Sets the text's transition, on a slide or an item, from `transition` ({"kind", "ms"}, either
 // alone). Empty when set; otherwise why not (a kind this version doesn't know, a length out of

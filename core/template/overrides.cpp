@@ -126,6 +126,14 @@ void setTemplate(QJsonObject &overrides, const QUuid &templateId)
         overrides["template"] = templateId.toString(QUuid::WithoutBraces);
 }
 
+void setBackground(QJsonObject &overrides, const QUuid &assetId)
+{
+    if (assetId.isNull())
+        overrides.remove("background");
+    else
+        overrides["background"] = assetId.toString(QUuid::WithoutBraces);
+}
+
 QString setTransition(QJsonObject &overrides, const QJsonObject &transition)
 {
     QStringList warnings;
