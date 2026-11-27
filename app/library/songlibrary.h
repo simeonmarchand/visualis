@@ -86,6 +86,9 @@ public:
     // By default without waiting on another program (`busy`): the GUI thread, mid-service.
     visualis::SongStore::Result saveSong(visualis::Song &song,
                                          visualis::Library::Transaction::Lock lock = visualis::Library::Transaction::Lock::NowOrBusy);
+    // All of them or none (SongStore::saveAll).
+    visualis::SongStore::Result saveSongs(QList<visualis::Song> &songs,
+                                          visualis::Library::Transaction::Lock lock = visualis::Library::Transaction::Lock::NowOrBusy);
     // Only its slide overrides (SongStore::saveSlideOverrides); by default without waiting on
     // another program.
     visualis::SongStore::Result saveSlideOverrides(visualis::Song &song,

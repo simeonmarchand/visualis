@@ -427,16 +427,26 @@ std::optional<Song> SongLibrary::loadSong(const QUuid &id) const
 
 SongStore::Result SongLibrary::saveSong(Song &song, Library::Transaction::Lock lock)
 {
+    QList<Song> songs{song};
+    const SongStore::Result r = saveSongs(songs, lock);
+    if (r.ok)
+        song = songs.first();
+    return r;
+}
+
+SongStore::Result SongLibrary::saveSongs(QList<Song> &songs, Library::Transaction::Lock lock)
+{
     if (!m_store)
         return {false, QStringLiteral("The song library isn't open.")};
-    const SongStore::Result r = lock == Library::Transaction::Lock::NowOrBusy ? m_store->saveWithoutWaiting(song)
-                                                                             : m_store->save(song);
+    const SongStore::Result r = m_store->saveAll(songs, lock);
     if (!r.ok)
         return r;
-    emit songsChanged();   // the title may have changed
-    if (m_selected && m_selected->id == song.id) {
-        m_selected = song;
-        emit selectionChanged();
+    emit songsChanged();   // a title may have changed
+    for (const Song &song : songs) {
+        if (m_selected && m_selected->id == song.id) {
+            m_selected = song;
+            emit selectionChanged();
+        }
     }
     return r;   // what's live stays as shown until the next go-live (#44)
 }

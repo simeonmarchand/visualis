@@ -1247,6 +1247,25 @@ private slots:
         QCOMPARE(m_songs->loadSong(song.id)->groups[1].slideOverride(0), big);
     }
 
+    // Thermo: moving the Planning Center id is all or nothing, so the link is never on no song.
+    void relinkingThatCantSaveTheChosenSongKeepsTheOldLink()
+    {
+        QVERIFY(m_songs->createFromPaste("Amazing Grace", kLyrics));
+        const QUuid wrong = QUuid::fromString(m_songs->selectedId());
+        QVERIFY(m_songs->createFromPaste("Amazing Grace Hymn", kLyrics));
+        const QUuid right = QUuid::fromString(m_songs->selectedId());
+        openImportedService({"Amazing Grace"}, true);
+        QCOMPARE(m_songs->loadSong(wrong)->pcoSongId, QStringLiteral("p1"));
+        QSqlQuery q(m_songs->library()->database());
+        QVERIFY(q.exec(QStringLiteral("CREATE TRIGGER refuse BEFORE UPDATE ON song WHEN NEW.id = '%1' "
+                                      "BEGIN SELECT RAISE(ABORT, 'refused'); END")
+                           .arg(right.toString(QUuid::WithoutBraces))));
+
+        QVERIFY(m_services->linkSong(0, right.toString(QUuid::WithoutBraces)));
+        QCOMPARE(m_songs->loadSong(wrong)->pcoSongId, QStringLiteral("p1"));   // still matches next week
+        QVERIFY(m_songs->loadSong(right)->pcoSongId.isEmpty());
+    }
+
     // Review of #85: a wrong link by title doesn't stick. Relinking moves the Planning
     // Center id, so next week links the right song by id instead of asking again.
     void relinkingMovesThePlanningCenterId()
