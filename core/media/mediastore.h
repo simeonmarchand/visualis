@@ -38,8 +38,9 @@ public:
     std::optional<MediaAsset> findByHash(const QString &hash) const;
     // Every asset, sorted by original name, ignoring case.
     QList<MediaAsset> list() const;
-    // The titles of the services with an item showing the asset, so deleting it can ask first.
-    // TODO(#99): also count backgrounds set as song and service defaults and as item overrides.
+    // What shows the asset, so deleting it can ask first: the titles of the services with it as
+    // a media item, an item's background, or their default, newest first; then `the song "X"`
+    // for each song with it as its own or a group's default.
     QStringList usedBy(const QUuid &id) const;
     // Deletes the asset's row, then its file and thumbnail if no other row uses them.
     Result remove(const QUuid &id);

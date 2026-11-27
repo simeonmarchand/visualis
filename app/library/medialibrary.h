@@ -59,7 +59,8 @@ public:
     Q_INVOKABLE bool importFiles(const QList<QUrl> &urls);
     // Stops after the file in hand; a file being copied is abandoned and its copy removed.
     Q_INVOKABLE void stopImport();
-    // The services that show the asset, so the pane can ask before deleting it.
+    // The services and songs that use the asset (MediaStore::usedBy), so the pane can ask
+    // before deleting it.
     Q_INVOKABLE QStringList usedBy(const QString &id) const;
     Q_INVOKABLE bool removeAsset(const QString &id);
 

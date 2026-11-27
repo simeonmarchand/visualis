@@ -4,6 +4,8 @@
 #include "media/mediaresolve.h"
 #include "media/mediastore.h"
 #include "service/servicestore.h"
+#include "song/songstore.h"
+#include "template/overrides.h"
 
 #include <QCryptographicHash>
 #include <QDir>
@@ -498,6 +500,49 @@ private slots:
 
         QCOMPARE(media.usedBy(used.id), QStringList{"Sunday"});
         QVERIFY(media.usedBy(unused.id).isEmpty());
+    }
+
+    // #99: a background set as a default or an override counts too: deleting it would leave
+    // that song or service without the background it asked for.
+    void usedByCountsDefaultsAndOverrides()
+    {
+        QTemporaryDir lib;
+        auto library = Library::open(lib.path()).library;
+        MediaStore media(*library);
+        MediaAsset a = asset("Sunrise.mp4", MediaAsset::Kind::Video);
+        QVERIFY(media.save(a).ok);
+
+        ServiceStore services(*library);
+        Service byDefault;
+        byDefault.title = "Easter";
+        byDefault.date = QDate(2027, 3, 28);
+        byDefault.defaultBackground = a.id;
+        Service byOverride;
+        byOverride.title = "Advent";
+        byOverride.date = QDate(2026, 11, 29);
+        ServiceItem item;
+        item.kind = ServiceItem::Kind::Text;
+        item.title = "Welcome";
+        overrides::setBackground(item.overrides, a.id);
+        byOverride.items << item;
+        Service unrelated;
+        unrelated.title = "Midweek";
+        QVERIFY(services.save(byDefault).ok && services.save(byOverride).ok && services.save(unrelated).ok);
+
+        SongStore songs(*library);
+        Song own;
+        own.title = "Amazing Grace";
+        own.defaultBackground = a.id;
+        Song group;
+        group.title = "Be Thou My Vision";
+        group.groups = {Group{QUuid::createUuid(), "Verse 1", "", {"Be Thou my vision"}}};
+        group.groups[0].defaultBackground = a.id;
+        Song plain;
+        plain.title = "Holy, Holy, Holy";
+        QVERIFY(songs.save(own).ok && songs.save(group).ok && songs.save(plain).ok);
+
+        QCOMPARE(media.usedBy(a.id), (QStringList{"Easter", "Advent", "the song \"Amazing Grace\"",
+                                                  "the song \"Be Thou My Vision\""}));
     }
 
     void removeDeletesTheRowFileAndThumbnail()

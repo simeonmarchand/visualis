@@ -2,16 +2,17 @@ import QtQuick
 import QtQuick.Controls
 import Visualis.Ui
 
-// Always asks: deleting removes the file from the library. When a service shows the
-// asset, it says which, since that item will have nothing to show.
+// Always asks: deleting removes the file from the library. When a service or song uses the
+// asset (as a media item, a background, or a default), it says which, since nothing will
+// show in its place.
 Dialog {
     id: deleteDialog
     objectName: "mediaDeleteDialog"
     property string assetId: ""
     property string assetName: ""
-    property var services: []
+    property var users: []
     function ask() {
-        services = MediaLibrary.usedBy(assetId)
+        users = MediaLibrary.usedBy(assetId)
         open()
     }
     title: "Delete \"" + assetName + "\"?"
@@ -24,10 +25,10 @@ Dialog {
         objectName: "mediaDeleteText"
         width: parent.width
         wrapMode: Text.WordWrap
-        text: deleteDialog.services.length === 0
+        text: deleteDialog.users.length === 0
               ? "It's removed from the library."
-              : "It's used in " + deleteDialog.services.join(", ")
-                + ". Those items will have nothing to show."
+              : "It's used by " + deleteDialog.users.join(", ")
+                + ". Nothing will show in its place."
     }
     onAccepted: MediaLibrary.removeAsset(assetId)
 }
