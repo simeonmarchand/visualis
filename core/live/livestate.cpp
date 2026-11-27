@@ -19,14 +19,19 @@ bool LiveState::show(const LiveItem &item, int index)
 {
     if (!acceptable(item))
         return false;
+    const bool valid = index >= 0 && index < item.slides.size();
+    enterItem(item, valid ? index : -1);
+    return valid;
+}
+
+void LiveState::enterItem(const LiveItem &item, int index)
+{
     m_live = item;
     m_heldBack.clear();
     m_failedDefault = QUuid();   // one try per item: the file may be back
-    const bool valid = index >= 0 && index < m_live.slides.size();
-    m_index = valid ? index : -1;
+    m_index = index;
     enterSlide();
     emit changed();
-    return valid;
 }
 
 bool LiveState::restore(const LiveItem &item, int index, bool textCleared, const BackgroundLayer &background,
@@ -118,12 +123,7 @@ bool LiveState::goToItem(int n, int slide)
 
 void LiveState::showItem(int n, int slide)
 {
-    m_live = m_items[n];
-    m_heldBack.clear();
-    m_failedDefault = QUuid();   // one try per item: the file may be back
-    m_index = slide;
-    enterSlide();
-    emit changed();
+    enterItem(m_items[n], slide);
 }
 
 bool LiveState::next()

@@ -183,6 +183,8 @@ private:
     // Swaps in `item` as the live one, clamping the slide index to its slides.
     void replaceLive(const LiveItem &item);
     void showItem(int n, int slide);
+    // Puts `item` live at `index` (-1 for none) and emits changed().
+    void enterItem(const LiveItem &item, int index);
     // Applies the layers the current slide carries: its content (un-clearing the text), its
     // background, or the service default into an empty layer. Doesn't emit changed().
     void enterSlide();
