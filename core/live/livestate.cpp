@@ -23,7 +23,7 @@ bool LiveState::show(const LiveItem &item, int index)
     m_heldBack.clear();
     const bool valid = index >= 0 && index < m_live.slides.size();
     m_index = valid ? index : -1;
-    m_textCleared = false;
+    enterSlide();
     emit changed();
     return valid;
 }
@@ -33,22 +33,28 @@ bool LiveState::restore(const LiveItem &item, int index, bool textCleared, const
 {
     if (!acceptable(item))
         return false;
-    if (service != m_serviceId)
+    if (service != m_serviceId) {
         m_items.clear();
+        m_serviceDefault = {};
+    }
     m_serviceId = service;
     m_live = item;
     m_heldBack.clear();
     m_index = index >= 0 && index < m_live.slides.size() ? index : -1;
     m_textCleared = textCleared;
+    // A media slide carries no text: what was held over before the crash isn't in the journal.
+    if (const LiveSlide *s = currentLiveSlide(); !s || s->content)
+        m_content = s ? *s->content : Content();
     applyBackground(background);
     emit changed();
     return true;
 }
 
-void LiveState::setService(const QUuid &id, const QList<LiveItem> &items)
+void LiveState::setService(const QUuid &id, const QList<LiveItem> &items, const QUuid &defaultBackground)
 {
     m_serviceId = id;
     m_items = items;
+    m_serviceDefault = defaultBackground;   // fills an empty layer on the next move, not now
     if (const int n = itemIndex(); n >= 0)
         replaceLive(m_items[n]);   // its song or template may have changed
     emit changed();
@@ -78,6 +84,9 @@ void LiveState::replaceLive(const LiveItem &item)
     m_heldBack.clear();
     if (m_index >= m_live.slides.size())
         m_index = int(m_live.slides.size()) - 1;
+    // The text follows the new rendering; the background changes only on moves.
+    if (const LiveSlide *s = currentLiveSlide(); !s || s->content)
+        m_content = s ? *s->content : Content();
 }
 
 int LiveState::itemIndex() const
@@ -109,7 +118,7 @@ void LiveState::showItem(int n, int slide)
     m_live = m_items[n];
     m_heldBack.clear();
     m_index = slide;
-    m_textCleared = false;
+    enterSlide();
     emit changed();
 }
 
@@ -151,9 +160,24 @@ bool LiveState::goToSlide(int n)
 bool LiveState::moveTo(int n)
 {
     m_index = n;
-    m_textCleared = false;
+    enterSlide();
     emit changed();
     return true;
+}
+
+void LiveState::enterSlide()
+{
+    const LiveSlide *s = currentLiveSlide();
+    if (!s || s->content) {
+        m_content = s ? *s->content : Content();
+        m_textCleared = false;
+    }
+    if (!s)
+        return;
+    if (s->background)
+        takeBackground(s->background->asset, s->background->transition);
+    else if (m_background.asset.isNull() && !m_serviceDefault.isNull())
+        takeBackground(m_serviceDefault, m_live.tmpl.transitions.background);
 }
 
 bool LiveState::goToGroupStartingWith(const QString &letter)
@@ -209,19 +233,24 @@ bool LiveState::applyBackground(const BackgroundLayer &layer)
     return true;
 }
 
-bool LiveState::setBackground(const QUuid &asset, const Transition &transition)
+bool LiveState::takeBackground(const QUuid &asset, const Transition &transition)
 {
     if (asset == m_background.asset) {
         // Already live: no restart and no new transition, but a cleared one comes back.
-        if (!m_background.cleared && m_backgroundAlert.isEmpty())
-            return true;
         m_background.cleared = false;
         m_backgroundAlert.clear();
-        emit changed();
         return true;
     }
-    const bool shown = applyBackground({asset, false, transition});
-    emit changed();   // the layer, or the alert
+    return applyBackground({asset, false, transition});
+}
+
+bool LiveState::setBackground(const QUuid &asset, const Transition &transition)
+{
+    const BackgroundLayer before = m_background;
+    const QString alertBefore = m_backgroundAlert;
+    const bool shown = takeBackground(asset, transition);
+    if (m_background != before || m_backgroundAlert != alertBefore)
+        emit changed();
     return shown;
 }
 
@@ -270,20 +299,20 @@ void LiveState::clearAll()
     emit changed();
 }
 
-const SongSlide *LiveState::currentSlide() const
+const LiveSlide *LiveState::currentLiveSlide() const
 {
-    return m_index >= 0 && m_index < m_live.slides.size() ? &m_live.slides[m_index].slide : nullptr;
+    return m_index >= 0 && m_index < m_live.slides.size() ? &m_live.slides[m_index] : nullptr;
 }
 
-Content LiveState::content() const
+const SongSlide *LiveState::currentSlide() const
 {
-    return m_index >= 0 && m_index < m_live.slides.size() ? m_live.slides[m_index].content.value_or(Content()) : Content();
+    const LiveSlide *s = currentLiveSlide();
+    return s ? &s->slide : nullptr;
 }
 
 QString LiveState::currentText() const
 {
-    const SongSlide *s = currentSlide();
-    return s ? s->text : QString();
+    return m_content.regions.value(QStringLiteral("main")).text;
 }
 
 QString LiveState::nextText() const

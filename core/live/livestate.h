@@ -41,7 +41,8 @@ class LiveState : public QObject
     Q_PROPERTY(QString serviceId READ serviceIdString NOTIFY changed)
     Q_PROPERTY(QString itemId READ itemIdString NOTIFY changed)
     Q_PROPERTY(int itemIndex READ itemIndex NOTIFY changed)
-    // The live slide's content layer, even while its text is cleared; empty with no slide.
+    // The text layer on screen, even while cleared; empty with no slide. A slide that carries
+    // no content (a media item) leaves the one before it up.
     Q_PROPERTY(visualis::Content content READ content NOTIFY changed)
     // Why what's live is an older copy, empty when it isn't (see update()); for the operator.
     Q_PROPERTY(QString heldBack READ heldBack NOTIFY changed)
@@ -80,7 +81,9 @@ public:
     // it (after a reorder, an edit, or a recovery) with its new rendering, as update() does;
     // otherwise Next and Previous stay in what's live until an item is taken live. Call again
     // after every change to the service, its songs, or their templates.
-    void setService(const QUuid &id, const QList<LiveItem> &items);
+    // `defaultBackground` fills an empty background layer on the next slide move that carries
+    // none, never on this call: an operator's "None" stays until a slide changes.
+    void setService(const QUuid &id, const QList<LiveItem> &items, const QUuid &defaultBackground = {});
     void clearService() { setService({}, {}); }
     const QList<LiveItem> &serviceItems() const { return m_items; }
 
@@ -110,9 +113,11 @@ public:
     // Brings a cleared background back (plan 5.8 show_background).
     Q_INVOKABLE void showBackground();
 
-    // The background layer (#98). Slides never touch it: a slide changes only the layers it
-    // carries (plan 5.2). Setting the asset that's already live changes nothing, not even the
-    // transition, except to bring it back if it was cleared. Another asset is checked first
+    // The background layer (#98). A slide changes only the layers it carries (plan 5.2): one
+    // carrying a background sets it as this does on each move; one carrying none leaves it,
+    // unless the layer is empty and the service has a default (setService). Setting the asset
+    // that's already live changes nothing, not even the transition, except to bring it back
+    // if it was cleared. Another asset is checked first
     // (setMediaCheck): when its file isn't there the layer stays as it was, backgroundAlert()
     // says why, and it returns false. A null asset empties the layer.
     bool setBackground(const QUuid &asset, const Transition &transition);
@@ -141,15 +146,16 @@ public:
     QUuid arrangementId() const { return m_live.arrangement; }   // null for the default
     const QList<LiveSlide> &slides() const { return m_live.slides; }
     const SongSlide *currentSlide() const;   // null when no slide is showing
-    Content content() const;
+    Content content() const { return m_content; }
 
     bool hasSlide() const { return currentSlide() != nullptr; }
     QString songTitle() const { return m_live.song.title; }
     QString songId() const { return braceless(m_live.song.id); }
     int slideIndex() const { return m_index; }   // -1 when no slide is showing
     int slideCount() const { return int(m_live.slides.size()); }
-    // The slide's text even while cleared: each output decides what clearing hides
-    // (the audience shows nothing; a stage display may keep it).
+    // The text layer's main text even while cleared: each output decides what clearing hides
+    // (the audience shows nothing; a stage display may keep it). After a media slide it's
+    // the lyric still up, so the stage display shows what the audience sees.
     QString currentText() const;
     QString nextText() const;   // empty at the last slide
     QString groupLabel() const;
@@ -177,6 +183,12 @@ private:
     // Swaps in `item` as the live one, clamping the slide index to its slides.
     void replaceLive(const LiveItem &item);
     void showItem(int n, int slide);
+    // Applies the layers the current slide carries: its content (un-clearing the text), its
+    // background, or the service default into an empty layer. Doesn't emit changed().
+    void enterSlide();
+    const LiveSlide *currentLiveSlide() const;
+    // setBackground() without changed().
+    bool takeBackground(const QUuid &asset, const Transition &transition);
     // Applies `layer` if its asset passes the check; otherwise leaves the layer and sets the
     // alert. Doesn't emit changed().
     bool applyBackground(const BackgroundLayer &layer);
@@ -185,7 +197,9 @@ private:
     LiveItem m_live;   // its id is the service item's, null for a library song
     int m_index = -1;
     bool m_textCleared = false;
+    Content m_content;   // the text layer shown, which a media slide leaves up
     BackgroundLayer m_background;
+    QUuid m_serviceDefault;
     QString m_backgroundAlert;
     MediaCheckFn m_check;
     QString m_heldBack;
