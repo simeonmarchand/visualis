@@ -31,7 +31,7 @@ class SongEditor : public QObject
     // The lyrics as text. Signalled only when the text should be replaced (load, a group
     // renamed from the list), not after each typed edit, so the cursor stays put.
     Q_PROPERTY(QString lyrics READ lyrics NOTIFY lyricsReset)
-    // {id, label, color, slideCount, arranged}
+    // {id, label, color, slideCount, arranged, backgroundId}
     Q_PROPERTY(QVariantList groups READ groups NOTIFY changed)
     // {id, name, isDefault}
     Q_PROPERTY(QVariantList arrangements READ arrangements NOTIFY changed)
@@ -64,6 +64,8 @@ class SongEditor : public QObject
     Q_PROPERTY(int maxTransitionMs READ maxTransitionMs CONSTANT)
     // The template it shows with (#94); the built-in's id when it has none of its own.
     Q_PROPERTY(QString templateId READ templateId WRITE setTemplateId NOTIFY changed)
+    // The song's default background (#99), "" for none. A group's, in `groups`, wins over it.
+    Q_PROPERTY(QString backgroundId READ backgroundId WRITE setBackgroundId NOTIFY changed)
     Q_PROPERTY(QStringList warnings READ warnings NOTIFY changed)
     Q_PROPERTY(QString error READ error NOTIFY changed)
 
@@ -89,6 +91,8 @@ public:
     QVariantList previewSlides() const;
     QString templateId() const;
     void setTemplateId(const QString &id);
+    QString backgroundId() const;
+    void setBackgroundId(const QString &id);
     QStringList selectedKeys() const;
     QVariantList regions() const;
     QString regionId() const { return m_regionId; }
@@ -109,6 +113,7 @@ public:
 
     Q_INVOKABLE void renameGroup(const QString &id, const QString &label);
     Q_INVOKABLE void setGroupColor(const QString &id, const QString &color);
+    Q_INVOKABLE void setGroupBackground(const QString &id, const QString &assetId);
     Q_INVOKABLE void removeGroup(const QString &id);
 
     // Returns the new arrangement's id.

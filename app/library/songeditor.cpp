@@ -167,7 +167,8 @@ QVariantList SongEditor::groups() const
             || std::any_of(m_song.arrangements.cbegin(), m_song.arrangements.cend(),
                            [&](const Arrangement &a) { return a.sequence.contains(g.id); });
         list.append(QVariantMap{{"id", idText(g.id)}, {"label", g.label}, {"color", g.color},
-                                {"slideCount", g.slides.size()}, {"arranged", arranged}});
+                                {"slideCount", g.slides.size()}, {"arranged", arranged},
+                                {"backgroundId", idText(g.defaultBackground)}});
     }
     return list;
 }
@@ -188,6 +189,30 @@ void SongEditor::setGroupColor(const QString &id, const QString &color)
     if (!g || color == g->color)
         return;
     g->color = color;
+    save();
+}
+
+void SongEditor::setGroupBackground(const QString &id, const QString &assetId)
+{
+    Group *g = m_song.group(QUuid::fromString(id));
+    const QUuid asset = QUuid::fromString(assetId);
+    if (!g || asset == g->defaultBackground)
+        return;
+    g->defaultBackground = asset;
+    save();
+}
+
+QString SongEditor::backgroundId() const
+{
+    return idText(m_song.defaultBackground);
+}
+
+void SongEditor::setBackgroundId(const QString &id)
+{
+    const QUuid asset = QUuid::fromString(id);
+    if (!loaded() || asset == m_song.defaultBackground)
+        return;
+    m_song.defaultBackground = asset;
     save();
 }
 

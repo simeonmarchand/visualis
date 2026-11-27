@@ -118,6 +118,26 @@ private slots:
                  QStringLiteral("#123456"));
     }
 
+    // #99: the song's and a group's default backgrounds save at once; "" clears them.
+    void backgroundsAreSetOnTheSongAndItsGroups()
+    {
+        const QString asset = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        const QString chorusId = strings(m_editor->groups(), "id")[2];
+        const QUuid songId = QUuid::fromString(m_editor->songId());
+        m_editor->setBackgroundId(asset);
+        m_editor->setGroupBackground(chorusId, asset);
+        QCOMPARE(m_editor->backgroundId(), asset);
+        QCOMPARE(strings(m_editor->groups(), "backgroundId")[2], asset);
+        QCOMPARE(strings(m_editor->groups(), "backgroundId")[0], QString());
+        QCOMPARE(m_songs->loadSong(songId)->defaultBackground, QUuid::fromString(asset));
+        QCOMPARE(m_songs->loadSong(songId)->group(QUuid::fromString(chorusId))->defaultBackground, QUuid::fromString(asset));
+
+        m_editor->setBackgroundId("");
+        m_editor->setGroupBackground(chorusId, "");
+        QVERIFY(m_songs->loadSong(songId)->defaultBackground.isNull());
+        QVERIFY(m_songs->loadSong(songId)->group(QUuid::fromString(chorusId))->defaultBackground.isNull());
+    }
+
     void removingAGroupRemovesItsSteps()
     {
         m_editor->removeGroup(strings(m_editor->groups(), "id")[0]);

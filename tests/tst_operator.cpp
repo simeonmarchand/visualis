@@ -702,6 +702,77 @@ private slots:
         QVERIFY(!m_services->setItemTemplate(5, tid));
     }
 
+    // #99: media goes into a service where it's dropped, or after the selection.
+    void mediaIsAddedToAServiceWhereItsDropped()
+    {
+        const QStringList ids = makeSongs({"Amazing Grace", "Holy Spirit"});
+        QVERIFY(m_services->createService("Sunday"));
+        QVERIFY(m_services->addSong(ids[0]));
+        QVERIFY(m_services->addSong(ids[1]));
+        const QUuid asset = QUuid::createUuid();
+        QVERIFY(m_services->addMedia(asset.toString(QUuid::WithoutBraces), "Countdown", 1));
+        QCOMPARE(titles(m_services->items()), (QStringList{"Amazing Grace", "Countdown", "Holy Spirit"}));
+        QCOMPARE(m_services->selectedIndex(), 1);
+        QVERIFY(m_services->addMedia(asset.toString(QUuid::WithoutBraces), "Announcements", -1));
+        QCOMPARE(titles(m_services->items()), (QStringList{"Amazing Grace", "Countdown", "Announcements", "Holy Spirit"}));
+        QVERIFY(!m_services->addMedia("", "Nothing", -1));
+        QVERIFY(!m_services->addMedia(asset.toString(QUuid::WithoutBraces), "Too far", 9));
+
+        const Service stored = *ServiceStore(*m_songs->library()).load(QUuid::fromString(m_services->openId()));
+        QCOMPARE(stored.items[1].kind, ServiceItem::Kind::Media);
+        QCOMPARE(stored.items[1].ref, asset);
+        QCOMPARE(m_services->items()[1].toMap()["kind"].toString(), QStringLiteral("media"));
+        QVERIFY(m_services->items()[1].toMap()["hasSlides"].toBool());
+    }
+
+    // #99: an item's background and the service's default are set from the service list,
+    // saved with the service, and reach LiveState.
+    void backgroundsAreSetFromTheServiceList()
+    {
+        const QStringList ids = makeSongs({"Amazing Grace", "Holy Spirit"});
+        QVERIFY(m_services->createService("Sunday"));
+        QVERIFY(m_services->addSong(ids[0]));
+        QVERIFY(m_services->addSong(ids[1]));
+        // Real files: LiveState checks each against the media library before it goes up.
+        auto *media = m_engine->singletonInstance<MediaLibrary *>("Visualis.Ui", "MediaLibrary");
+        QTemporaryDir in;
+        for (const auto &[name, color] : {std::pair{"Cross.png", Qt::blue}, std::pair{"Sunrise.png", Qt::red}}) {
+            QImage image(16, 9, QImage::Format_RGB32);
+            image.fill(color);
+            QVERIFY(image.save(in.filePath(name)));
+        }
+        QSignalSpy finished(media, &MediaLibrary::importFinished);
+        QVERIFY(media->importFiles({QUrl::fromLocalFile(in.path())}));
+        QVERIFY(finished.wait(10'000));
+        QCOMPARE(media->assets().size(), 2);
+        const QString own = media->assets()[0].toMap().value("id").toString();
+        const QString fallback = media->assets()[1].toMap().value("id").toString();
+
+        QVERIFY(m_services->setItemBackground(0, own));
+        QVERIFY(m_services->setServiceBackground(fallback));
+        QCOMPARE(m_services->items()[0].toMap()["backgroundId"].toString(), own);
+        QCOMPARE(m_services->items()[1].toMap()["backgroundId"].toString(), QString());
+        QCOMPARE(m_services->serviceBackgroundId(), fallback);
+        QVERIFY(!m_services->setItemBackground(5, own));
+
+        const Service stored = *ServiceStore(*m_songs->library()).load(QUuid::fromString(m_services->openId()));
+        QCOMPARE(overrideBackgroundId(stored.items[0].overrides), QUuid::fromString(own));
+        QCOMPARE(stored.defaultBackground, QUuid::fromString(fallback));
+
+        QVERIFY(m_live->goToItem(0));
+        QCOMPARE(m_live->backgroundId(), own);
+        QVERIFY(m_live->pickBackground(""));
+        QVERIFY(m_live->goToItem(1));
+        QCOMPARE(m_live->backgroundId(), fallback);   // the default fills the empty layer
+
+        QVERIFY(m_services->setItemBackground(0, ""));
+        QVERIFY(m_services->setServiceBackground(""));
+        const Service cleared = *ServiceStore(*m_songs->library()).load(QUuid::fromString(m_services->openId()));
+        QVERIFY(overrideBackgroundId(cleared.items[0].overrides).isNull());
+        QVERIFY(cleared.defaultBackground.isNull());
+        QCOMPARE(m_services->serviceBackgroundId(), QString());
+    }
+
     void tileClicksOnAServiceItemAreCommands()
     {
         QQuickWindow *window = serviceOperatorWindow();
