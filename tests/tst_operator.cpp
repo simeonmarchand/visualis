@@ -1266,6 +1266,27 @@ private slots:
         QVERIFY(m_songs->loadSong(right)->pcoSongId.isEmpty());
     }
 
+    // Thermo: moving the link writes only the link, so a song the library would refuse to save
+    // whole (here one over the slide limit) doesn't stop it.
+    void relinkingAwayFromAnOversizedSongStillMovesTheLink()
+    {
+        QVERIFY(m_songs->createFromPaste("Amazing Grace", kLyrics));
+        const QUuid wrong = QUuid::fromString(m_songs->selectedId());
+        QVERIFY(m_songs->createFromPaste("Amazing Grace Hymn", kLyrics));
+        const QUuid right = QUuid::fromString(m_songs->selectedId());
+        openImportedService({"Amazing Grace"}, true);
+        QCOMPARE(m_songs->loadSong(wrong)->pcoSongId, QStringLiteral("p1"));
+        QSqlQuery q(m_songs->library()->database());
+        q.prepare("UPDATE song_group SET slides = ? WHERE id = ?");
+        q.addBindValue(QStringLiteral("[\"%1\"]").arg(QString(songlimits::kCharactersPerSlide + 1, 'a')));
+        q.addBindValue(m_songs->loadSong(wrong)->groups[0].id.toString(QUuid::WithoutBraces));
+        QVERIFY(q.exec());
+
+        QVERIFY(m_services->linkSong(0, right.toString(QUuid::WithoutBraces)));
+        QVERIFY(m_songs->loadSong(wrong)->pcoSongId.isEmpty());
+        QCOMPARE(m_songs->loadSong(right)->pcoSongId, QStringLiteral("p1"));
+    }
+
     // Review of #85: a wrong link by title doesn't stick. Relinking moves the Planning
     // Center id, so next week links the right song by id instead of asking again.
     void relinkingMovesThePlanningCenterId()

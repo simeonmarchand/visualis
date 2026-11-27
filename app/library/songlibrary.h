@@ -21,6 +21,7 @@ class TemplateLibrary;
 namespace visualis {
 class Library;
 class LiveState;
+struct PcoSong;
 class SongStore;
 }
 
@@ -86,9 +87,10 @@ public:
     // By default without waiting on another program (`busy`): the GUI thread, mid-service.
     visualis::SongStore::Result saveSong(visualis::Song &song,
                                          visualis::Library::Transaction::Lock lock = visualis::Library::Transaction::Lock::NowOrBusy);
-    // All of them or none (SongStore::saveAll).
-    visualis::SongStore::Result saveSongs(QList<visualis::Song> &songs,
-                                          visualis::Library::Transaction::Lock lock = visualis::Library::Transaction::Lock::NowOrBusy);
+    // Moves the Planning Center link to the song `to` (with the plan's credits where it has
+    // none), off any song that held it: only those columns, in one transaction that never waits,
+    // so the link is never left on no song.
+    visualis::SongStore::Result movePcoLink(const QUuid &to, const visualis::PcoSong &pco);
     // Only its slide overrides (SongStore::saveSlideOverrides); by default without waiting on
     // another program.
     visualis::SongStore::Result saveSlideOverrides(visualis::Song &song,

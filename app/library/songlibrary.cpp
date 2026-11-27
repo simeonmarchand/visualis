@@ -4,6 +4,7 @@
 #include "library/library.h"
 #include "library/templatelibrary.h"
 #include "live/livestate.h"
+#include "pco/songlink.h"
 #include "song/lyricspaste.h"
 #include "song/slidelist.h"
 #include "song/songjson.h"
@@ -427,28 +428,61 @@ std::optional<Song> SongLibrary::loadSong(const QUuid &id) const
 
 SongStore::Result SongLibrary::saveSong(Song &song, Library::Transaction::Lock lock)
 {
-    QList<Song> songs{song};
-    const SongStore::Result r = saveSongs(songs, lock);
-    if (r.ok)
-        song = songs.first();
-    return r;
+    if (!m_store)
+        return {false, QStringLiteral("The song library isn't open.")};
+    const SongStore::Result r = m_store->saveAlone(song, lock);
+    if (!r.ok)
+        return r;
+    emit songsChanged();   // the title may have changed
+    if (m_selected && m_selected->id == song.id) {
+        m_selected = song;
+        emit selectionChanged();
+    }
+    return r;   // what's live stays as shown until the next go-live (#44)
 }
 
-SongStore::Result SongLibrary::saveSongs(QList<Song> &songs, Library::Transaction::Lock lock)
+SongStore::Result SongLibrary::movePcoLink(const QUuid &to, const PcoSong &pco)
 {
     if (!m_store)
         return {false, QStringLiteral("The song library isn't open.")};
-    const SongStore::Result r = m_store->saveAll(songs, lock);
-    if (!r.ok)
-        return r;
-    emit songsChanged();   // a title may have changed
-    for (const Song &song : songs) {
+    // The songs whose link changes, as stored now.
+    auto changes = [&]() -> std::optional<QList<Song>> {
+        QList<Song> changed;
+        for (const SongCandidate &c : m_store->matchCandidates()) {
+            if (c.id == to || c.pcoSongId != pco.id)
+                continue;
+            if (std::optional<Song> holder = m_store->load(c.id); holder && releasePcoSong(*holder, pco.id))
+                changed << *holder;
+        }
+        std::optional<Song> song = m_store->load(to);
+        if (!song)
+            return std::nullopt;
+        if (takePcoSong(*song, pco))
+            changed << *song;
+        return changed;
+    };
+    if (const std::optional<QList<Song>> before = changes(); before && before->isEmpty())
+        return {};   // already linked: no need for the lock
+    Library::Transaction t(*m_library, Library::Transaction::Lock::NowOrBusy);
+    if (!t.ok())
+        return {false, t.error(), t.busy()};
+    const std::optional<QList<Song>> changed = changes();   // again, under the lock
+    if (!changed)
+        return {false, QStringLiteral("That song is no longer in the library.")};
+    for (const Song &song : *changed) {   // the holders first, then the chosen song
+        if (SongStore::Result r = m_store->updatePcoLink(song); !r.ok)
+            return r;
+    }
+    if (const QString committed = t.commit(); !committed.isEmpty())
+        return {false, committed};
+    emit songsChanged();
+    for (const Song &song : *changed) {
         if (m_selected && m_selected->id == song.id) {
-            m_selected = song;
+            m_selected = m_store->load(song.id);
             emit selectionChanged();
         }
     }
-    return r;   // what's live stays as shown until the next go-live (#44)
+    return {};
 }
 
 SongStore::Result SongLibrary::saveSlideOverrides(Song &song, Library::Transaction::Lock lock)

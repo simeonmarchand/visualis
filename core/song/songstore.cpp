@@ -257,19 +257,17 @@ SongStore::Result SongStore::save(Song &song)
     return {};
 }
 
-SongStore::Result SongStore::saveAll(QList<Song> &songs, Library::Transaction::Lock lock)
+SongStore::Result SongStore::saveAlone(Song &song, Library::Transaction::Lock lock)
 {
     Library::Transaction t(m_library, lock);
     if (!t.ok())
         return {false, t.error(), t.busy()};
-    QList<Song> saved = songs;   // save() updates its argument before the commit
-    for (Song &s : saved) {
-        if (Result r = save(s); !r.ok)
-            return r;
-    }
+    Song s = song;   // save() updates its argument before the commit
+    if (Result r = save(s); !r.ok)
+        return r;
     if (const QString committed = t.commit(); !committed.isEmpty())
-        return {false, QStringLiteral("Couldn't save: %1").arg(committed)};
-    songs = saved;
+        return {false, QStringLiteral("Couldn't save \"%1\": %2").arg(s.title, committed)};
+    song = s;
     return {};
 }
 
