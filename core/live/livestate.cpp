@@ -35,7 +35,7 @@ bool LiveState::restore(const LiveItem &item, int index, bool textCleared, const
         return false;
     if (service != m_serviceId) {
         m_items.clear();
-        m_serviceDefault = {};
+        m_serviceDefault = QUuid();
     }
     m_serviceId = service;
     m_live = item;
