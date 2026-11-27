@@ -8,7 +8,8 @@ import Visualis.Ui
 // Edit a song (#44, plan W3): title and credits, lyrics as text with "[Label]" headers and
 // blank-line slide breaks, its groups, its arrangements, and its template, with a preview
 // through that template. Click preview slides (Command or Shift for more) to override the
-// template's style on just those (#95). Every change saves on its own.
+// template's style on just those (#95). The song and each group can have a default background
+// (#99; a group's wins). Every change saves on its own.
 Window {
     id: window
     objectName: "songEditorWindow"
@@ -42,6 +43,24 @@ Window {
         id: lyricsDirty
         interval: 600
         onTriggered: editor.applyLyrics(lyricsArea.text)
+    }
+
+    // groupId "" for the song's own.
+    BackgroundPicker {
+        id: backgroundPicker
+        objectName: "songBackgroundPicker"
+        property string groupId
+        onChosen: id => {
+            if (groupId === "")
+                editor.backgroundId = id
+            else
+                editor.setGroupBackground(groupId, id)
+        }
+    }
+    function pickBackground(groupId, current) {
+        backgroundPicker.groupId = groupId
+        backgroundPicker.currentId = current
+        backgroundPicker.open()
     }
 
     ColorDialog {
@@ -98,6 +117,18 @@ Window {
                 // A template deleted since: the song shows with the built-in (#93).
                 displayText: currentIndex < 0 ? "Missing (built-in shows)" : currentText
                 onActivated: editor.templateId = currentValue
+            }
+            Button {
+                objectName: "songBackground"
+                text: editor.backgroundId !== "" ? "Background ✓" : "Background…"
+                onClicked: window.pickBackground("", editor.backgroundId)
+            }
+            ToolButton {
+                text: "✕"
+                visible: editor.backgroundId !== ""
+                onClicked: editor.backgroundId = ""
+                ToolTip.visible: hovered
+                ToolTip.text: "No background of its own"
             }
             Button {
                 text: "Delete song…"
@@ -191,6 +222,17 @@ Window {
                             text: groupRow.modelData.slideCount + (groupRow.modelData.slideCount === 1 ? " slide" : " slides")
                                   + (groupRow.modelData.arranged ? "" : " · not arranged")
                             color: groupRow.modelData.arranged ? "#8b8f96" : "#e0b040"
+                        }
+                        ToolButton {
+                            text: "▣"
+                            highlighted: groupRow.modelData.backgroundId !== ""
+                            onClicked: window.pickBackground(groupRow.modelData.id, groupRow.modelData.backgroundId)
+                            ToolTip.visible: hovered
+                            ToolTip.text: groupRow.modelData.backgroundId !== "" ? "Background set (right-click to remove)" : "Background…"
+                            TapHandler {
+                                acceptedButtons: Qt.RightButton
+                                onTapped: editor.setGroupBackground(groupRow.modelData.id, "")
+                            }
                         }
                         ToolButton { text: "✕"; onClicked: editor.removeGroup(groupRow.modelData.id) }
                     }

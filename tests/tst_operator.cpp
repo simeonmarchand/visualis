@@ -773,6 +773,35 @@ private slots:
         QCOMPARE(m_services->serviceBackgroundId(), QString());
     }
 
+    // #99: a media tile dragged from the media pane goes into the service where it's dropped.
+    void aMediaTileIsDraggedIntoTheService()
+    {
+        auto *media = m_engine->singletonInstance<MediaLibrary *>("Visualis.Ui", "MediaLibrary");
+        QTemporaryDir in;
+        QImage image(16, 9, QImage::Format_RGB32);
+        image.fill(Qt::green);
+        QVERIFY(image.save(in.filePath("Countdown.png")));
+        QSignalSpy finished(media, &MediaLibrary::importFinished);
+        QVERIFY(media->importFiles({QUrl::fromLocalFile(in.filePath("Countdown.png"))}));
+        QVERIFY(finished.wait(10'000));
+        const QString asset = media->assets()[0].toMap().value("id").toString();
+
+        QQuickWindow *window = serviceOperatorWindow();
+        click(window, item(window, "mediaTab"));
+        QQuickItem *from = item(window, "mediaTile0");
+        QQuickItem *onto = item(window, "serviceItem1");
+        const QPoint start = from->mapToScene(QPointF(from->width() / 2, from->height() / 2)).toPoint();
+        const QPoint end = onto->mapToScene(QPointF(onto->width() / 2, onto->height() - 4)).toPoint();
+        QTest::mousePress(window, Qt::LeftButton, {}, start);
+        for (int step = 1; step <= 20; ++step)
+            QTest::mouseMove(window, start + (end - start) * step / 20);
+        QTest::mouseRelease(window, Qt::LeftButton, {}, end);
+        QTRY_COMPARE(titles(m_services->items()), (QStringList{"Song 1", "Song 2", "Countdown", "Offering", "Song 3", "Song 4"}));
+        QCOMPARE(m_services->items()[2].toMap()["kind"].toString(), QStringLiteral("media"));
+        QVERIFY(m_live->goToItem(2));
+        QCOMPARE(m_live->backgroundId(), asset);
+    }
+
     void tileClicksOnAServiceItemAreCommands()
     {
         QQuickWindow *window = serviceOperatorWindow();

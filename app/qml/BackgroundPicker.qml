@@ -4,18 +4,22 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import Visualis.Ui
 
-// Picks the live background from the media library (#98). It changes with the live item's
-// template's background transition; the search is the media pane's.
+// Picks a background from the media library: the live one (#98), or a service's, item's,
+// song's, or group's default (#99). Whoever opens it acts on `chosen`. The search is the
+// media pane's.
 Popup {
     id: picker
-    objectName: "backgroundPicker"
     width: 520
     height: 420
     modal: true
     focus: true
 
+    // Highlighted as the current choice.
+    property string currentId: ""
+    signal chosen(string id)
+
     function choose(id) {
-        LiveState.pickBackground(id)
+        picker.chosen(id)
         picker.close()
     }
 
@@ -50,7 +54,7 @@ Popup {
                     anchors { left: parent.left; right: parent.right; top: parent.top; margins: 4 }
                     height: width * 9 / 16
                     color: "#1b1d21"
-                    border.width: tile.modelData.id === LiveState.backgroundId ? 2 : 0
+                    border.width: tile.modelData.id === picker.currentId ? 2 : 0
                     border.color: "#4a90d9"
                     Image {
                         anchors.fill: parent
