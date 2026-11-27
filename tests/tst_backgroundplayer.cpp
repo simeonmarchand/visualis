@@ -231,6 +231,22 @@ private slots:
         QCOMPARE(running(), QStringList{"/media/a"});
     }
 
+    // #99: stepping through a song, whether its slides carry no background or the one that's
+    // up, never restarts the video.
+    void steppingASongNeverRestartsTheVideo()
+    {
+        const QUuid a = add(true, "/media/a");
+        show(a, kCut);
+        m_live->show(liveSong(song(), {}, templateSet({})), 0);
+        while (m_live->next()) {}
+        Song own = song();
+        own.defaultBackground = a;
+        m_live->show(liveSong(own, {}, templateSet({})), 0);
+        while (m_live->next()) {}
+        QCOMPARE(sourceFor("/media/a")->loads, 1);
+        QCOMPARE(running(), QStringList{"/media/a"});
+    }
+
     void aBackgroundThatCantDecodeKeepsTheOldOneAndSaysWhy()
     {
         const QUuid a = add(false, "/media/a"), b = add(false, "/media/b");
