@@ -105,6 +105,8 @@ QByteArray songToJson(const Song &s)
                 overrides.append(o);
             group["slideOverrides"] = overrides;
         }
+        if (!g.defaultBackground.isNull())
+            group["defaultBackground"] = idText(g.defaultBackground);
         groups.append(group);
     }
     QJsonArray arrangements;
@@ -129,6 +131,8 @@ QByteArray songToJson(const Song &s)
     };
     if (!s.defaultTemplate.isNull())
         o["defaultTemplate"] = idText(s.defaultTemplate);
+    if (!s.defaultBackground.isNull())
+        o["defaultBackground"] = idText(s.defaultBackground);
     if (s.created.isValid())
         o["created"] = time(s.created);
     if (s.updated.isValid())
@@ -171,6 +175,7 @@ SongJsonResult songFromJson(const QByteArray &json)
                  credits.value("copyright").toString()};
     s.pcoSongId = o.value("pcoSongId").toString();
     s.defaultTemplate = QUuid::fromString(o.value("defaultTemplate").toString());
+    s.defaultBackground = QUuid::fromString(o.value("defaultBackground").toString());
     s.created = QDateTime::fromString(o.value("created").toString(), Qt::ISODateWithMs);
     s.updated = QDateTime::fromString(o.value("updated").toString(), Qt::ISODateWithMs);
 
@@ -188,6 +193,7 @@ SongJsonResult songFromJson(const QByteArray &json)
             slides << slide.toString();
         Group group{id, g.value("label").toString(), g.value("color").toString(), slides};
         readSlideOverrides(g.value("slideOverrides"), group, r.warnings);
+        group.defaultBackground = QUuid::fromString(g.value("defaultBackground").toString());
         s.groups << group;
     }
 

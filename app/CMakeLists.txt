@@ -22,6 +22,7 @@ qt_add_qml_module(visualis_ui
         qml/PasteSongDialog.qml
         qml/ImportReportDialog.qml
         qml/MediaDeleteDialog.qml
+        qml/MediaDrag.qml
         qml/MediaPane.qml
         qml/PercentField.qml
         qml/RegionStyleControls.qml

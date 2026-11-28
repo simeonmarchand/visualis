@@ -4,6 +4,9 @@
 #include "media/mediaresolve.h"
 #include "media/mediastore.h"
 #include "service/servicestore.h"
+#include "song/songstore.h"
+#include "template/overrides.h"
+#include "template/template.h"
 
 #include <QCryptographicHash>
 #include <QDir>
@@ -496,8 +499,71 @@ private slots:
         s.items << item;
         QVERIFY(services.save(s).ok);
 
-        QCOMPARE(media.usedBy(used.id), QStringList{"Sunday"});
+        QCOMPARE(media.usedBy(used.id).services, QStringList{"Sunday"});
         QVERIFY(media.usedBy(unused.id).isEmpty());
+    }
+
+    // #99: a background set as a default or an override counts too: deleting it would leave
+    // that song or service without the background it asked for.
+    void usedByCountsDefaultsAndOverrides()
+    {
+        QTemporaryDir lib;
+        auto library = Library::open(lib.path()).library;
+        MediaStore media(*library);
+        MediaAsset a = asset("Sunrise.mp4", MediaAsset::Kind::Video);
+        QVERIFY(media.save(a).ok);
+
+        ServiceStore services(*library);
+        Service byDefault;
+        byDefault.title = "Easter";
+        byDefault.date = QDate(2027, 3, 28);
+        byDefault.defaultBackground = a.id;
+        Service byOverride;
+        byOverride.title = "Advent";
+        byOverride.date = QDate(2026, 11, 29);
+        ServiceItem item;
+        item.kind = ServiceItem::Kind::Text;
+        item.title = "Welcome";
+        overrides::setBackground(item.overrides, a.id);
+        byOverride.items << item;
+        Service unrelated;
+        unrelated.title = "Midweek";
+        QVERIFY(services.save(byDefault).ok && services.save(byOverride).ok && services.save(unrelated).ok);
+
+        SongStore songs(*library);
+        Song own;
+        own.title = "Amazing Grace";
+        own.defaultBackground = a.id;
+        Song group;
+        group.title = "Be Thou My Vision";
+        group.groups = {Group{QUuid::createUuid(), "Verse 1", "", {"Be Thou my vision"}}};
+        group.groups[0].defaultBackground = a.id;
+        Song plain;
+        plain.title = "Holy, Holy, Holy";
+        QVERIFY(songs.save(own).ok && songs.save(group).ok && songs.save(plain).ok);
+
+        QCOMPARE(media.usedBy(a.id), (MediaStore::UsedBy{{"Easter", "Advent"}, {"Amazing Grace", "Be Thou My Vision"}}));
+    }
+
+    // PR #127 review: an override written by hand or another tool may brace or capitalize
+    // the id, and liveItem still shows it, so usedBy must count it.
+    void usedByCountsAnOverrideIdWrittenWithBraces()
+    {
+        QTemporaryDir lib;
+        auto library = Library::open(lib.path()).library;
+        MediaStore media(*library);
+        MediaAsset a = asset("Sunrise.mp4", MediaAsset::Kind::Video);
+        QVERIFY(media.save(a).ok);
+        Service s;
+        s.title = "Advent";
+        ServiceItem item;
+        item.kind = ServiceItem::Kind::Text;
+        item.title = "Welcome";
+        item.overrides["background"] = a.id.toString(QUuid::WithBraces).toUpper();
+        QCOMPARE(overrideBackgroundId(item.overrides), a.id);   // what goes live
+        s.items << item;
+        QVERIFY(ServiceStore(*library).save(s).ok);
+        QCOMPARE(media.usedBy(a.id).services, QStringList{"Advent"});
     }
 
     void removeDeletesTheRowFileAndThumbnail()
@@ -529,10 +595,12 @@ private slots:
         {
             auto old = Library::open(dir.path(), std::vector<Migration>(all.begin(), before));
             QVERIFY2(old.library, qPrintable(old.message));
-            Service s;
-            s.title = "Kept";
-            QVERIFY(ServiceStore(*old.library).save(s).ok);
-            serviceId = s.id;
+            // Written as that schema had it: today's ServiceStore needs later columns.
+            serviceId = QUuid::createUuid();
+            QSqlQuery q(old.library->database());
+            q.prepare("INSERT INTO service (id, title, created_at, updated_at) VALUES (?, 'Kept', '', '')");
+            q.addBindValue(serviceId.toString(QUuid::WithoutBraces));
+            QVERIFY(q.exec());
         }
         auto now = Library::open(dir.path());
         QVERIFY2(now.library, qPrintable(now.message));

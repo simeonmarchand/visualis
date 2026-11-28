@@ -26,6 +26,7 @@
 #include <QtQml/qqmlextensionplugin.h>
 #include <QtTest>
 
+#include "otherprogram.h"
 #include "testkeychain.h"
 
 Q_IMPORT_QML_PLUGIN(Visualis_UiPlugin)
@@ -511,8 +512,8 @@ private slots:
         const QStringList ids = makeSongs({"Amazing Grace", "Holy Spirit"});
         Song song = *m_songs->loadSong(QUuid::fromString(ids[0]));
         song.defaultTemplate = t.id;
-        QString error;
-        QVERIFY2(m_songs->saveSong(song, &error), qPrintable(error));
+        const SongStore::Result saved = m_songs->saveSong(song);
+        QVERIFY2(saved.ok, qPrintable(saved.error));
         QVERIFY(m_services->createService("Sunday"));
         QVERIFY(m_services->addSong(ids[0]));
         QVERIFY(m_live->goToItem(0, 1));
@@ -551,8 +552,8 @@ private slots:
 
         Song song = *m_songs->loadSong(QUuid::fromString(ids[0]));
         song.groups[0].slides[0] = "Edited since";
-        QString error;
-        QVERIFY2(m_songs->saveSong(song, &error), qPrintable(error));
+        const SongStore::Result saved = m_songs->saveSong(song);
+        QVERIFY2(saved.ok, qPrintable(saved.error));
         Template t = builtInLyricsTemplate();
         t.id = QUuid();
         t.name = "Any";
@@ -597,8 +598,8 @@ private slots:
         const QStringList ids = makeSongs({"Amazing Grace"});
         Song song = *m_songs->loadSong(QUuid::fromString(ids[0]));
         song.defaultTemplate = t.id;
-        QString error;
-        QVERIFY2(m_songs->saveSong(song, &error), qPrintable(error));
+        const SongStore::Result saved = m_songs->saveSong(song);
+        QVERIFY2(saved.ok, qPrintable(saved.error));
 
         {
             QSqlQuery q(m_songs->library()->database());
@@ -633,8 +634,8 @@ private slots:
         const QStringList ids = makeSongs({"Amazing Grace"});
         Song song = *m_songs->loadSong(QUuid::fromString(ids[0]));
         song.defaultTemplate = t.id;
-        QString error;
-        QVERIFY2(m_songs->saveSong(song, &error), qPrintable(error));
+        const SongStore::Result saved = m_songs->saveSong(song);
+        QVERIFY2(saved.ok, qPrintable(saved.error));
         m_songs->select(ids[0]);
 
         QQuickWindow *window = loadOperatorWindow();
@@ -658,8 +659,8 @@ private slots:
         const QStringList ids = makeSongs({"Amazing Grace", "Holy Spirit"});
         Song song = *m_songs->loadSong(QUuid::fromString(ids[0]));
         song.defaultTemplate = QUuid::createUuid();   // a template that's gone
-        QString error;
-        QVERIFY2(m_songs->saveSong(song, &error), qPrintable(error));
+        const SongStore::Result saved = m_songs->saveSong(song);
+        QVERIFY2(saved.ok, qPrintable(saved.error));
         QVERIFY(m_services->createService("Sunday"));
         QVERIFY(m_services->addSong(ids[0]));
         QVERIFY(m_services->addSong(ids[1]));
@@ -700,6 +701,168 @@ private slots:
         QCOMPARE(m_services->items()[0].toMap()["templateId"].toString(), QString());
         QCOMPARE(m_live->content().regions.value("main").style.color, builtInLyricsTemplate().regions[0].style.color);
         QVERIFY(!m_services->setItemTemplate(5, tid));
+    }
+
+    // #99: media goes into a service where it's dropped, or after the selection.
+    void mediaIsAddedToAServiceWhereItsDropped()
+    {
+        const QStringList ids = makeSongs({"Amazing Grace", "Holy Spirit"});
+        QVERIFY(m_services->createService("Sunday"));
+        QVERIFY(m_services->addSong(ids[0]));
+        QVERIFY(m_services->addSong(ids[1]));
+        const QUuid asset = QUuid::createUuid();
+        QVERIFY(m_services->addMedia(asset.toString(QUuid::WithoutBraces), "Countdown", 1));
+        QCOMPARE(titles(m_services->items()), (QStringList{"Amazing Grace", "Countdown", "Holy Spirit"}));
+        QCOMPARE(m_services->selectedIndex(), 1);
+        QVERIFY(m_services->addMedia(asset.toString(QUuid::WithoutBraces), "Announcements", -1));
+        QCOMPARE(titles(m_services->items()), (QStringList{"Amazing Grace", "Countdown", "Announcements", "Holy Spirit"}));
+        QVERIFY(!m_services->addMedia("", "Nothing", -1));
+        QVERIFY(!m_services->addMedia(asset.toString(QUuid::WithoutBraces), "Too far", 9));
+
+        const Service stored = *ServiceStore(*m_songs->library()).load(QUuid::fromString(m_services->openId()));
+        QCOMPARE(stored.items[1].kind, ServiceItem::Kind::Media);
+        QCOMPARE(stored.items[1].ref, asset);
+        QCOMPARE(m_services->items()[1].toMap()["kind"].toString(), QStringLiteral("media"));
+        QVERIFY(m_services->items()[1].toMap()["hasSlides"].toBool());
+        // A media item is its asset: an override of it wouldn't show.
+        QVERIFY(!m_services->items()[1].toMap()["canHaveBackground"].toBool());
+        QVERIFY(m_services->items()[0].toMap()["canHaveBackground"].toBool());
+    }
+
+    // #99: an item's background and the service's default are set from the service list,
+    // saved with the service, and reach LiveState.
+    void backgroundsAreSetFromTheServiceList()
+    {
+        const QStringList ids = makeSongs({"Amazing Grace", "Holy Spirit"});
+        QVERIFY(m_services->createService("Sunday"));
+        QVERIFY(m_services->addSong(ids[0]));
+        QVERIFY(m_services->addSong(ids[1]));
+        // Real files: LiveState checks each against the media library before it goes up.
+        auto *media = m_engine->singletonInstance<MediaLibrary *>("Visualis.Ui", "MediaLibrary");
+        QTemporaryDir in;
+        for (const auto &[name, color] : {std::pair{"Cross.png", Qt::blue}, std::pair{"Sunrise.png", Qt::red}}) {
+            QImage image(16, 9, QImage::Format_RGB32);
+            image.fill(color);
+            QVERIFY(image.save(in.filePath(name)));
+        }
+        QSignalSpy finished(media, &MediaLibrary::importFinished);
+        QVERIFY(media->importFiles({QUrl::fromLocalFile(in.path())}));
+        QVERIFY(finished.wait(10'000));
+        QCOMPARE(media->assets().size(), 2);
+        const QString own = media->assets()[0].toMap().value("id").toString();
+        const QString fallback = media->assets()[1].toMap().value("id").toString();
+
+        QVERIFY(m_services->setItemBackground(0, own));
+        QVERIFY(m_services->setServiceBackground(fallback));
+        QCOMPARE(m_services->items()[0].toMap()["backgroundId"].toString(), own);
+        QCOMPARE(m_services->items()[1].toMap()["backgroundId"].toString(), QString());
+        QCOMPARE(m_services->serviceBackgroundId(), fallback);
+        QVERIFY(!m_services->setItemBackground(5, own));
+
+        const Service stored = *ServiceStore(*m_songs->library()).load(QUuid::fromString(m_services->openId()));
+        QCOMPARE(overrideBackgroundId(stored.items[0].overrides), QUuid::fromString(own));
+        QCOMPARE(stored.defaultBackground, QUuid::fromString(fallback));
+
+        QVERIFY(m_live->goToItem(0));
+        QCOMPARE(m_live->backgroundId(), own);
+        QVERIFY(m_live->pickBackground(""));
+        QVERIFY(m_live->goToItem(1));
+        QCOMPARE(m_live->backgroundId(), fallback);   // the default fills the empty layer
+
+        QVERIFY(m_services->setItemBackground(0, ""));
+        QVERIFY(m_services->setServiceBackground(""));
+        const Service cleared = *ServiceStore(*m_songs->library()).load(QUuid::fromString(m_services->openId()));
+        QVERIFY(overrideBackgroundId(cleared.items[0].overrides).isNull());
+        QVERIFY(cleared.defaultBackground.isNull());
+        QCOMPARE(m_services->serviceBackgroundId(), QString());
+    }
+
+    // #99: a media tile dragged from the media pane goes into the service where it's dropped.
+    void aMediaTileIsDraggedIntoTheService()
+    {
+        const QString asset = importImage("Countdown");
+        QQuickWindow *window = serviceOperatorWindow();
+        QQuickItem *onto = item(window, "serviceItem1");
+        dragMediaTile(window, onto->mapToScene(QPointF(onto->width() / 2, onto->height() - 4)).toPoint());
+        QTRY_COMPARE(titles(m_services->items()), (QStringList{"Song 1", "Song 2", "Countdown", "Offering", "Song 3", "Song 4"}));
+        QCOMPARE(m_services->items()[2].toMap()["kind"].toString(), QStringLiteral("media"));
+        QVERIFY(m_live->goToItem(2));
+        QCOMPARE(m_live->backgroundId(), asset);
+    }
+
+    void mediaDroppedOnAnEmptyServiceOrBelowTheLastRowIsAdded()
+    {
+        importImage("Countdown");
+        QVERIFY(m_services->createService("Sunday"));
+        QQuickWindow *window = loadOperatorWindow();
+        window->requestActivate();
+        QVERIFY(QTest::qWaitForWindowActive(window));
+        QQuickItem *list = item(window, "serviceItems");
+        dragMediaTile(window, list->mapToScene(QPointF(list->width() / 2, list->height() / 2)).toPoint());
+        QTRY_COMPARE(titles(m_services->items()), QStringList{"Countdown"});
+        dragMediaTile(window, list->mapToScene(QPointF(list->width() / 2, list->height() - 10)).toPoint());
+        QTRY_COMPARE(titles(m_services->items()), (QStringList{"Countdown", "Countdown"}));
+    }
+
+    void mediaDroppedOnAScrolledServiceLandsUnderThePointer()
+    {
+        importImage("Countdown");
+        QVERIFY(m_services->createService("Sunday"));
+        for (int i = 0; i < 60; ++i)
+            QVERIFY(m_services->addHeader(QStringLiteral("Header %1").arg(i)));
+        QQuickWindow *window = loadOperatorWindow();
+        window->requestActivate();
+        QVERIFY(QTest::qWaitForWindowActive(window));
+        QQuickItem *list = item(window, "serviceItems");
+        const qreal tenRows = 10 * item(window, "serviceItem0")->height();
+        QVERIFY(list->property("contentHeight").toReal() > list->height() + tenRows);
+        list->setProperty("contentY", tenRows);
+        QQuickItem *onto = item(window, "serviceItem20");
+        dragMediaTile(window, onto->mapToScene(QPointF(onto->width() / 2, onto->height() - 4)).toPoint());
+        QTRY_COMPARE(m_services->items().size(), 61);
+        QCOMPARE(m_services->items()[21].toMap()["title"].toString(), QStringLiteral("Countdown"));
+    }
+
+    // PR #127 review: adding to a service from the GUI thread never waits on another
+    // program's lock. It says so, and the operator adds again.
+    void addingToAServiceWhileTheLibraryIsBusyFailsAtOnce()
+    {
+        QVERIFY(m_services->createService("Sunday"));
+        QVERIFY(m_services->addHeader("Welcome"));
+        const QString asset = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        {
+            OtherProgram other(m_dir.filePath(QString::number(m_libraries)));
+            QVERIFY(QSqlQuery(other.database()).exec("BEGIN IMMEDIATE"));
+            QElapsedTimer t;
+            t.start();
+            QVERIFY(!m_services->addMedia(asset, "Countdown", 0));
+            QVERIFY(!m_services->addHeader("Offering"));
+            QVERIFY2(t.elapsed() < Library::kBusyTimeoutMs / 2, qPrintable(QString::number(t.elapsed())));
+            QVERIFY2(m_services->report().contains("in use by another program"), qPrintable(m_services->report()));
+            QCOMPARE(titles(m_services->items()), QStringList{"Welcome"});
+            QVERIFY(QSqlQuery(other.database()).exec("ROLLBACK"));
+        }
+        QVERIFY(m_services->addMedia(asset, "Countdown", 0));
+        QCOMPARE(titles(m_services->items()), (QStringList{"Countdown", "Welcome"}));
+        QCOMPARE(m_services->selectedIndex(), 0);
+    }
+
+    // Thermo: a drop below the last row appends, even after another program appended.
+    void mediaAddedAtTheEndGoesBelowWhatAnotherProgramAdded()
+    {
+        QVERIFY(m_services->createService("Sunday"));
+        QVERIFY(m_services->addHeader("Welcome"));
+        ServiceStore other(*m_songs->library());
+        Service changed = *other.load(QUuid::fromString(m_services->openId()));
+        ServiceItem theirs = changed.items[0];
+        theirs.id = QUuid::createUuid();
+        theirs.title = QStringLiteral("Theirs");
+        changed.items << theirs;
+        QVERIFY(other.save(changed).ok);
+
+        QVERIFY(m_services->addMedia(QUuid::createUuid().toString(QUuid::WithoutBraces), "Countdown", 1));
+        QCOMPARE(titles(m_services->items()), (QStringList{"Welcome", "Theirs", "Countdown"}));
+        QCOMPARE(m_services->selectedIndex(), 2);
     }
 
     void tileClicksOnAServiceItemAreCommands()
@@ -1084,6 +1247,46 @@ private slots:
         QCOMPARE(m_songs->loadSong(song.id)->groups[1].slideOverride(0), big);
     }
 
+    // Thermo: moving the Planning Center id is all or nothing, so the link is never on no song.
+    void relinkingThatCantSaveTheChosenSongKeepsTheOldLink()
+    {
+        QVERIFY(m_songs->createFromPaste("Amazing Grace", kLyrics));
+        const QUuid wrong = QUuid::fromString(m_songs->selectedId());
+        QVERIFY(m_songs->createFromPaste("Amazing Grace Hymn", kLyrics));
+        const QUuid right = QUuid::fromString(m_songs->selectedId());
+        openImportedService({"Amazing Grace"}, true);
+        QCOMPARE(m_songs->loadSong(wrong)->pcoSongId, QStringLiteral("p1"));
+        QSqlQuery q(m_songs->library()->database());
+        QVERIFY(q.exec(QStringLiteral("CREATE TRIGGER refuse BEFORE UPDATE ON song WHEN NEW.id = '%1' "
+                                      "BEGIN SELECT RAISE(ABORT, 'refused'); END")
+                           .arg(right.toString(QUuid::WithoutBraces))));
+
+        QVERIFY(m_services->linkSong(0, right.toString(QUuid::WithoutBraces)));
+        QCOMPARE(m_songs->loadSong(wrong)->pcoSongId, QStringLiteral("p1"));   // still matches next week
+        QVERIFY(m_songs->loadSong(right)->pcoSongId.isEmpty());
+    }
+
+    // Thermo: moving the link writes only the link, so a song the library would refuse to save
+    // whole (here one over the slide limit) doesn't stop it.
+    void relinkingAwayFromAnOversizedSongStillMovesTheLink()
+    {
+        QVERIFY(m_songs->createFromPaste("Amazing Grace", kLyrics));
+        const QUuid wrong = QUuid::fromString(m_songs->selectedId());
+        QVERIFY(m_songs->createFromPaste("Amazing Grace Hymn", kLyrics));
+        const QUuid right = QUuid::fromString(m_songs->selectedId());
+        openImportedService({"Amazing Grace"}, true);
+        QCOMPARE(m_songs->loadSong(wrong)->pcoSongId, QStringLiteral("p1"));
+        QSqlQuery q(m_songs->library()->database());
+        q.prepare("UPDATE song_group SET slides = ? WHERE id = ?");
+        q.addBindValue(QStringLiteral("[\"%1\"]").arg(QString(songlimits::kCharactersPerSlide + 1, 'a')));
+        q.addBindValue(m_songs->loadSong(wrong)->groups[0].id.toString(QUuid::WithoutBraces));
+        QVERIFY(q.exec());
+
+        QVERIFY(m_services->linkSong(0, right.toString(QUuid::WithoutBraces)));
+        QVERIFY(m_songs->loadSong(wrong)->pcoSongId.isEmpty());
+        QCOMPARE(m_songs->loadSong(right)->pcoSongId, QStringLiteral("p1"));
+    }
+
     // Review of #85: a wrong link by title doesn't stick. Relinking moves the Planning
     // Center id, so next week links the right song by id instead of asking again.
     void relinkingMovesThePlanningCenterId()
@@ -1263,6 +1466,38 @@ private:
         if (!QTest::qWaitForWindowActive(window))
             qFatal("operator window didn't activate");
         return window;
+    }
+
+    // Imports a one-color image as `title`; returns its asset id. Each call uses a new color,
+    // because the media library dedups by content.
+    QString importImage(const QString &title)
+    {
+        auto *media = m_engine->singletonInstance<MediaLibrary *>("Visualis.Ui", "MediaLibrary");
+        QTemporaryDir in;
+        QImage image(16, 9, QImage::Format_RGB32);
+        image.fill(QColor::fromHsv((media->assets().size() * 47) % 360, 255, 255));
+        const QString file = in.filePath(title + ".png");
+        if (!image.save(file))
+            qFatal("couldn't write the test image");
+        QSignalSpy finished(media, &MediaLibrary::importFinished);
+        if (!media->importFiles({QUrl::fromLocalFile(file)}) || !finished.wait(10'000))
+            qFatal("the test image didn't import");
+        for (const QVariant &a : media->assets())
+            if (a.toMap().value("name").toString() == title + ".png")
+                return a.toMap().value("id").toString();
+        qFatal("no imported asset %s", qPrintable(title));
+    }
+
+    // Drags the first media tile from the Media tab and drops it at `end` (scene coordinates).
+    static void dragMediaTile(QQuickWindow *window, QPoint end)
+    {
+        click(window, item(window, "mediaTab"));
+        QQuickItem *from = item(window, "mediaTile0");
+        const QPoint start = from->mapToScene(QPointF(from->width() / 2, from->height() / 2)).toPoint();
+        QTest::mousePress(window, Qt::LeftButton, {}, start);
+        for (int step = 1; step <= 20; ++step)
+            QTest::mouseMove(window, start + (end - start) * step / 20);
+        QTest::mouseRelease(window, Qt::LeftButton, {}, end);
     }
 
     static QQuickItem *item(QQuickWindow *window, const QString &name)

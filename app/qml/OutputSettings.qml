@@ -11,7 +11,13 @@ ColumnLayout {
 
     signal templatesRequested()
 
-    BackgroundPicker { id: backgroundPicker }
+    BackgroundPicker {
+        id: backgroundPicker
+        objectName: "backgroundPicker"
+        currentId: LiveState.backgroundId
+        // With the live item's template's background transition.
+        onChosen: id => LiveState.pickBackground(id)
+    }
     PlanningCenterDialog { id: pcoDialog }
     PlanPickerDialog { id: planPicker }
 

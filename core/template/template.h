@@ -172,6 +172,8 @@ TemplateSet templateSet(const QList<Template> &stored);
 
 // The template an override picks, or null.
 QUuid overrideTemplateId(const QJsonObject &overrides);
+// The media asset a service item's override shows as its background (#99), or null.
+QUuid overrideBackgroundId(const QJsonObject &overrides);
 
 // The region's style with the overrides applied: an overridden property sticks, everything
 // else follows the template. A value that isn't valid for its property is ignored (the

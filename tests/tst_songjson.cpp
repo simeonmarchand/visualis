@@ -39,6 +39,8 @@ Song fullSong()
     s.arrangements[0].pcoArrangementId = "36584590";
     s.created = QDateTime(QDate(2026, 11, 21), QTime(9, 30, 15, 123), QTimeZone::UTC);
     s.updated = s.created.addSecs(3600);
+    s.defaultBackground = QUuid::createUuid();   // #99
+    s.groups[0].defaultBackground = QUuid::createUuid();
     return s;
 }
 

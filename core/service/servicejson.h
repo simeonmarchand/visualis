@@ -14,7 +14,7 @@ namespace visualis {
 // lacks the song, the item loads as a placeholder with its title.
 //
 // {"format": "visualis-service", "version": 1, "id": "…", "title": "Sunday", "date": "2026-11-29",
-//  "pcoPlanId": "", "pcoServiceTypeId": "", "pcoPlanUrl": "", "lastImportedAt": "",
+//  "pcoPlanId": "", "pcoServiceTypeId": "", "pcoPlanUrl": "", "lastImportedAt": "", "defaultBackground": "",
 //  "items": [{"id": "…", "kind": "song", "title": "Amazing Grace", "ref": "<song id>",
 //             "arrangement": "", "customSequence": ["Verse 1", "Chorus"], "body": "",
 //             "servicePosition": "", "pcoItemId": "", "overrides": {}, "importSnapshot": {}}]}

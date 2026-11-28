@@ -4,18 +4,33 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import Visualis.Ui
 
-// Picks the live background from the media library (#98). It changes with the live item's
-// template's background transition; the search is the media pane's.
+// Picks a background from the media library: the live one (#98), or a service's, item's,
+// song's, or group's default (#99): open it with pick(), or bind `currentId` and act on
+// `chosen`. "None" chooses "". The search is the media pane's.
 Popup {
     id: picker
-    objectName: "backgroundPicker"
     width: 520
     height: 420
     modal: true
     focus: true
 
+    // Highlighted as the current choice.
+    property string currentId: ""
+    signal chosen(string id)
+
+    property var then: null
+
+    // Opens with `current` highlighted; `then(id)` gets the choice.
+    function pick(current, then) {
+        picker.currentId = current
+        picker.then = then
+        picker.open()
+    }
+
     function choose(id) {
-        LiveState.pickBackground(id)
+        picker.chosen(id)
+        if (picker.then)
+            picker.then(id)
         picker.close()
     }
 
@@ -23,11 +38,22 @@ Popup {
         anchors.fill: parent
         spacing: 8
 
-        TextField {
+        RowLayout {
             Layout.fillWidth: true
-            placeholderText: "Search media"
-            text: MediaLibrary.search
-            onTextEdited: MediaLibrary.search = text
+            spacing: 8
+            TextField {
+                Layout.fillWidth: true
+                placeholderText: "Search media"
+                text: MediaLibrary.search
+                onTextEdited: MediaLibrary.search = text
+            }
+            Button {
+                objectName: "noBackground"
+                text: "None"
+                focusPolicy: Qt.NoFocus
+                enabled: picker.currentId !== ""
+                onClicked: picker.choose("")
+            }
         }
 
         GridView {
@@ -50,7 +76,7 @@ Popup {
                     anchors { left: parent.left; right: parent.right; top: parent.top; margins: 4 }
                     height: width * 9 / 16
                     color: "#1b1d21"
-                    border.width: tile.modelData.id === LiveState.backgroundId ? 2 : 0
+                    border.width: tile.modelData.id === picker.currentId ? 2 : 0
                     border.color: "#4a90d9"
                     Image {
                         anchors.fill: parent

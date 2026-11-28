@@ -21,8 +21,10 @@ namespace visualis {
 //   "credits": {"ccliNumber": "", "authors": "John Newton", "copyright": "Public Domain"},
 //   "pcoSongId": "",
 //   "groups": [{"id": "…", "label": "Verse 1", "color": "#0078cc", "slides": ["line\nline", "…"],
-//               "slideOverrides": [{}, {"regions": {"main": {"color": "#ffcc00"}}}]}],   // optional
+//               "slideOverrides": [{}, {"regions": {"main": {"color": "#ffcc00"}}}],     // optional
+//               "defaultBackground": "<media asset id>"}],                               // optional
 //   "defaultTemplate": "<template id>",                                                // optional
+//   "defaultBackground": "<media asset id>",                                           // optional
 //   "arrangements": [{"id": "…", "name": "Default", "sequence": ["<group id or label>", …],
 //                     "pcoArrangementId": ""}],
 //   "defaultArrangement": "<arrangement id or name>",

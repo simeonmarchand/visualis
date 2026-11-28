@@ -68,6 +68,7 @@ private slots:
         s.pcoPlanId = "12345";
         s.pcoServiceTypeId = "678";
         s.lastImportedAt = QDateTime(QDate(2026, 11, 21), QTime(9, 30), QTimeZone::UTC);
+        s.defaultBackground = QUuid::createUuid();   // #99
 
         ServiceItem song = item(Kind::Song, "Amazing Grace");
         song.ref = m_songId;
@@ -94,6 +95,37 @@ private slots:
         const std::optional<Service> loaded = m_services->load(s.id);
         QVERIFY(loaded);
         QCOMPARE(*loaded, s);
+    }
+
+    // #99: a library from before default backgrounds gains them, empty, and keeps its rows.
+    void aLibraryFromBeforeDefaultBackgroundsLoadsWithNone()
+    {
+        QTemporaryDir dir;
+        const std::vector<Migration> &all = Library::migrations();
+        QCOMPARE(all.back().version, 8);
+        const QString song = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        const QString group = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        const QString service = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        {
+            auto old = Library::open(dir.path(), std::vector<Migration>(all.begin(), all.end() - 1));
+            QVERIFY2(old.library, qPrintable(old.message));
+            QSqlQuery q(old.library->database());
+            QVERIFY(q.exec(QStringLiteral("INSERT INTO song (id, title, created_at, updated_at) VALUES ('%1', 'Kept', '', '')").arg(song)));
+            QVERIFY(q.exec(QStringLiteral("INSERT INTO song_group (id, song_id, position, label, color, slides) "
+                                          "VALUES ('%1', '%2', 0, 'Verse 1', '', '[\"a\"]')").arg(group, song)));
+            QVERIFY(q.exec(QStringLiteral("INSERT INTO service (id, title, created_at, updated_at) VALUES ('%1', 'Kept', '', '')").arg(service)));
+        }
+        auto now = Library::open(dir.path());
+        QVERIFY2(now.library, qPrintable(now.message));
+        const std::optional<Song> loaded = SongStore(*now.library).load(QUuid::fromString(song));
+        QVERIFY(loaded);
+        QVERIFY(loaded->defaultBackground.isNull());
+        QCOMPARE(loaded->groups.size(), 1);
+        QVERIFY(loaded->groups[0].defaultBackground.isNull());
+        const std::optional<Service> kept = ServiceStore(*now.library).load(QUuid::fromString(service));
+        QVERIFY(kept);
+        QCOMPARE(kept->title, QStringLiteral("Kept"));
+        QVERIFY(kept->defaultBackground.isNull());
     }
 
     void reorderingIsSavingTheNewOrder()
@@ -495,6 +527,8 @@ private slots:
         QCOMPARE(r.service->date, s.date);
         s.pcoPlanUrl = "https://services.planningcenteronline.com/plans/1";
         QCOMPARE(serviceFromJson(serviceToJson(s)).service->pcoPlanUrl, s.pcoPlanUrl);
+        s.defaultBackground = QUuid::createUuid();   // #99
+        QCOMPARE(serviceFromJson(serviceToJson(s)).service->defaultBackground, s.defaultBackground);
 
         const ServiceJsonResult future = serviceFromJson(
             R"({"format":"visualis-service","version":1,"title":"T","items":[{"kind":"hologram","title":"Next year"}]})");

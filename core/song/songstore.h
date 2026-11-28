@@ -30,13 +30,17 @@ public:
     struct Result {
         bool ok = true;
         QString error;      // for the operator
-        bool busy = false;  // saveSlideOverrides: another program holds the write lock; try again
+        bool busy = false;  // NowOrBusy: another program holds the write lock; try again
     };
 
     // Saves the song, its groups, and its arrangements. Gives new songs, groups, and
     // arrangements ids, and sets the timestamps. Rejects arrangements that use another
     // song's groups or a group that doesn't exist, and songs over the limits in songlimits.h.
     Result save(Song &song);
+    // save() as a transaction of its own; a failure leaves `song` as it was. With NowOrBusy
+    // (the GUI thread) it never waits for the write lock: `busy` if another program has it.
+    // Not inside a Batch.
+    Result saveAlone(Song &song, Library::Transaction::Lock lock);
     // Saves only the slide overrides of a song already in the library, and its updated time
     // (#95: the song editor's style edits, from the GUI thread during a service). With
     // NowOrBusy it never waits for the write lock: if another program holds it, it fails at

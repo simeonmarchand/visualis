@@ -185,6 +185,18 @@ bool ServiceList::addText(const QString &title, const QString &body)
     return insert(item);
 }
 
+bool ServiceList::addMedia(const QString &assetId, const QString &title, int at)
+{
+    const QUuid asset = QUuid::fromString(assetId);
+    if (asset.isNull() || !m_open || at < -1 || at > m_open->items.size())
+        return false;
+    ServiceItem item;
+    item.kind = ServiceItem::Kind::Media;
+    item.title = title.trimmed().isEmpty() ? QStringLiteral("Media") : title.trimmed();
+    item.ref = asset;
+    return insert(item, at);
+}
+
 bool ServiceList::linkSong(int index, const QString &songId)
 {
     if (!m_open || !m_songs || index < 0 || index >= m_open->items.size())
@@ -199,17 +211,8 @@ bool ServiceList::linkSong(int index, const QString &songId)
     if (const std::optional<PcoSong> pco = snapshotSong(before.importSnapshot)) {
         // The Planning Center id moves to the chosen song, so a wrong link (by title, last
         // week) doesn't stick, and next week matches this one at once.
-        QString error;
-        for (const SongCandidate &c : SongStore(*m_songs->library()).matchCandidates()) {
-            if (c.id == song->id || c.pcoSongId != pco->id)
-                continue;
-            if (std::optional<Song> holder = m_songs->loadSong(c.id); holder && releasePcoSong(*holder, pco->id))
-                m_songs->saveSong(*holder, &error);
-        }
-        if (takePcoSong(*song, *pco))
-            m_songs->saveSong(*song, &error);
-        if (!error.isEmpty())
-            setReport(error);   // still linked for this service; it just won't match by id next week
+        if (const SongStore::Result r = m_songs->movePcoLink(song->id, *pco); !r.ok)
+            setReport(r.error);   // still linked for this service; it just won't match by id next week
     }
     ServiceItem linked = linkedItem(before, *song);
     linked.title = song->title;
@@ -248,26 +251,63 @@ bool ServiceList::leaveBlank(int index)
 
 bool ServiceList::setItemTemplate(int index, const QString &templateId)
 {
+    const QUuid chosen = QUuid::fromString(templateId);
+    return editItem(index, [&](ServiceItem &item) { overrides::setTemplate(item.overrides, chosen); },
+                    tr("The template wasn't changed: the library is in use by another program. Try again."));
+}
+
+bool ServiceList::setItemBackground(int index, const QString &assetId)
+{
+    const QUuid chosen = QUuid::fromString(assetId);
+    return editItem(index, [&](ServiceItem &item) { overrides::setBackground(item.overrides, chosen); },
+                    tr("The background wasn't changed: the library is in use by another program. Try again."));
+}
+
+bool ServiceList::editItem(int index, const std::function<void(ServiceItem &)> &edit, const QString &busy)
+{
     if (!m_open || index < 0 || index >= m_open->items.size())
         return false;
     const QUuid itemId = m_open->items[index].id;
-    const QUuid chosen = QUuid::fromString(templateId);
+    return applyToOpen(
+        [&](Service &s) {
+            for (ServiceItem &item : s.items) {
+                if (item.id == itemId) {
+                    edit(item);
+                    return true;
+                }
+            }
+            return false;   // another program took it out
+        },
+        busy);
+}
+
+bool ServiceList::setServiceBackground(const QString &assetId)
+{
+    if (!m_open)
+        return false;
+    const QUuid chosen = QUuid::fromString(assetId);
+    return applyToOpen(
+        [&](Service &s) {
+            s.defaultBackground = chosen;
+            return true;
+        },
+        tr("The default background wasn't changed: the library is in use by another program. Try again."));
+}
+
+bool ServiceList::applyToOpen(const std::function<bool(Service &)> &edit, const QString &busy)
+{
     Service saved;
     const ServiceStore::Result r = m_store->applyWithoutWaiting(
         m_open->id,
         [&](const Service &current) -> std::optional<ServiceStore::Decision> {
             Service s = current;
-            for (ServiceItem &item : s.items) {
-                if (item.id != itemId)
-                    continue;
-                overrides::setTemplate(item.overrides, chosen);
-                return ServiceStore::Decision{s, {}};
-            }
-            return std::nullopt;
+            if (!edit(s))
+                return std::nullopt;
+            return ServiceStore::Decision{s, {}};
         },
         &saved);
     if (!r.ok) {
-        setReport(r.busy ? tr("The template wasn't changed: the library is in use by another program. Try again.") : r.error);
+        setReport(r.busy ? busy : r.error);
         return false;
     }
     m_open = saved;
@@ -275,18 +315,42 @@ bool ServiceList::setItemTemplate(int index, const QString &templateId)
     return true;
 }
 
-bool ServiceList::insert(ServiceItem item)
+bool ServiceList::insert(ServiceItem item, int at)
 {
     if (!m_open)
         return false;
-    const int at = m_selected >= 0 ? m_selected + 1 : int(m_open->items.size());
-    m_open->items.insert(at, item);
-    if (!save()) {
-        m_open->items.removeAt(at);
+    if (at < 0)
+        at = m_selected >= 0 ? m_selected + 1 : int(m_open->items.size());
+    // After the item it follows here, found by id: another program may have changed the list.
+    const bool append = at == m_open->items.size();
+    const QUuid after = at > 0 ? m_open->items[at - 1].id : QUuid();
+    item.id = QUuid::createUuid();
+    const bool added = applyToOpen(
+        [&](Service &s) {
+            qsizetype i = 0;
+            if (append) {
+                i = s.items.size();
+            } else if (!after.isNull()) {
+                i = std::min(qsizetype(at), s.items.size());
+                for (qsizetype n = 0; n < s.items.size(); ++n) {
+                    if (s.items[n].id == after) {
+                        i = n + 1;
+                        break;
+                    }
+                }
+            }
+            s.items.insert(i, item);
+            return true;
+        },
+        tr("Nothing was added: the library is in use by another program. Try again."));
+    if (!added)
         return false;
+    for (int n = 0; n < m_open->items.size(); ++n) {
+        if (m_open->items[n].id == item.id) {
+            select(n);
+            break;
+        }
     }
-    refresh();
-    select(at);
     return true;
 }
 
@@ -389,7 +453,7 @@ void ServiceList::refresh()
     }
     m_loggedWarnings = logged;
     if (m_live)
-        m_live->setService(m_open ? m_open->id : QUuid(), m_liveItems);
+        m_live->setService(m_open ? m_open->id : QUuid(), m_liveItems, m_open ? m_open->defaultBackground : QUuid());
     emit serviceChanged();
     emit selectionChanged();
 }
@@ -467,6 +531,11 @@ QString ServiceList::openTitle() const
     return m_open ? m_open->title : QString();
 }
 
+QString ServiceList::serviceBackgroundId() const
+{
+    return m_open ? braceless(m_open->defaultBackground) : QString();
+}
+
 QVariantList ServiceList::items() const
 {
     QVariantList list;
@@ -480,7 +549,9 @@ QVariantList ServiceList::items() const
                                 {"warnings", m_liveItems.value(i).warnings.join('\n')},
                                 {"songPlaceholder", songPlaceholder}, {"suggestions", m_suggestions.value(i)},
                                 {"pcoRemoved", it.pcoRemoved},
-                                {"templateId", braceless(overrideTemplateId(it.overrides))}});
+                                {"templateId", braceless(overrideTemplateId(it.overrides))},
+                                {"backgroundId", braceless(overrideBackgroundId(it.overrides))},
+                                {"canHaveBackground", it.kind == ServiceItem::Kind::Song || it.kind == ServiceItem::Kind::Text}});
     }
     return list;
 }

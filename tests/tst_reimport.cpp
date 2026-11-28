@@ -2,6 +2,8 @@
 #include "pco/reimport.h"
 
 #include "reimportplans.h"
+#include "template/overrides.h"
+#include "template/template.h"
 
 #include <QJsonArray>
 #include <QtTest>
@@ -64,6 +66,19 @@ private slots:
         QCOMPARE(r.service.items[0].customSequence, QStringList{"Chorus"});
         QCOMPARE(r.service.items[1].kind, Kind::Text);
         QCOMPARE(r.service.items[1].title, QStringLiteral("Welcome!"));
+    }
+
+    // #99: backgrounds are the operator's: an item's override and the service's default stay
+    // through a re-import that changes the item.
+    void backgroundsSurviveAReimport()
+    {
+        Service mine = local({song("1", "Amazing Grace")});
+        mine.defaultBackground = QUuid::createUuid();
+        overrides::setBackground(mine.items[0].overrides, QUuid::createUuid());
+        const ReimportResult r = mergeReimport(mine, import({song("1", "Amazing Grace", {"Chorus"})}));
+        QCOMPARE(kinds(r), QList<CK>{CK::Changed});
+        QCOMPARE(r.service.defaultBackground, mine.defaultBackground);
+        QCOMPARE(overrideBackgroundId(r.service.items[0].overrides), overrideBackgroundId(mine.items[0].overrides));
     }
 
     void anotherSongInItsPlaceNeedsASongAgain()

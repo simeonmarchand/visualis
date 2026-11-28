@@ -6,12 +6,15 @@ import Visualis.Ui
 
 // The open service's items (#51): pick, create, rename, and delete services; add the
 // library's selected song, headers, and text or blank slides; drag items to reorder
-// (Option+Up/Down moves the selected one). Click an item to see its slides.
+// (Option+Up/Down moves the selected one). Click an item to see its slides. Drop media from
+// the media pane to add it where it lands (#99); the item and service menus set backgrounds.
 ColumnLayout {
     id: pane
     spacing: 8
 
     readonly property bool dialogOpen: nameDialog.visible || deleteDialog.visible || pasteDialog.visible || reimportDialog.visible
+                                       || backgroundPicker.visible
+    readonly property var selectedItem: ServiceList.items[ServiceList.selectedIndex] ?? null
     // The selected item, if it's an imported song not linked to the library yet (#55).
     readonly property var selectedPlaceholder: {
         const items = ServiceList.items
@@ -21,6 +24,7 @@ ColumnLayout {
     readonly property int rowHeight: 34
     property int dragFrom: -1
     property int dropAt: -1
+    property int mediaDropAt: -1   // where dragged media will go in, between rows
 
     RowLayout {
         Layout.fillWidth: true
@@ -161,6 +165,34 @@ ColumnLayout {
             y: (pane.dropAt + (pane.dropAt > pane.dragFrom ? 1 : 0)) * pane.rowHeight - 1
         }
 
+        Rectangle {   // where dropped media will go in
+            parent: list.contentItem
+            visible: pane.mediaDropAt >= 0
+            width: list.width
+            height: 2
+            color: "#4a90e2"
+            y: pane.mediaDropAt * pane.rowHeight - 1
+        }
+
+        DropArea {
+            objectName: "serviceMediaDrop"
+            anchors.fill: parent
+            keys: ["application/x-visualis-media"]
+            enabled: ServiceList.openId !== ""
+            function rowAt(y) {
+                return Math.max(0, Math.min(list.count, Math.round((y + list.contentY) / pane.rowHeight)))
+            }
+            onPositionChanged: drag => pane.mediaDropAt = rowAt(drag.y)
+            onExited: pane.mediaDropAt = -1
+            onDropped: drop => {
+                const media = drop.source as MediaDrag
+                if (media)
+                    ServiceList.addMedia(media.assetId, media.mediaTitle, rowAt(drop.y))
+                pane.mediaDropAt = -1
+                drop.accept()
+            }
+        }
+
         Label {
             anchors.centerIn: parent
             width: parent.width - 24
@@ -226,7 +258,25 @@ ColumnLayout {
                 PlanImporter.reimport(ServiceList.openId)
             }
         }
+        MenuSeparator {}
+        MenuItem {
+            objectName: "serviceBackground"
+            text: "Default background…"
+            enabled: ServiceList.openId !== ""
+            onTriggered: backgroundPicker.pick(ServiceList.serviceBackgroundId, id => ServiceList.setServiceBackground(id))
+        }
+        MenuSeparator {}
         MenuItem { text: "Delete…"; enabled: ServiceList.openId !== ""; onTriggered: deleteDialog.open() }
+    }
+
+    // Shows on the next slide, not at once: a background changes only when a slide does.
+    BackgroundPicker {
+        id: backgroundPicker
+        objectName: "serviceBackgroundPicker"
+    }
+    // By id, as the items may change while the picker is open.
+    function indexOfItem(id) {
+        return ServiceList.items.findIndex(it => it.id === id)
     }
 
     ReimportDialog { id: reimportDialog }
@@ -272,6 +322,17 @@ ColumnLayout {
                 }
                 onObjectAdded: (index, object) => templateMenu.insertItem(index + 2, object)
                 onObjectRemoved: (index, object) => templateMenu.removeItem(object)
+            }
+        }
+        // Over the song's and its groups' own, for this service only (#99).
+        MenuItem {
+            objectName: "itemBackground"
+            text: "Background…"
+            enabled: pane.selectedItem?.canHaveBackground ?? false
+            onTriggered: {
+                const itemId = pane.selectedItem.id
+                backgroundPicker.pick(pane.selectedItem.backgroundId,
+                                      id => ServiceList.setItemBackground(pane.indexOfItem(itemId), id))
             }
         }
         MenuItem { text: "Remove from service"; onTriggered: ServiceList.removeItem(ServiceList.selectedIndex) }

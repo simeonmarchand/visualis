@@ -123,16 +123,28 @@ QList<MediaAsset> MediaStore::list() const
     return out;
 }
 
-QStringList MediaStore::usedBy(const QUuid &id) const
+MediaStore::UsedBy MediaStore::usedBy(const QUuid &id) const
 {
-    QStringList out;
+    // Ids are stored lowercase without braces. The override JSON is written that way too
+    // (overrides.h), but liveItem reads any form QUuid::fromString takes, so match those.
+    UsedBy out;
     QSqlQuery q(m_library.database());
-    q.prepare("SELECT DISTINCT s.title FROM service_item i JOIN service s ON s.id = i.service_id "
-              "WHERE i.kind = 'media' AND i.ref_id = ? ORDER BY s.date DESC, s.title");
-    q.addBindValue(key(id));
+    q.prepare("SELECT s.title FROM service s WHERE s.default_background = :id OR EXISTS ("
+              " SELECT 1 FROM service_item i WHERE i.service_id = s.id AND ("
+              "  (i.kind = 'media' AND i.ref_id = :id)"
+              "  OR CASE WHEN json_valid(i.overrides) THEN lower(trim(json_extract(i.overrides, '$.background'), '{}')) END = :id))"
+              " ORDER BY s.date DESC, s.title");
+    q.bindValue(":id", key(id));
     q.exec();
     while (q.next())
-        out << q.value(0).toString();
+        out.services << q.value(0).toString();
+    q.prepare("SELECT s.title FROM song s WHERE s.default_background = :id OR EXISTS ("
+              " SELECT 1 FROM song_group g WHERE g.song_id = s.id AND g.default_background = :id)"
+              " ORDER BY s.title COLLATE NOCASE");
+    q.bindValue(":id", key(id));
+    q.exec();
+    while (q.next())
+        out.songs << q.value(0).toString();
     return out;
 }
 

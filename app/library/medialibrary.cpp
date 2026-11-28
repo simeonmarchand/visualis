@@ -490,7 +490,13 @@ void MediaLibrary::finishImport()
 
 QStringList MediaLibrary::usedBy(const QString &id) const
 {
-    return m_store ? m_store->usedBy(QUuid::fromString(id)) : QStringList{};
+    if (!m_store)
+        return {};
+    const MediaStore::UsedBy used = m_store->usedBy(QUuid::fromString(id));
+    QStringList out = used.services;
+    for (const QString &song : used.songs)
+        out << tr("the song \u201c%1\u201d").arg(song);
+    return out;
 }
 
 bool MediaLibrary::removeAsset(const QString &id)

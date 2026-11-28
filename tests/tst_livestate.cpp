@@ -113,6 +113,28 @@ struct FakeMedia {
 
 const Transition kFade{TransitionKind::Fade, 800};
 
+// #99: a media item, through the built-in template (its background transition is a cut).
+LiveItem mediaItem(const QUuid &asset, const QString &title = QStringLiteral("Countdown"))
+{
+    ServiceItem item{QUuid::createUuid(), ServiceItem::Kind::Media, title, asset, {}, {}, {}, {}, {}, {}, {}};
+    return liveItem(item, std::nullopt, templateSet({}));
+}
+
+// sample() with its own background, as a service item.
+LiveItem songWithBackground(const QUuid &asset)
+{
+    Song song = sample();
+    song.id = QUuid::createUuid();
+    song.defaultBackground = asset;
+    return liveItem(songItem(song), song, templateSet({}));
+}
+
+LiveItem songItemOf(Song song)
+{
+    song.id = QUuid::createUuid();
+    return liveItem(songItem(song), song, templateSet({}));
+}
+
 } // namespace
 
 class LiveStateTest : public QObject
@@ -138,12 +160,12 @@ private slots:
         QCOMPARE(live.content(), Content());
         const LiveItem item = libraryItem(sample());
         QVERIFY(live.show(item, 1));
-        QCOMPARE(live.content(), item.slides[1].content);
+        QCOMPARE(live.content(), *item.slides[1].content);
         QCOMPARE(live.content().regions["main"].text, QStringLiteral("Joy to the world"));
         live.next();
-        QCOMPARE(live.content(), item.slides[2].content);
+        QCOMPARE(live.content(), *item.slides[2].content);
         live.clearText();   // each output decides what clearing hides, as with currentText
-        QCOMPARE(live.content(), item.slides[2].content);
+        QCOMPARE(live.content(), *item.slides[2].content);
     }
 
     // #93: after the live song or its template changes, what's live is the new rendering, at
@@ -582,7 +604,7 @@ private slots:
         const QString before = live.currentText();
 
         items[3].slides[1].slide.text = "edited";
-        items[3].slides[1].content.regions["main"].text = "edited";
+        items[3].slides[1].content->regions["main"].text = "edited";
         live.setService(id, items);
         QCOMPARE(live.itemIndex(), 3);
         QCOMPARE(live.slideIndex(), 1);
@@ -886,6 +908,178 @@ private slots:
         live.backgroundFailed(b, {a, false, kFade}, "too late");   // the layer has moved on
         QCOMPARE(changed.count(), 0);
         QCOMPARE(live.background().asset, c);
+    }
+
+    // #99's acceptance criterion: a motion clicked before a song keeps playing, unrestarted,
+    // through every lyric slide of a song with no background of its own.
+    void aSlideCarryingNoBackgroundNeverTouchesARunningOne()
+    {
+        const QUuid motion = QUuid::createUuid();
+        FakeMedia media{{motion}};
+        LiveState live;
+        live.setMediaCheck(media.fn());
+        live.setService(QUuid::createUuid(), {mediaItem(motion), songItemOf(sample())});
+        QVERIFY(live.goToItem(0));
+        const BackgroundLayer layer = live.background();
+        QCOMPARE(layer.asset, motion);
+        const int checks = *media.calls;
+        while (live.next())
+            QCOMPARE(live.background(), layer);
+        QCOMPARE(live.itemIndex(), 1);
+        QCOMPARE(*media.calls, checks);   // nothing carried, nothing checked
+    }
+
+    // A song's own background goes up with its first slide; the rest carry the same asset,
+    // which changes nothing: no restart, no new transition.
+    void aSongsBackgroundGoesUpOnceAndStays()
+    {
+        const QUuid asset = QUuid::createUuid();
+        LiveState live;
+        live.setMediaCheck(FakeMedia{{asset}}.fn());
+        QVERIFY(live.show(songWithBackground(asset), 0));
+        const BackgroundLayer layer = live.background();
+        QCOMPARE(layer.asset, asset);
+        QSignalSpy changed(&live, &LiveState::changed);
+        while (live.next())
+            QCOMPARE(live.background(), layer);
+        QCOMPARE(changed.count(), 4);   // one per slide, for the text
+
+        live.clearBackground();
+        QVERIFY(live.goToSlide(0));   // a slide carrying it brings a cleared one back
+        QVERIFY(!live.backgroundCleared());
+        QCOMPARE(live.background().transition, layer.transition);
+    }
+
+    // A media slide carries no text, so the lyrics on screen stay, cleared or not.
+    void aMediaItemLeavesTheTextAlone()
+    {
+        const QUuid asset = QUuid::createUuid();
+        LiveState live;
+        live.setMediaCheck(FakeMedia{{asset}}.fn());
+        const LiveItem song = songItemOf(sample());
+        const LiveItem media = mediaItem(asset);
+        live.setService(QUuid::createUuid(), {song, media});
+        QVERIFY(live.goToItem(0, 1));
+        const Content lyric = live.content();
+        QVERIFY(live.goToItem(1));
+        QCOMPARE(live.background().asset, asset);
+        QCOMPARE(live.content(), lyric);
+        QCOMPARE(live.currentText(), QStringLiteral("Joy to the world"));
+        QVERIFY(live.update(media));   // a new rendering of the media item keeps it too
+        QCOMPARE(live.content(), lyric);
+
+        QVERIFY(live.goToItem(0, 1));
+        live.clearText();
+        QVERIFY(live.goToItem(1));
+        QVERIFY(live.textCleared());   // it carries no text to bring back
+        QVERIFY(live.previous());      // a lyric slide does
+        QVERIFY(!live.textCleared());
+        QCOMPARE(live.currentText(), QStringLiteral("And heaven and nature sing"));
+    }
+
+    void mediaItemsAreInNextAndPreviousOrder()
+    {
+        const QUuid a = QUuid::createUuid(), b = QUuid::createUuid();
+        LiveState live;
+        live.setMediaCheck(FakeMedia{{a, b}}.fn());
+        live.setService(QUuid::createUuid(), {mediaItem(a, "Countdown"), songItemOf(sample()), mediaItem(b, "Announcements"),
+                                              liveItem(textItem("Welcome", "Welcome!"), std::nullopt, templateSet({}))});
+        QStringList order;
+        QVERIFY(live.next());   // nothing live: Next starts the service
+        do {
+            order << QStringLiteral("%1:%2").arg(live.itemIndex()).arg(live.slideIndex());
+        } while (live.next());
+        QCOMPARE(order, (QStringList{"0:0", "1:0", "1:1", "1:2", "1:3", "1:4", "2:0", "3:0"}));
+        QCOMPARE(live.background().asset, b);
+        QVERIFY(live.previous());
+        QCOMPARE(live.itemIndex(), 2);
+        QCOMPARE(live.groupLabel(), QStringLiteral("Announcements"));
+        QVERIFY(live.previous());
+        QCOMPARE(live.itemIndex(), 1);
+        QCOMPARE(live.slideIndex(), 4);
+        QCOMPARE(live.background().asset, b);   // the song carries none
+    }
+
+    // The service's default fills an empty layer, with the live template's transition, and
+    // never replaces one that's up or cleared.
+    void theServiceDefaultFillsOnlyAnEmptyLayer()
+    {
+        const QUuid fallback = QUuid::createUuid(), other = QUuid::createUuid(), own = QUuid::createUuid();
+        LiveState live;
+        live.setMediaCheck(FakeMedia{{fallback, other, own}}.fn());
+        const QUuid service = QUuid::createUuid();
+        live.setService(service, {songItemOf(sample()), songWithBackground(own)}, fallback);
+        QCOMPARE(live.background().asset, QUuid());   // not until a slide goes live
+        QVERIFY(live.next());
+        QCOMPARE(live.background(), (BackgroundLayer{fallback, false, Transitions{}.background}));
+
+        QVERIFY(live.pickBackground(other.toString(QUuid::WithoutBraces)));
+        QVERIFY(live.next());
+        QCOMPARE(live.background().asset, other);   // up already: left alone
+
+        QVERIFY(live.pickBackground(""));
+        QVERIFY(live.pickBackground(""));
+        QCOMPARE(live.background().asset, QUuid());
+        QVERIFY(live.next());
+        QCOMPARE(live.background().asset, fallback);   // empty again: filled
+
+        live.clearBackground();
+        QVERIFY(live.next());
+        QVERIFY(live.backgroundCleared());   // cleared isn't empty
+        QCOMPARE(live.background().asset, fallback);
+
+        QVERIFY(live.goToItem(1));
+        QCOMPARE(live.background().asset, own);   // a song's own wins
+
+        live.setService(service, live.serviceItems());   // the default taken away
+        QVERIFY(live.pickBackground(""));
+        QVERIFY(live.goToItem(0));
+        QCOMPARE(live.background().asset, QUuid());
+    }
+
+    // PR #127 review: a service default that won't decode isn't tried again on every slide,
+    // which would reload the player and flicker the alert, until the default changes.
+    void aServiceDefaultThatFailedIsntRetriedOnEveryMove()
+    {
+        const QUuid broken = QUuid::createUuid(), fixed = QUuid::createUuid();
+        LiveState live;
+        live.setMediaCheck(FakeMedia{{broken, fixed}}.fn());
+        const QUuid service = QUuid::createUuid();
+        live.setService(service, {songItemOf(sample()), songItemOf(sample())}, broken);
+        QVERIFY(live.next());
+        QCOMPARE(live.background().asset, broken);
+        live.backgroundFailed(broken, {}, "it won't decode");
+        QCOMPARE(live.background().asset, QUuid());
+
+        QVERIFY(live.next());
+        QCOMPARE(live.background().asset, QUuid());
+        QCOMPARE(live.backgroundAlert(), QStringLiteral("it won't decode"));
+        live.setService(service, live.serviceItems(), broken);   // an edit to the service
+        QVERIFY(live.next());
+        QCOMPARE(live.background().asset, QUuid());
+
+        QVERIFY(live.goToItem(1));   // once per item: the file may be back
+        QCOMPARE(live.background().asset, broken);
+        live.backgroundFailed(broken, {}, "it won't decode");
+
+        live.setService(service, live.serviceItems(), fixed);   // or a new choice
+        QVERIFY(live.next());
+        QCOMPARE(live.background().asset, fixed);
+        QVERIFY(live.backgroundAlert().isEmpty());
+    }
+
+    // A carried background whose file is gone leaves the layer as it was and says so; the
+    // text still changes.
+    void aMissingCarriedBackgroundKeepsTheLayerAndTheTextChanges()
+    {
+        const QUuid shown = QUuid::createUuid(), gone = QUuid::createUuid();
+        LiveState live;
+        live.setMediaCheck(FakeMedia{{shown}}.fn());
+        live.setBackground(shown, kFade);
+        QVERIFY(live.show(songWithBackground(gone), 1));
+        QCOMPARE(live.background(), (BackgroundLayer{shown, false, kFade}));
+        QVERIFY(!live.backgroundAlert().isEmpty());
+        QCOMPARE(live.currentText(), QStringLiteral("Joy to the world"));
     }
 
     // Without a library there's nothing to check against: every asset is taken as given.

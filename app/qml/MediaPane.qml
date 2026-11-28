@@ -6,6 +6,7 @@ import QtQuick.Layouts
 import Visualis.Ui
 
 // The library's images and videos (#97): a thumbnail grid with search, import, and delete.
+// Drag a tile into the service, or right-click it to add it there (#99).
 ColumnLayout {
     id: pane
     spacing: 8
@@ -32,6 +33,8 @@ ColumnLayout {
         delegate: Item {
             id: tile
             required property var modelData
+            required property int index
+            objectName: "mediaTile" + index
             width: grid.cellWidth
             height: grid.cellHeight
 
@@ -60,10 +63,47 @@ ColumnLayout {
                 elide: Text.ElideMiddle
                 font.pixelSize: 11
             }
+            MediaDrag {
+                id: dragged
+                assetId: tile.modelData.id
+                mediaTitle: pane.titleOf(tile.modelData.name)
+                width: frame.width
+                height: frame.height
+                Drag.active: dragArea.drag.active
+                Image {
+                    anchors.fill: parent
+                    visible: dragArea.drag.active
+                    opacity: 0.7
+                    source: tile.modelData.thumbnail
+                    fillMode: Image.PreserveAspectFit
+                    sourceSize.width: 320
+                }
+                // Above the panes while it moves, so the grid's clip doesn't hide it.
+                states: State {
+                    when: dragArea.drag.active
+                    ParentChange { target: dragged; parent: tile.Window.contentItem }
+                }
+            }
             MouseArea {
+                id: dragArea
                 anchors.fill: parent
-                acceptedButtons: Qt.RightButton
-                onClicked: {
+                acceptedButtons: Qt.LeftButton | Qt.RightButton
+                drag.target: dragged
+                // Dropped where the pointer is: not the thumbnail's middle, and not trailing it by
+                // the drag threshold.
+                drag.smoothed: false
+                onPressed: mouse => dragged.Drag.hotSpot = Qt.point(mouse.x, mouse.y)
+                onReleased: {
+                    if (drag.active)
+                        dragged.Drag.drop()
+                    dragged.x = 0
+                    dragged.y = 0
+                }
+                onClicked: mouse => {
+                    if (mouse.button !== Qt.RightButton)
+                        return
+                    tileMenu.assetId = tile.modelData.id
+                    tileMenu.mediaTitle = dragged.mediaTitle
                     deleteDialog.assetId = tile.modelData.id
                     deleteDialog.assetName = tile.modelData.name
                     tileMenu.popup()
@@ -133,8 +173,21 @@ ColumnLayout {
         MenuItem { text: "Folder…"; onTriggered: folderDialog.open() }
     }
 
+    // A media item's title: the file's name without its extension.
+    function titleOf(name) {
+        return name.replace(/\.[^.]*$/, "")
+    }
+
     Menu {
         id: tileMenu
+        property string assetId
+        property string mediaTitle
+        MenuItem {
+            objectName: "addMediaToService"
+            text: "Add to service"
+            enabled: ServiceList.openId !== ""
+            onTriggered: ServiceList.addMedia(tileMenu.assetId, tileMenu.mediaTitle, -1)
+        }
         MenuItem { text: "Delete…"; onTriggered: deleteDialog.ask() }
     }
 

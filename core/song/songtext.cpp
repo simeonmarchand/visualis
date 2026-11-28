@@ -134,8 +134,10 @@ LyricsEdit applyLyricsText(const Song &song, const QString &text)
         Group g = parsed.groups[p];
         if (matchOf[p] >= 0) {
             const Group &was = old[matchOf[p]];
-            g.id = was.id;
-            g.color = was.color;
+            // The text owns only the label and slides; everything else stays the group's.
+            g = was;
+            g.label = parsed.groups[p].label;
+            g.slides = parsed.groups[p].slides;
             // A group whose text wasn't touched keeps its slides exactly as they were (the parser
             // would trim them).
             // Remapped first, so parsed text is compared with parsed text.

@@ -117,6 +117,22 @@ private slots:
         QCOMPARE(o, parse("{'regions': {'main': {'color': '#ffcc00'}}}"));
     }
 
+    // #99: an item's background, by media asset id. Not style, so resetting the style keeps it.
+    void aBackgroundIsSetAndResetOnItsOwn()
+    {
+        const QJsonObject original = parse("{'regions': {'main': {'color': '#ffcc00'}}, 'glow': true}");
+        QJsonObject o = original;
+        QVERIFY(overrideBackgroundId(o).isNull());
+        const QUuid asset = QUuid::createUuid();
+        overrides::setBackground(o, asset);
+        QCOMPARE(overrideBackgroundId(o), asset);
+        overrides::resetAll(o);
+        QCOMPARE(overrideBackgroundId(o), asset);
+        QCOMPARE(o, (QJsonObject{{"glow", true}, {"background", asset.toString(QUuid::WithoutBraces)}}));
+        overrides::setBackground(o, QUuid());
+        QCOMPARE(o, parse("{'glow': true}"));
+    }
+
     void aTransitionIsSetAndResetOnItsOwn()
     {
         const QJsonObject original = parse("{'regions': {'main': {'color': '#ffcc00'}}}");
@@ -150,7 +166,7 @@ private slots:
         song.groups[0].fitSlideOverrides();
         QCOMPARE(overrides::setTransition(song.groups[0].slideOverrides[1], parse("{'kind': 'cut', 'ms': 300}")), QString());
 
-        auto transition = [&](int slide) { return liveSong(song, {}, templateSet({t})).slides[slide].content.transition; };
+        auto transition = [&](int slide) { return liveSong(song, {}, templateSet({t})).slides[slide].content->transition; };
         QCOMPARE(transition(0), (Transition{TransitionKind::Fade, 400}));
         QCOMPARE(transition(1), (Transition{TransitionKind::Cut, 300}));
 
@@ -190,7 +206,7 @@ private slots:
         QCOMPARE(overrides::setProperty(song.groups[0].slideOverrides[1], "main", "color", "#ffcc00"), QString());
 
         auto style = [&](int slide) {
-            return liveSong(song, {}, templateSet({t})).slides[slide].content.regions["main"].style;
+            return liveSong(song, {}, templateSet({t})).slides[slide].content->regions["main"].style;
         };
         QCOMPARE(style(1).color, QStringLiteral("#ffcc00"));
         QCOMPARE(style(0).color, QStringLiteral("#ffffff"));

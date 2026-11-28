@@ -301,7 +301,7 @@ private slots:
         QVERIFY(m_songs->createFromPaste("Grace", "Verse 1\nAmazing grace\n"));
         Song song = *m_songs->loadSong(QUuid::fromString(m_songs->selectedId()));
         song.defaultTemplate = QUuid::fromString(id);
-        QVERIFY(m_songs->saveSong(song, nullptr));
+        QVERIFY(m_songs->saveSong(song).ok);
         QVERIFY(m_songs->goLive(0));
         m_editor->setStyle(map("{'color': '#ffcc00', 'frame': {'y': 0.6, 'h': 0.3}}"));
         QTRY_COMPARE(m_live->content().regions.value("main").style.color, QStringLiteral("#ffcc00"));

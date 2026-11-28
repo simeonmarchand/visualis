@@ -138,6 +138,11 @@ QUuid overrideTemplateId(const QJsonObject &overrides)
     return QUuid::fromString(overrides.value("template").toString());
 }
 
+QUuid overrideBackgroundId(const QJsonObject &overrides)
+{
+    return QUuid::fromString(overrides.value("background").toString());
+}
+
 std::optional<RegionStyle> effectiveStyle(const Template &tmpl, const QString &regionId,
                                           const QList<QJsonObject> &layers, QStringList *warnings)
 {

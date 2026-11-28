@@ -2,7 +2,7 @@
 
 Terms used across the code, issues, and plan. Plan sections are in `docs/DEVELOPMENT_PLAN.md`.
 
-**LiveSlide**: a slide as it will show: its place in the song plus its resolved layers. Built by `liveItem()` and `liveSong()` (`core/live/liveitem.h`) for the outputs, the previews, and recovery alike.
+**LiveSlide**: a slide as it will show: its place in the song plus the layers it carries, each optional. A slide changes only the layers it carries: one with no content leaves the text up, one with no background leaves the background alone. Built by `liveItem()` and `liveSong()` (`core/live/liveitem.h`) for the outputs, the previews, and recovery alike.
 
 **Content layer**: a slide's text layer: the template's regions with the item's and the slide's overrides applied, and the transition it changes with. `Content` in `core/live/liveitem.h`.
 
@@ -15,5 +15,9 @@ Terms used across the code, issues, and plan. Plan sections are in `docs/DEVELOP
 **Media verification**: the full preflight check: the media check plus hash and decode (`verifyMedia`).
 
 **Background layer**: the live asset id, whether it's cleared, and the transition it arrived with. `BackgroundLayer` in `core/live/liveitem.h`; outputs are views of it.
+
+**Media item**: a service item showing a media asset (`ServiceItem::Kind::Media`, `ref` = the asset). It goes live as one slide that carries the asset as its background and no content, so the text on screen stays.
+
+**Service default background**: the background a service fills an empty layer with when a slide carries none (`Service::defaultBackground`). It never replaces a background that's up or cleared.
 
 **Background player**: the app module that plays the background layer through the video or still adapter, in two slots so a fade can overlap them. `BackgroundPlayer` in `app/background/`.

@@ -56,6 +56,7 @@ QByteArray serviceToJson(const Service &s)
         {"format", "visualis-service"}, {"version", kVersion}, {"id", idText(s.id)}, {"title", s.title},
         {"date", s.date.isValid() ? s.date.toString(Qt::ISODate) : QString()}, {"pcoPlanId", s.pcoPlanId},
         {"pcoServiceTypeId", s.pcoServiceTypeId}, {"pcoPlanUrl", s.pcoPlanUrl}, {"lastImportedAt", time(s.lastImportedAt)},
+        {"defaultBackground", idText(s.defaultBackground)},
         {"created", time(s.created)}, {"updated", time(s.updated)}, {"items", items},
         {"removedPcoItems", removed},
     };
@@ -85,6 +86,7 @@ ServiceJsonResult serviceFromJson(const QByteArray &json)
     s.pcoServiceTypeId = o.value("pcoServiceTypeId").toString();
     s.pcoPlanUrl = o.value("pcoPlanUrl").toString();
     s.lastImportedAt = QDateTime::fromString(o.value("lastImportedAt").toString(), Qt::ISODateWithMs);
+    s.defaultBackground = QUuid::fromString(o.value("defaultBackground").toString());
     s.created = QDateTime::fromString(o.value("created").toString(), Qt::ISODateWithMs);
     s.updated = QDateTime::fromString(o.value("updated").toString(), Qt::ISODateWithMs);
     for (const QJsonValue &v : o.value("items").toArray())

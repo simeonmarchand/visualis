@@ -19,13 +19,19 @@ bool LiveState::show(const LiveItem &item, int index)
 {
     if (!acceptable(item))
         return false;
+    const bool valid = index >= 0 && index < item.slides.size();
+    enterItem(item, valid ? index : -1);
+    return valid;
+}
+
+void LiveState::enterItem(const LiveItem &item, int index)
+{
     m_live = item;
     m_heldBack.clear();
-    const bool valid = index >= 0 && index < m_live.slides.size();
-    m_index = valid ? index : -1;
-    m_textCleared = false;
+    m_failedDefault = QUuid();   // one try per item: the file may be back
+    m_index = index;
+    enterSlide();
     emit changed();
-    return valid;
 }
 
 bool LiveState::restore(const LiveItem &item, int index, bool textCleared, const BackgroundLayer &background,
@@ -33,22 +39,32 @@ bool LiveState::restore(const LiveItem &item, int index, bool textCleared, const
 {
     if (!acceptable(item))
         return false;
-    if (service != m_serviceId)
+    if (service != m_serviceId) {
         m_items.clear();
+        m_serviceDefault = QUuid();
+        m_failedDefault = QUuid();
+    }
     m_serviceId = service;
     m_live = item;
     m_heldBack.clear();
     m_index = index >= 0 && index < m_live.slides.size() ? index : -1;
     m_textCleared = textCleared;
+    // A media slide carries no text, and the journal doesn't keep what was held over from
+    // before the crash, so the text layer comes back empty then.
+    m_content = {};
+    takeContent();
     applyBackground(background);
     emit changed();
     return true;
 }
 
-void LiveState::setService(const QUuid &id, const QList<LiveItem> &items)
+void LiveState::setService(const QUuid &id, const QList<LiveItem> &items, const QUuid &defaultBackground)
 {
     m_serviceId = id;
     m_items = items;
+    if (defaultBackground != m_serviceDefault)
+        m_failedDefault = QUuid();   // a new choice is worth a try
+    m_serviceDefault = defaultBackground;   // fills an empty layer on the next move, not now
     if (const int n = itemIndex(); n >= 0)
         replaceLive(m_items[n]);   // its song or template may have changed
     emit changed();
@@ -78,6 +94,7 @@ void LiveState::replaceLive(const LiveItem &item)
     m_heldBack.clear();
     if (m_index >= m_live.slides.size())
         m_index = int(m_live.slides.size()) - 1;
+    takeContent();   // the background changes only on moves
 }
 
 int LiveState::itemIndex() const
@@ -106,11 +123,7 @@ bool LiveState::goToItem(int n, int slide)
 
 void LiveState::showItem(int n, int slide)
 {
-    m_live = m_items[n];
-    m_heldBack.clear();
-    m_index = slide;
-    m_textCleared = false;
-    emit changed();
+    enterItem(m_items[n], slide);
 }
 
 bool LiveState::next()
@@ -151,9 +164,31 @@ bool LiveState::goToSlide(int n)
 bool LiveState::moveTo(int n)
 {
     m_index = n;
-    m_textCleared = false;
+    enterSlide();
     emit changed();
     return true;
+}
+
+void LiveState::takeContent()
+{
+    if (const LiveSlide *s = currentLiveSlide(); !s)
+        m_content = {};
+    else if (s->content)
+        m_content = *s->content;
+}
+
+void LiveState::enterSlide()
+{
+    const LiveSlide *s = currentLiveSlide();
+    takeContent();
+    if (!s || s->content)
+        m_textCleared = false;   // the text shown changed (a media slide carries none)
+    if (!s)
+        return;
+    if (s->background)
+        takeBackground(s->background->asset, s->background->transition);
+    else if (m_background.asset.isNull() && !m_serviceDefault.isNull() && m_serviceDefault != m_failedDefault)
+        takeBackground(m_serviceDefault, m_live.tmpl.transitions.background);
 }
 
 bool LiveState::goToGroupStartingWith(const QString &letter)
@@ -209,19 +244,25 @@ bool LiveState::applyBackground(const BackgroundLayer &layer)
     return true;
 }
 
-bool LiveState::setBackground(const QUuid &asset, const Transition &transition)
+bool LiveState::takeBackground(const QUuid &asset, const Transition &transition)
 {
     if (asset == m_background.asset) {
         // Already live: no restart and no new transition, but a cleared one comes back.
-        if (!m_background.cleared && m_backgroundAlert.isEmpty())
-            return true;
         m_background.cleared = false;
         m_backgroundAlert.clear();
-        emit changed();
         return true;
     }
-    const bool shown = applyBackground({asset, false, transition});
-    emit changed();   // the layer, or the alert
+    return applyBackground({asset, false, transition});
+}
+
+bool LiveState::setBackground(const QUuid &asset, const Transition &transition)
+{
+    // Emits only on a change someone can see: the layer, or the alert.
+    const BackgroundLayer before = m_background;
+    const QString alertBefore = m_backgroundAlert;
+    const bool shown = takeBackground(asset, transition);
+    if (m_background != before || m_backgroundAlert != alertBefore)
+        emit changed();
     return shown;
 }
 
@@ -229,6 +270,8 @@ void LiveState::backgroundFailed(const QUuid &asset, const BackgroundLayer &show
 {
     if (asset != m_background.asset)
         return;
+    if (asset == m_serviceDefault)
+        m_failedDefault = asset;   // or every move would load it again
     m_background = showing;
     m_backgroundAlert = why;
     emit changed();
@@ -270,20 +313,20 @@ void LiveState::clearAll()
     emit changed();
 }
 
-const SongSlide *LiveState::currentSlide() const
+const LiveSlide *LiveState::currentLiveSlide() const
 {
-    return m_index >= 0 && m_index < m_live.slides.size() ? &m_live.slides[m_index].slide : nullptr;
+    return m_index >= 0 && m_index < m_live.slides.size() ? &m_live.slides[m_index] : nullptr;
 }
 
-Content LiveState::content() const
+const SongSlide *LiveState::currentSlide() const
 {
-    return m_index >= 0 && m_index < m_live.slides.size() ? m_live.slides[m_index].content : Content();
+    const LiveSlide *s = currentLiveSlide();
+    return s ? &s->slide : nullptr;
 }
 
 QString LiveState::currentText() const
 {
-    const SongSlide *s = currentSlide();
-    return s ? s->text : QString();
+    return m_content.regions.value(QStringLiteral("main")).text;
 }
 
 QString LiveState::nextText() const
